@@ -1,0 +1,11 @@
+{
+  "12345": {
+    "success": true,
+    "data": {
+      "steam_appid": 54321,
+      "type": "game",
+      "name": "Mismatched Fixture Game",
+      "is_free": true
+    }
+  }
+}

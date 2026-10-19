@@ -1,0 +1,11 @@
+{
+  "12345": {
+    "success": true,
+    "data": {
+      "steam_appid": "not-a-number",
+      "type": "game",
+      "name": "Malformed Fixture Game",
+      "price_overview": { "currency": "US", "initial": -1, "final": 0 }
+    }
+  }
+}

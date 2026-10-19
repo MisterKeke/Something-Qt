@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom" xmlns:yt="http://www.youtube.com/xml/schemas/2015" xmlns:media="http://search.yahoo.com/mrss/">
+  <entry><yt:videoId>abcdefghijk</yt:videoId><title> Sample &amp; safe </title><published>2026-05-03T10:00:00Z</published>
+    <author><name>Example channel</name></author><media:group><media:thumbnail url="https://i.ytimg.com/vi/abcdefghijk/hqdefault.jpg"/>
+      <media:description>Description is plain text.</media:description><media:community><media:statistics views="123"/></media:community></media:group>
+  </entry>
+  <entry><yt:videoId>invalid</yt:videoId><title>Ignored malformed ID</title></entry>
+</feed>

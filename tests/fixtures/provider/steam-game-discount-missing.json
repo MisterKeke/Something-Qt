@@ -1,0 +1,16 @@
+{
+  "12345": {
+    "success": true,
+    "data": {
+      "steam_appid": 12345,
+      "type": "game",
+      "name": "Discount Without Field",
+      "is_free": false,
+      "price_overview": {
+        "currency": "USD",
+        "initial": 1000,
+        "final": 750
+      }
+    }
+  }
+}

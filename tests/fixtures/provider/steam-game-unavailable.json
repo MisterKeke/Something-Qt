@@ -1,0 +1,12 @@
+{
+  "12345": {
+    "success": true,
+    "data": {
+      "steam_appid": 12345,
+      "type": "game",
+      "name": "Unavailable Fixture Game",
+      "is_free": false,
+      "price_overview": null
+    }
+  }
+}

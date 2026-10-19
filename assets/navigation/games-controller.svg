@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Game controller">
+  <defs>
+    <radialGradient id="background" cx="34%" cy="25%" r="82%">
+      <stop offset="0" stop-color="#4455a8"/>
+      <stop offset="0.52" stop-color="#171c3b"/>
+      <stop offset="1" stop-color="#090c19"/>
+    </radialGradient>
+    <linearGradient id="controller" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#b8c2ff"/>
+      <stop offset="0.55" stop-color="#7c8cff"/>
+      <stop offset="1" stop-color="#22d3ee"/>
+    </linearGradient>
+    <filter id="glow" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="12" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+  <rect width="512" height="512" fill="url(#background)"/>
+  <circle cx="410" cy="92" r="78" fill="#22d3ee" opacity=".08"/>
+  <circle cx="92" cy="420" r="112" fill="#ff4fd8" opacity=".07"/>
+  <path d="M163 164h186c48 0 84 34 94 81l24 111c9 42-39 69-68 38l-50-54H163l-50 54c-29 31-77 4-68-38l24-111c10-47 46-81 94-81Z" fill="#0b1023" stroke="url(#controller)" stroke-width="15" filter="url(#glow)"/>
+  <path d="M171 220v74M134 257h74" fill="none" stroke="#dce1ff" stroke-width="18" stroke-linecap="round"/>
+  <circle cx="348" cy="230" r="13" fill="#ff6b8a"/>
+  <circle cx="387" cy="269" r="13" fill="#49f2a4"/>
+  <circle cx="309" cy="269" r="13" fill="#ffbf4d"/>
+  <circle cx="348" cy="308" r="13" fill="#22d3ee"/>
+  <path d="M231 292h50" stroke="#a9b4ec" stroke-width="13" stroke-linecap="round"/>
+</svg>

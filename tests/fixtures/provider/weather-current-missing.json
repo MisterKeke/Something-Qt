@@ -1,0 +1,10 @@
+{
+  "current": {"weather_code": 3},
+  "daily": {
+    "time": ["2026-10-19"],
+    "weather_code": [3],
+    "temperature_2m_max": [20],
+    "temperature_2m_min": [11],
+    "precipitation_probability_max": [0]
+  }
+}

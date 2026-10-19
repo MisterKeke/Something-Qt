@@ -1,0 +1,37 @@
+<RCC>
+  <qresource prefix="/provider-fixtures">
+    <file alias="telegram-success.html">fixtures/provider/telegram-success.html</file>
+    <file alias="telegram-missing-fields.html">fixtures/provider/telegram-missing-fields.html</file>
+    <file alias="telegram-empty.html">fixtures/provider/telegram-empty.html</file>
+    <file alias="youtube-feed-success.xml">fixtures/provider/youtube-feed-success.xml</file>
+    <file alias="youtube-feed-empty.xml">fixtures/provider/youtube-feed-empty.xml</file>
+    <file alias="youtube-feed-malformed.xml">fixtures/provider/youtube-feed-malformed.xml</file>
+    <file alias="youtube-channel-page.html">fixtures/provider/youtube-channel-page.html</file>
+    <file alias="youtube-channel-script.html">fixtures/provider/youtube-channel-script.html</file>
+    <file alias="json-success.json">fixtures/provider/json-success.json</file>
+    <file alias="json-missing-fields.json">fixtures/provider/json-missing-fields.json</file>
+    <file alias="json-malformed.json">fixtures/provider/json-malformed.json</file>
+    <file alias="network-redirect-same.json">fixtures/provider/network-redirect-same.json</file>
+    <file alias="network-redirect-cross-host.json">fixtures/provider/network-redirect-cross-host.json</file>
+    <file alias="network-http-failure.json">fixtures/provider/network-http-failure.json</file>
+    <file alias="network-connection-failure.json">fixtures/provider/network-connection-failure.json</file>
+    <file alias="weather-forecast-success.json">fixtures/provider/weather-forecast-success.json</file>
+    <file alias="weather-current-missing.json">fixtures/provider/weather-current-missing.json</file>
+    <file alias="weather-daily-malformed.json">fixtures/provider/weather-daily-malformed.json</file>
+    <file alias="weather-city-success.json">fixtures/provider/weather-city-success.json</file>
+    <file alias="weather-city-empty.json">fixtures/provider/weather-city-empty.json</file>
+    <file alias="currency-rate-success.json">fixtures/provider/currency-rate-success.json</file>
+    <file alias="currency-rate-mismatch.json">fixtures/provider/currency-rate-mismatch.json</file>
+    <file alias="currency-rates-success.json">fixtures/provider/currency-rates-success.json</file>
+    <file alias="currency-rates-empty.json">fixtures/provider/currency-rates-empty.json</file>
+    <file alias="currency-rates-malformed.json">fixtures/provider/currency-rates-malformed.json</file>
+    <file alias="currency-rates-mismatched-base.json">fixtures/provider/currency-rates-mismatched-base.json</file>
+    <file alias="steam-game-priced.json">fixtures/provider/steam-game-priced.json</file>
+    <file alias="steam-game-discount-missing.json">fixtures/provider/steam-game-discount-missing.json</file>
+    <file alias="steam-game-free.json">fixtures/provider/steam-game-free.json</file>
+    <file alias="steam-game-unavailable.json">fixtures/provider/steam-game-unavailable.json</file>
+    <file alias="steam-game-mismatch.json">fixtures/provider/steam-game-mismatch.json</file>
+    <file alias="steam-game-malformed.json">fixtures/provider/steam-game-malformed.json</file>
+    <file alias="steam-artwork-1px.png.b64">fixtures/provider/steam-artwork-1px.png.b64</file>
+  </qresource>
+</RCC>

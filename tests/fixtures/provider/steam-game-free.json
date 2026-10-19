@@ -1,0 +1,11 @@
+{
+  "12345": {
+    "success": true,
+    "data": {
+      "steam_appid": 12345,
+      "type": "game",
+      "name": "Free Fixture Game",
+      "is_free": true
+    }
+  }
+}

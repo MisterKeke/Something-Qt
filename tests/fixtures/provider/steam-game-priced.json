@@ -1,0 +1,18 @@
+{
+  "12345": {
+    "success": true,
+    "data": {
+      "steam_appid": 12345,
+      "type": "game",
+      "name": "Fixture Game",
+      "header_image": "https://cdn.akamai.steamstatic.com/steam/apps/12345/header.jpg",
+      "is_free": false,
+      "price_overview": {
+        "currency": "USD",
+        "initial": 1999,
+        "final": 999,
+        "discount_percent": 50
+      }
+    }
+  }
+}
