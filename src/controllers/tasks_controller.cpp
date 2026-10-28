@@ -9,6 +9,7 @@
 #include <QGuiApplication>
 #include <QMetaType>
 #include <QThread>
+#include <QUuid>
 
 #include <algorithm>
 #include <utility>
@@ -31,14 +32,17 @@ QString userError(domain::AppError error)
 } // namespace
 
 TasksController::TasksController(application::ApplicationServiceGraph *graph,
-                                 const domain::Clock *clock, QObject *parent)
+                                 const domain::Clock *clock,
+                                 services::ApplicationMutationWorkflow *mutations,
+                                 QObject *parent)
     : QObject(parent)
     , m_graph(graph)
     , m_clock(clock)
+    , m_mutations(mutations)
     , m_model()
     , m_observedLocalDate(m_clock ? m_clock->localDate() : QDate())
 {
-    Q_ASSERT(m_graph && m_clock);
+    Q_ASSERT(m_graph && m_clock && m_mutations);
     Q_ASSERT(QThread::currentThread() == thread());
     m_model.setToday(m_observedLocalDate);
     m_filterTimer.setSingleShot(true);
@@ -59,6 +63,10 @@ TasksController::TasksController(application::ApplicationServiceGraph *graph,
     });
     connect(m_graph, &application::ApplicationServiceGraph::storageOperationFinished,
             this, &TasksController::onStorageFinished);
+    connect(m_mutations, &services::ApplicationMutationWorkflow::requestFinished,
+            this, &TasksController::onSharedMutationFinished);
+    connect(m_mutations, &services::ApplicationMutationWorkflow::taskCommitted,
+            this, &TasksController::onSharedTaskCommitted);
     connect(&m_graph->lifecycle(), &application::ApplicationLifecycle::stateChanged,
             this, &TasksController::onLifecycleChanged);
     if (auto *guiApplication = qobject_cast<QGuiApplication *>(QCoreApplication::instance())) {
@@ -120,6 +128,10 @@ void TasksController::setPageVisible(bool visible)
         return;
     }
     if (!m_ready) return;
+    if (m_externalMutationWhileHidden) {
+        m_externalMutationWhileHidden = false;
+        refreshAfterMutation();
+    }
     m_localDateTimer.start();
     const QDate today = m_clock->localDate();
     if (today == m_observedLocalDate) return;
@@ -287,9 +299,15 @@ storage::TaskInput TasksController::taskInput(const QVariantMap &draft) const
 
 void TasksController::toggleTask(qint64 id, bool completed)
 {
-    if (!m_ready || m_mutationBusy) return;
+    if (!m_ready || m_mutationBusy) {
+        setError(QStringLiteral("Task completion could not be accepted right now."));
+        return;
+    }
     const domain::Task *task = m_model.taskById(id);
-    if (!task) return;
+    if (!task) {
+        setError(QStringLiteral("The task is no longer available in the current view."));
+        return;
+    }
     setTaskCompleted(id, task->revision, completed);
 }
 
@@ -300,21 +318,22 @@ void TasksController::toggleTaskFromView(qint64 id, qint64 revision, bool comple
 
 void TasksController::setTaskCompleted(qint64 id, qint64 revision, bool completed)
 {
-    if (!m_ready || m_mutationBusy || id <= 0 || revision <= 0) return;
+    if (!m_ready || m_mutationBusy || id <= 0 || revision <= 0) {
+        setError(QStringLiteral("Task completion could not be accepted right now."));
+        return;
+    }
     m_mutationBusy = true;
     setError({});
     emit stateChanged();
-    const auto operation = m_graph->beginOperation(QStringLiteral("change task completion"));
-    if (!operation.isValid()) { m_mutationBusy = false; emit stateChanged(); return; }
-    m_pending.insert(operation.id.value, {Action::Complete, id});
-    if (!m_graph->submitStorage(operation,
-            services::TaskService::setCompleted(id, revision, completed))) {
-        if (m_pending.contains(operation.id.value)) {
-            m_pending.remove(operation.id.value);
-            m_mutationBusy = false;
-            setError(QStringLiteral("Task could not be updated."));
-            emit stateChanged();
-        }
+    const QString requestId = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    m_sharedPending.insert(requestId, {Action::Complete, id});
+    const auto admission = m_mutations->completeTask(requestId, id, revision, completed, [this] {
+        emit stateChanged();
+    });
+    if (!admission.accepted && m_sharedPending.remove(requestId) > 0) {
+        m_mutationBusy = false;
+        setError(admission.message);
+        emit stateChanged();
     }
 }
 
@@ -388,7 +407,10 @@ void TasksController::setSubtaskCompleted(qint64 taskId, qint64 subtaskId,
 
 void TasksController::saveTask(const QVariantMap &draft)
 {
-    if (!m_ready || m_mutationBusy) return;
+    if (!m_ready || m_mutationBusy) {
+        setEditorError(QStringLiteral("Task changes could not be accepted right now."));
+        return;
+    }
     const qint64 id = draft.value(QStringLiteral("id")).toLongLong();
     storage::TaskInput input = taskInput(draft);
     if (id <= 0 && !input.difficulty) input.difficulty = QString{};
@@ -398,6 +420,29 @@ void TasksController::saveTask(const QVariantMap &draft)
     if (preserveDifficulty) {
         if (const domain::Task *current = m_model.taskById(id))
             input.difficulty = current->difficulty;
+    }
+    if (id <= 0) {
+        m_mutationBusy = true;
+        m_editorSaving = true;
+        m_editorConflict = false;
+        m_conflictReloadAvailable = false;
+        m_conflictReloadMessage.clear();
+        m_conflictTaskId = 0;
+        setEditorError({});
+        setError({});
+        emit stateChanged();
+        const QString requestId = QUuid::createUuid().toString(QUuid::WithoutBraces);
+        m_sharedPending.insert(requestId, {Action::Create, 0});
+        const auto admission = m_mutations->addTask(requestId, std::move(input), [this] {
+            emit stateChanged();
+        });
+        if (!admission.accepted && m_sharedPending.remove(requestId) > 0) {
+            m_mutationBusy = false;
+            m_editorSaving = false;
+            setEditorError(admission.message);
+            emit stateChanged();
+        }
+        return;
     }
     const domain::AppError validation = domain::normalizeTaskInput(input);
     if (validation.isError()) {
@@ -418,12 +463,10 @@ void TasksController::saveTask(const QVariantMap &draft)
     const auto operation = m_graph->beginOperation(
         id > 0 ? QStringLiteral("update task") : QStringLiteral("create task"));
     if (!operation.isValid()) { m_mutationBusy = false; m_editorSaving = false; emit stateChanged(); return; }
-    const Action action = id > 0 ? Action::Update : Action::Create;
+    const Action action = Action::Update;
     m_pending.insert(operation.id.value, {action, id});
-    const auto command = id > 0
-        ? services::TaskService::update(id, draft.value(QStringLiteral("revision")).toLongLong(),
-                                       std::move(input))
-        : services::TaskService::create(std::move(input));
+    const auto command = services::TaskService::update(
+        id, draft.value(QStringLiteral("revision")).toLongLong(), std::move(input));
     if (!m_graph->submitStorage(operation, command)
         && m_pending.contains(operation.id.value)) {
         m_pending.remove(operation.id.value);
@@ -432,6 +475,53 @@ void TasksController::saveTask(const QVariantMap &draft)
         setEditorError(QStringLiteral("The task could not be saved."));
         emit stateChanged();
     }
+}
+
+void TasksController::onSharedTaskCommitted(const QString &requestId,
+                                            const QVariantMap &taskMap, bool created)
+{
+    const bool guiRequest = m_sharedPending.contains(requestId);
+    const domain::Task task = services::TaskService::fromVariantMap(taskMap);
+    m_model.applyTask(task); // update an already visible row; do not inject a filtered-out row
+    emit taskMutationCommitted(task.id, taskMap, false);
+    if (guiRequest) return; // The GUI request refreshes after its correlated final result.
+    if (m_pageVisible) refreshAfterMutation();
+    else m_externalMutationWhileHidden = true;
+    Q_UNUSED(created);
+}
+
+void TasksController::onSharedMutationFinished(const services::MutationResult &result)
+{
+    auto found = m_sharedPending.find(result.requestId);
+    if (found == m_sharedPending.end()) return;
+    const PendingAction action = found.value();
+    m_sharedPending.erase(found);
+    m_mutationBusy = false;
+    if (action.action == Action::Create) m_editorSaving = false;
+    if (result.state != QStringLiteral("succeeded")) {
+        const QString message = result.message.isEmpty()
+            ? QStringLiteral("The operation did not complete.") : result.message;
+        if (action.action == Action::Create) setEditorError(message);
+        else setError(message);
+        if (result.errorCode == QStringLiteral("conflict")) {
+            m_reconcileNextList = true;
+            refreshAfterMutation();
+        }
+        emit stateChanged();
+        return;
+    }
+    if (action.action == Action::Create) {
+        m_pageOffset = 0;
+        emit editorSaveSucceeded();
+        setEditorError({});
+        m_editorConflict = false;
+        m_conflictReloadAvailable = false;
+        setNotification(QStringLiteral("Task added."));
+    } else {
+        setNotification(QStringLiteral("Task completed."));
+    }
+    refreshAfterMutation();
+    emit stateChanged();
 }
 
 void TasksController::deleteTask(qint64 id)

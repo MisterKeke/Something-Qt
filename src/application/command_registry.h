@@ -21,6 +21,10 @@ struct CommandDefinition final {
     QString usage;
     std::function<QString(const QStringList &arguments)> validateArguments;
     std::function<CommandExecution(const QStringList &arguments)> handler;
+    // Explicit argument completion metadata. Arguments exclude the command
+    // name; the final token may be partial or empty.
+    std::function<QStringList(const QStringList &completeArguments,
+                              const QString &partialArgument)> completeArguments;
 };
 
 struct CommandLookup final {

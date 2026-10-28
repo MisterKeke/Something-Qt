@@ -119,24 +119,53 @@ void ApplicationCommandService::registerBuiltins()
             QVariantMap status{
                 {QStringLiteral("lifecycle"), m_graph->lifecycle().stateName()},
                 {QStringLiteral("maintenance"), m_graph->isProfileMaintenance()},
-                {QStringLiteral("pendingConsoleRequests"), m_pending.size()},
+                {QStringLiteral("pendingConsoleRequests"), m_pending.size() + m_mutationRequests.size()},
                 {QStringLiteral("unavailableCapabilities"), m_graph->capabilities().unavailableCapabilities()},
             };
             execution.data.insert(QStringLiteral("status"), status);
             return execution;
         }});
 
-    registerOne({QStringLiteral("task"), QStringLiteral("Read saved tasks."),
-        QStringLiteral("task list [--query \"text\"] [--page n] | task show <id>"),
+    registerOne({QStringLiteral("task"), QStringLiteral("Read, add, or complete saved tasks."),
+        QStringLiteral("task list [--query \"text\"] [--page n] | task show <id> | task add \"title\" [--due YYYY-MM-DD] [--priority low|medium|high] | task complete <id> --revision <revision>"),
         [](const QStringList &args) {
-            if (args.isEmpty()) return QStringLiteral("Usage: task list [--query \"text\"] [--page n] | task show <id>");
+            if (args.isEmpty()) return QStringLiteral("Usage: task list [--query \"text\"] [--page n] | task show <id> | task add \"title\" [--due YYYY-MM-DD] [--priority low|medium|high] | task complete <id> --revision <revision>");
+            if (args.constFirst() == QStringLiteral("add")) {
+                if (args.size() < 2) return QStringLiteral("Usage: task add \"title\" [--due YYYY-MM-DD] [--priority low|medium|high]");
+                QSet<QString> seen;
+                for (qsizetype i = 2; i < args.size(); ++i) {
+                    const QString option = args.at(i);
+                    if ((option != QStringLiteral("--due") && option != QStringLiteral("--priority"))
+                        || seen.contains(option) || i + 1 >= args.size())
+                        return QStringLiteral("Expected one optional --due <date> and --priority <low|medium|high>.");
+                    const QString value = args.at(++i);
+                    if (option == QStringLiteral("--due")) {
+                        const QDate date = QDate::fromString(value, Qt::ISODate);
+                        if (value.isEmpty() || !date.isValid() || date.toString(Qt::ISODate) != value)
+                            return QStringLiteral("--due must be a valid YYYY-MM-DD date.");
+                    } else if (value != QStringLiteral("low") && value != QStringLiteral("medium")
+                               && value != QStringLiteral("high")) {
+                        return QStringLiteral("--priority must be low, medium, or high.");
+                    }
+                    seen.insert(option);
+                }
+                return QString();
+            }
+            if (args.constFirst() == QStringLiteral("complete")) {
+                qint64 id = 0, revision = 0;
+                if (args.size() != 4 || args.at(2) != QStringLiteral("--revision"))
+                    return QStringLiteral("Usage: task complete <id> --revision <revision>");
+                const QString idError = positiveInteger(args.at(1), std::numeric_limits<qint64>::max(), &id);
+                if (!idError.isEmpty()) return idError;
+                return positiveInteger(args.at(3), std::numeric_limits<qint64>::max(), &revision);
+            }
             if (args.constFirst() == QStringLiteral("show")) {
                 qint64 id = 0;
                 if (args.size() != 2) return QStringLiteral("Usage: task show <id>");
                 return positiveInteger(args.at(1), std::numeric_limits<qint64>::max(), &id);
             }
             if (args.constFirst() != QStringLiteral("list"))
-                return QStringLiteral("Expected 'list' or 'show'.");
+                return QStringLiteral("Expected 'list', 'show', 'add', or 'complete'.");
             QSet<QString> seen;
             for (qsizetype i = 1; i < args.size(); ++i) {
                 const QString option = args.at(i);
@@ -161,6 +190,26 @@ void ApplicationCommandService::registerBuiltins()
         },
         [](const QStringList &args) {
             application::CommandExecution execution;
+            if (args.constFirst() == QStringLiteral("add")) {
+                storage::TaskInput input;
+                input.title = args.at(1);
+                input.priority = QStringLiteral("medium");
+                for (qsizetype i = 2; i < args.size(); ++i) {
+                    if (args.at(i) == QStringLiteral("--due")) input.dueDate = args.at(++i);
+                    else if (args.at(i) == QStringLiteral("--priority")) input.priority = args.at(++i);
+                }
+                execution.data.insert(QStringLiteral("mutationKind"), QStringLiteral("task-add"));
+                execution.data.insert(QStringLiteral("title"), input.title);
+                execution.data.insert(QStringLiteral("dueDate"), input.dueDate);
+                execution.data.insert(QStringLiteral("priority"), input.priority);
+                return execution;
+            }
+            if (args.constFirst() == QStringLiteral("complete")) {
+                execution.data.insert(QStringLiteral("mutationKind"), QStringLiteral("task-complete"));
+                execution.data.insert(QStringLiteral("taskId"), args.at(1).toLongLong());
+                execution.data.insert(QStringLiteral("revision"), args.at(3).toLongLong());
+                return execution;
+            }
             if (args.constFirst() == QStringLiteral("show")) {
                 const qint64 id = args.at(1).toLongLong();
                 execution.storageCommand = TaskService::get(id);
@@ -182,6 +231,18 @@ void ApplicationCommandService::registerBuiltins()
             execution.data.insert(QStringLiteral("pageSize"), pageSize);
             execution.data.insert(QStringLiteral("source"), QStringLiteral("fresh-query"));
             return execution;
+        }, [](const QStringList &complete, const QString &partial) {
+            QStringList values;
+            if (complete.isEmpty()) values = {QStringLiteral("list"), QStringLiteral("show"),
+                                              QStringLiteral("add"), QStringLiteral("complete")};
+            else if (complete.first() == QStringLiteral("add")) {
+                if (!complete.contains(QStringLiteral("--priority"))) values << QStringLiteral("--priority");
+                if (!complete.contains(QStringLiteral("--due"))) values << QStringLiteral("--due");
+                if (complete.contains(QStringLiteral("--priority")))
+                    values << QStringLiteral("low") << QStringLiteral("medium") << QStringLiteral("high");
+            }
+            values.removeAll(partial);
+            return values;
         }});
 
     registerPhaseThreeCommands();
@@ -191,6 +252,27 @@ void ApplicationCommandService::setSnapshotProvider(QString name,
                                                     std::function<QVariantMap()> provider)
 {
     if (provider) m_snapshotProviders.insert(std::move(name), std::move(provider));
+}
+
+void ApplicationCommandService::setMutationWorkflow(ApplicationMutationWorkflow *workflow)
+{
+    m_mutations = workflow;
+    if (!m_mutations) return;
+    connect(m_mutations, &ApplicationMutationWorkflow::requestFinished,
+            this, &ApplicationCommandService::onMutationFinished);
+}
+
+void ApplicationCommandService::onMutationFinished(const MutationResult &mutation)
+{
+    if (!m_mutationRequests.remove(mutation.requestId)) return;
+    ConsoleRequestResult result = makeResult(mutation.requestId, mutation.state,
+                                              m_mutationCommands.take(mutation.requestId));
+    result.accepted = true;
+    result.message = mutation.message;
+    result.data = mutation.data;
+    if (!mutation.errorCode.isEmpty()) result.data.insert(QStringLiteral("errorCode"), mutation.errorCode);
+    if (mutation.state == QStringLiteral("cancelled")) emit requestCancelled(result);
+    else emit requestFinished(result);
 }
 
 void ApplicationCommandService::registerPhaseThreeCommands()
@@ -230,20 +312,47 @@ void ApplicationCommandService::registerPhaseThreeCommands()
                  execution.data.insert(QStringLiteral("pageLoadConfirmed"), false);
              }
              return execution;
+         }, [](const QStringList &complete, const QString &) {
+             if (complete.isEmpty()) return QStringList{QStringLiteral("list"), QStringLiteral("open")};
+             if (complete == QStringList{QStringLiteral("open")}) {
+                 QStringList routes;
+                 for (const QVariant &row : application::RouteCatalog::routes())
+                     routes.push_back(row.toMap().value(QStringLiteral("id")).toString());
+                 return routes;
+             }
+             return QStringList{};
          }});
 
-    reg({QStringLiteral("settings"), QStringLiteral("Show supported retained settings."),
-         QStringLiteral("settings show"), [](const QStringList &args) {
-             return args == QStringList{QStringLiteral("show")} ? QString()
-                 : QStringLiteral("Usage: settings show");
-         }, [this](const QStringList &) {
+    reg({QStringLiteral("settings"), QStringLiteral("Show supported retained settings or update the week start."),
+         QStringLiteral("settings show | settings week-start <0..6>"), [](const QStringList &args) {
+             if (args == QStringList{QStringLiteral("show")}) return QString();
+             if (args.size() == 2 && args.first() == QStringLiteral("week-start")) {
+                 bool ok = false;
+                 const int value = args.at(1).toInt(&ok, 10);
+                 return ok && value >= 0 && value <= 6 ? QString()
+                     : QStringLiteral("Week start must be a decimal integer from 0 to 6.");
+             }
+             return QStringLiteral("Usage: settings show | settings week-start <0..6>");
+         }, [this](const QStringList &args) {
              application::CommandExecution execution;
+             if (args.first() == QStringLiteral("week-start")) {
+                 execution.data.insert(QStringLiteral("mutationKind"), QStringLiteral("week-start"));
+                 execution.data.insert(QStringLiteral("weekStart"), args.at(1).toInt());
+                 return execution;
+             }
              const auto it = m_snapshotProviders.constFind(QStringLiteral("settings"));
              execution.data = it == m_snapshotProviders.cend()
                  ? QVariantMap{{QStringLiteral("available"), false},
                                {QStringLiteral("message"), QStringLiteral("Settings snapshot is unavailable.")}}
                  : it.value()();
              return execution;
+         }, [](const QStringList &complete, const QString &partial) {
+             if (complete.isEmpty()) return QStringList{QStringLiteral("show"), QStringLiteral("week-start")};
+             if (complete.first() == QStringLiteral("week-start"))
+                 return QStringList{QStringLiteral("0"), QStringLiteral("1"), QStringLiteral("2"),
+                                    QStringLiteral("3"), QStringLiteral("4"), QStringLiteral("5"), QStringLiteral("6")};
+             Q_UNUSED(partial);
+             return QStringList{};
          }});
 
     reg({QStringLiteral("wallpaper"), QStringLiteral("List built-in and imported wallpaper catalog entries."),
@@ -305,6 +414,11 @@ void ApplicationCommandService::registerPhaseThreeCommands()
          }, [listExecution](const QStringList &args) {
              return listExecution(FavoritesService::loadSourceSnapshot(args.at(1)),
                                   QStringLiteral("favorites"), args, 2);
+         }, [](const QStringList &complete, const QString &) {
+             if (complete.isEmpty()) return QStringList{QStringLiteral("list")};
+             if (complete == QStringList{QStringLiteral("list")})
+                 return QStringList{QStringLiteral("telegram"), QStringLiteral("youtube")};
+             return QStringList{};
          }});
 
     reg({QStringLiteral("news"), QStringLiteral("List cached favorite-provider news."),
@@ -386,9 +500,10 @@ ConsoleRequestResult ApplicationCommandService::makeResult(QString id, QString s
 QString ApplicationCommandService::submit(const QString &input)
 {
     const QString requestId = QUuid::createUuid().toString(QUuid::WithoutBraces);
-    auto reject = [this, requestId](QString command, QString message) {
+    auto reject = [this, requestId](QString command, QString message, QString errorCode = QString()) {
         auto result = makeResult(requestId, QStringLiteral("rejected"), std::move(command));
         result.message = std::move(message);
+        if (!errorCode.isEmpty()) result.data.insert(QStringLiteral("errorCode"), std::move(errorCode));
         emit requestRejected(result);
         return requestId;
     };
@@ -400,19 +515,64 @@ QString ApplicationCommandService::submit(const QString &input)
     if (!definition) return reject(commandName, QStringLiteral("Unknown command. Use 'help' to list registered commands."));
     const QStringList arguments = parsed.tokens.mid(1);
     const QString validationError = m_registry.validate(*definition, arguments);
-    if (!validationError.isEmpty()) return reject(commandName, validationError);
+    if (!validationError.isEmpty()) return reject(commandName, validationError, QStringLiteral("validation"));
 
     const bool queryCommand = commandName != QStringLiteral("help")
         && commandName != QStringLiteral("status") && commandName != QStringLiteral("page");
-    if (queryCommand) {
+    const bool mutationCommand = (commandName == QStringLiteral("task")
+                                  && !arguments.isEmpty()
+                                  && (arguments.first() == QStringLiteral("add")
+                                      || arguments.first() == QStringLiteral("complete")))
+        || (commandName == QStringLiteral("settings") && arguments.size() == 2
+            && arguments.first() == QStringLiteral("week-start"));
+    if (queryCommand && !mutationCommand) {
         const QString unavailable = queryAvailabilityError();
         if (!unavailable.isEmpty()) return reject(commandName, unavailable);
-    } else if (m_graph->lifecycle().state() == application::ApplicationLifecycle::State::ShuttingDown
-               || m_graph->lifecycle().state() == application::ApplicationLifecycle::State::Stopped) {
+    } else if (!mutationCommand && (m_graph->lifecycle().state() == application::ApplicationLifecycle::State::ShuttingDown
+               || m_graph->lifecycle().state() == application::ApplicationLifecycle::State::Stopped)) {
         return reject(commandName, QStringLiteral("The application is shutting down."));
     }
 
     const application::CommandExecution execution = definition->handler(arguments);
+    const QString mutationKind = execution.data.value(QStringLiteral("mutationKind")).toString();
+    if (!mutationKind.isEmpty()) {
+        if (!m_mutations) return reject(commandName, QStringLiteral("Application mutations are unavailable."));
+        if (m_pending.size() + m_mutationRequests.size() >= MaximumPendingRequests)
+            return reject(commandName, QStringLiteral("Console is busy; try again when a request finishes."));
+        m_mutationRequests.insert(requestId);
+        m_mutationCommands.insert(requestId, commandName);
+        const QVariantMap pendingData = execution.data;
+        const auto admitted = [this, requestId, commandName, pendingData] {
+            ConsoleRequestResult pending = makeResult(requestId, QStringLiteral("pending"), commandName);
+            pending.accepted = true;
+            pending.data = pendingData;
+            emit requestAccepted(pending);
+            emit requestPending(pending);
+        };
+        MutationAdmission admission;
+        if (mutationKind == QStringLiteral("task-add")) {
+            storage::TaskInput input;
+            input.title = execution.data.value(QStringLiteral("title")).toString();
+            input.dueDate = execution.data.value(QStringLiteral("dueDate")).toString();
+            input.priority = execution.data.value(QStringLiteral("priority")).toString();
+            admission = m_mutations->addTask(requestId, std::move(input), admitted);
+        } else if (mutationKind == QStringLiteral("task-complete")) {
+            admission = m_mutations->completeTask(requestId,
+                execution.data.value(QStringLiteral("taskId")).toLongLong(),
+                execution.data.value(QStringLiteral("revision")).toLongLong(), true, admitted);
+        } else if (mutationKind == QStringLiteral("week-start")) {
+            admission = m_mutations->setWeekStart(requestId,
+                execution.data.value(QStringLiteral("weekStart")).toInt(), admitted);
+        } else {
+            admission = {false, QStringLiteral("unavailable"), QStringLiteral("Mutation is not supported.")};
+        }
+        if (!admission.accepted) {
+            m_mutationRequests.remove(requestId);
+            m_mutationCommands.remove(requestId);
+            return reject(commandName, admission.message, admission.errorCode);
+        }
+        return requestId;
+    }
     if (!execution.storageCommand && execution.data.contains(QStringLiteral("openRoute"))) {
         ConsoleRequestResult accepted = makeResult(requestId, QStringLiteral("succeeded"), commandName);
         accepted.accepted = true;
@@ -431,7 +591,7 @@ QString ApplicationCommandService::submit(const QString &input)
         emit requestFinished(accepted);
         return requestId;
     }
-    if (m_pending.size() >= MaximumPendingRequests)
+    if (m_pending.size() + m_mutationRequests.size() >= MaximumPendingRequests)
         return reject(commandName, QStringLiteral("Console is busy; try again when a request finishes."));
 
     const auto operation = m_graph->beginOperation(QStringLiteral("console: ") + commandName);
@@ -472,6 +632,8 @@ QString ApplicationCommandService::queryAvailabilityError() const
 
 bool ApplicationCommandService::cancel(const QString &requestId)
 {
+    if (m_mutationRequests.contains(requestId) && m_mutations)
+        return m_mutations->cancel(requestId);
     const auto it = m_pending.constFind(requestId);
     if (it == m_pending.cend() || it->finalEmitted) return false;
     return m_graph->cancelOperation({it->operationId});

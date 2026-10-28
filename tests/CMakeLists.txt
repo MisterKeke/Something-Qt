@@ -1,9 +1,12 @@
 add_executable(SomethingQtApplicationCommandTests
     application_command_test.cpp
+    ../src/controllers/tasks_controller.cpp
+    ../src/models/tasks_model.cpp
     ../src/application/application_lifecycle.cpp
     ../src/application/application_service_graph.cpp
     ../src/application/capability_registry.cpp
     ../src/application/command_parser.cpp
+    ../src/application/command_completion.cpp
     ../src/application/command_registry.cpp
     ../src/application/operation_coordinator.cpp
     ../src/domain/app_error.cpp
@@ -14,6 +17,8 @@ add_executable(SomethingQtApplicationCommandTests
     ../src/providers/provider_policy.cpp
     ../src/providers/provider_response_cache.cpp
     ../src/services/application_command_service.cpp
+    ../src/services/application_mutation_workflow.cpp
+    ../src/services/preferences_service.cpp
     ../src/services/bounded_worker_pool.cpp
     ../src/services/task_service.cpp
     ../src/services/wallpaper_service.cpp
@@ -41,6 +46,7 @@ add_executable(SomethingQtConsolePhaseThreeTests
     ../src/application/application_service_graph.cpp
     ../src/application/capability_registry.cpp
     ../src/application/command_parser.cpp
+    ../src/application/command_completion.cpp
     ../src/application/command_registry.cpp
     ../src/application/operation_coordinator.cpp
     ../src/application/route_catalog.cpp
@@ -55,6 +61,8 @@ add_executable(SomethingQtConsolePhaseThreeTests
     ../src/providers/provider_response_cache.cpp
     ../src/providers/provider_parsers.cpp
     ../src/services/application_command_service.cpp
+    ../src/services/application_mutation_workflow.cpp
+    ../src/services/preferences_service.cpp
     ../src/services/bounded_worker_pool.cpp
     ../src/services/task_service.cpp
     ../src/services/wallpaper_service.cpp

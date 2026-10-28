@@ -32,6 +32,7 @@
 #include "controllers/terminal_controller.h"
 #include "controllers/wallpaper_controller.h"
 #include "controllers/weather_controller.h"
+#include "services/application_mutation_workflow.h"
 #include "platform/location_provider.h"
 #include "platform/desktop_applications_platform.h"
 #include "platform/file_explorer_platform.h"
@@ -91,7 +92,9 @@ int main(int argc, char *argv[])
     QQuickStyle::setStyle(QStringLiteral("Basic"));
 
     something::application::ApplicationServiceGraph services;
+    something::services::ApplicationMutationWorkflow mutationWorkflow(&services);
     something::services::ApplicationCommandService commandService(&services);
+    commandService.setMutationWorkflow(&mutationWorkflow);
     something::platform::SystemClock clock;
     commandService.setClock(&clock);
     something::platform::NativeLocationProvider locationProvider;
@@ -115,7 +118,7 @@ int main(int argc, char *argv[])
         services.profileDirectory());
     something::controllers::WallpaperController wallpaperController(&services,
                                                                      wallpaperImages);
-    something::controllers::TasksController tasksController(&services, &clock);
+    something::controllers::TasksController tasksController(&services, &clock, &mutationWorkflow);
     something::controllers::TerminalController terminalController(&commandService);
     something::controllers::CalendarController calendarController(&services, &clock);
     something::controllers::DashboardController dashboardController(&services, &clock);
@@ -128,7 +131,7 @@ int main(int argc, char *argv[])
         &services, &desktopApplicationsPlatform, applicationImages);
     something::controllers::RunningApplicationsController runningApplicationsController(
         &services, &runningWindowsPlatform);
-    something::controllers::SettingsController settingsController(&services, &clock);
+    something::controllers::SettingsController settingsController(&services, &clock, &mutationWorkflow);
     something::controllers::SetupsController setupsController(
         &services, &desktopApplicationsPlatform, setupImages);
     something::controllers::FileExplorerController fileExplorerController(

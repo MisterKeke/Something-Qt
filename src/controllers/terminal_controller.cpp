@@ -1,4 +1,5 @@
 #include "terminal_controller.h"
+#include "../application/command_completion.h"
 
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -19,6 +20,7 @@ QString taskSummary(const QVariantMap &task)
     const QString description = task.value(QStringLiteral("description")).toString();
     if (!description.isEmpty()) lines.push_back(QStringLiteral("  %1").arg(description));
     lines.push_back(QStringLiteral("  Priority: %1").arg(task.value(QStringLiteral("priority")).toString()));
+    lines.push_back(QStringLiteral("  Revision: %1").arg(task.value(QStringLiteral("revision")).toLongLong()));
     const QString dueDate = task.value(QStringLiteral("dueDate")).toString();
     if (!dueDate.isEmpty()) lines.push_back(QStringLiteral("  Due: %1").arg(dueDate));
     const QStringList tags = task.value(QStringLiteral("tags")).toStringList();
@@ -72,6 +74,19 @@ void TerminalController::clearOutput()
     m_output.clear();
 }
 
+QVariantMap TerminalController::completions(const QString &input, int cursorPosition) const
+{
+    return application::CommandCompletion::complete(m_commands->registry(), input, cursorPosition);
+}
+
+QVariantMap TerminalController::applyCompletion(const QString &input,
+                                                 const QVariantMap &suggestion) const
+{
+    int cursor = input.size();
+    const QString updated = application::CommandCompletion::apply(input, suggestion, &cursor);
+    return {{QStringLiteral("text"), updated}, {QStringLiteral("cursorPosition"), cursor}};
+}
+
 QString TerminalController::historyUp(const QString &currentDraft)
 {
     if (m_history.isEmpty()) return currentDraft;
@@ -111,7 +126,10 @@ void TerminalController::resetHistoryNavigation()
 
 void TerminalController::onRejected(const services::ConsoleRequestResult &result)
 {
-    m_output.append(QStringLiteral("Rejected: %1").arg(result.message), QStringLiteral("error"));
+    const QString code = result.data.value(QStringLiteral("errorCode")).toString();
+    m_output.append(code.isEmpty()
+        ? QStringLiteral("Rejected: %1").arg(result.message)
+        : QStringLiteral("Rejected (%1): %2").arg(code, result.message), QStringLiteral("error"));
 }
 
 void TerminalController::onPending(const services::ConsoleRequestResult &result)
@@ -126,7 +144,10 @@ void TerminalController::onFinished(const services::ConsoleRequestResult &result
 {
     m_pendingCommands.remove(result.requestId);
     if (result.state == QStringLiteral("failed")) {
-        m_output.append(QStringLiteral("Error: %1").arg(result.message), QStringLiteral("error"));
+        const QString code = result.data.value(QStringLiteral("errorCode")).toString();
+        m_output.append(code.isEmpty()
+            ? QStringLiteral("Error: %1").arg(result.message)
+            : QStringLiteral("Error (%1): %2").arg(code, result.message), QStringLiteral("error"));
     } else {
         appendResultData(result);
     }
@@ -136,7 +157,8 @@ void TerminalController::onFinished(const services::ConsoleRequestResult &result
 void TerminalController::onCancelled(const services::ConsoleRequestResult &result)
 {
     m_pendingCommands.remove(result.requestId);
-    m_output.append(QStringLiteral("Cancelled · %1").arg(result.command), QStringLiteral("warning"));
+    const QString suffix = result.message.isEmpty() ? QString() : QStringLiteral(" · %1").arg(result.message);
+    m_output.append(QStringLiteral("Cancelled · %1%2").arg(result.command, suffix), QStringLiteral("warning"));
     emit stateChanged();
 }
 

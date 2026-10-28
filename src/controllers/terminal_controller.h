@@ -24,6 +24,9 @@ public:
     int historyCount() const noexcept { return static_cast<int>(m_history.size()); }
 
     Q_INVOKABLE void submit(const QString &input);
+    Q_INVOKABLE QVariantMap completions(const QString &input, int cursorPosition) const;
+    Q_INVOKABLE QVariantMap applyCompletion(const QString &input,
+                                            const QVariantMap &suggestion) const;
     Q_INVOKABLE void clearOutput();
     Q_INVOKABLE QString historyUp(const QString &currentDraft);
     Q_INVOKABLE QString historyDown(const QString &currentDraft);

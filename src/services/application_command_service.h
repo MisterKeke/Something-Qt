@@ -3,10 +3,12 @@
 #include "../application/application_service_graph.h"
 #include "../application/command_registry.h"
 #include "../application/command_parser.h"
+#include "application_mutation_workflow.h"
 #include "../domain/clock.h"
 
 #include <QObject>
 #include <QHash>
+#include <QSet>
 #include <functional>
 
 namespace something::services {
@@ -31,6 +33,7 @@ public:
                                         QObject *parent = nullptr);
     void setClock(const domain::Clock *clock) noexcept { m_clock = clock; }
     void setSnapshotProvider(QString name, std::function<QVariantMap()> provider);
+    void setMutationWorkflow(ApplicationMutationWorkflow *workflow);
     const application::CommandRegistry &registry() const noexcept { return m_registry; }
     QString submit(const QString &input);
     bool cancel(const QString &requestId);
@@ -52,6 +55,7 @@ private:
 
     void registerBuiltins();
     void registerPhaseThreeCommands();
+    void onMutationFinished(const something::services::MutationResult &result);
     ConsoleRequestResult makeResult(QString id, QString state, QString command = {}) const;
     void finish(const QString &id, QString state, QString message = {}, QVariantMap data = {});
     void onStorageFinished(quint64 operationId, const QVariantMap &values,
@@ -68,6 +72,9 @@ private:
     QHash<QString, std::function<QVariantMap()>> m_snapshotProviders;
     QHash<QString, PendingRequest> m_pending;
     QHash<quint64, QString> m_requestByOperation;
+    ApplicationMutationWorkflow *m_mutations{nullptr};
+    QSet<QString> m_mutationRequests;
+    QHash<QString, QString> m_mutationCommands;
 };
 
 } // namespace something::services

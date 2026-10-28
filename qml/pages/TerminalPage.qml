@@ -46,12 +46,56 @@ Item {
     property bool followNewest: true
     property bool scrollAfterAppend: true
     property bool adjustingTranscriptScroll: false
+    property var suggestions: []
+    property int suggestionIndex: 0
+    property bool applyingCompletion: false
 
     function scrollToNewest() {
         adjustingTranscriptScroll = true
         transcriptView.positionViewAtEnd()
         adjustingTranscriptScroll = false
         followNewest = true
+    }
+
+    function chooseSuggestion(index) {
+        if (index < 0 || index >= suggestions.length) return
+        const applied = controller.applyCompletion(commandField.text, suggestions[index])
+        applyingCompletion = true
+        commandField.text = applied.text
+        commandField.cursorPosition = applied.cursorPosition
+        suggestions = []
+        applyingCompletion = false
+        commandField.forceActiveFocus()
+    }
+
+    function requestCompletion() {
+        const result = controller.completions(commandField.text, commandField.cursorPosition)
+        const values = result.suggestions || []
+        if (values.length === 0) {
+            suggestions = []
+            return false
+        }
+        if (suggestions.length > 0) {
+            suggestionIndex = (suggestionIndex + 1) % suggestions.length
+            return true
+        }
+        if (values.length === 1) {
+            chooseSuggestionFrom(values[0])
+            return true
+        }
+        suggestions = values
+        suggestionIndex = 0
+        return true
+    }
+
+    function chooseSuggestionFrom(suggestion) {
+        const applied = controller.applyCompletion(commandField.text, suggestion)
+        applyingCompletion = true
+        commandField.text = applied.text
+        commandField.cursorPosition = applied.cursorPosition
+        suggestions = []
+        applyingCompletion = false
+        commandField.forceActiveFocus()
     }
 
     Connections {
@@ -195,7 +239,23 @@ Item {
                 maximumLength: 4096
                 selectByMouse: true
                 Keys.onPressed: function(event) {
-                    if (event.key === Qt.Key_Up) {
+                    if (event.key === Qt.Key_Tab) {
+                        if (root.requestCompletion()) event.accepted = true
+                    } else if ((event.key === Qt.Key_Return || event.key === Qt.Key_Enter)
+                               && root.suggestions.length > 0) {
+                        root.chooseSuggestion(root.suggestionIndex)
+                        event.accepted = true
+                    } else if (event.key === Qt.Key_Escape && root.suggestions.length > 0) {
+                        root.suggestions = []
+                        event.accepted = true
+                    } else if (event.key === Qt.Key_Up && root.suggestions.length > 0) {
+                        root.suggestionIndex = (root.suggestionIndex + root.suggestions.length - 1)
+                                               % root.suggestions.length
+                        event.accepted = true
+                    } else if (event.key === Qt.Key_Down && root.suggestions.length > 0) {
+                        root.suggestionIndex = (root.suggestionIndex + 1) % root.suggestions.length
+                        event.accepted = true
+                    } else if (event.key === Qt.Key_Up) {
                         commandField.text = root.controller.historyUp(commandField.text)
                         commandField.cursorPosition = commandField.text.length
                         event.accepted = true
@@ -205,7 +265,12 @@ Item {
                         event.accepted = true
                     }
                 }
+                onTextChanged: if (!root.applyingCompletion) root.suggestions = []
                 onAccepted: {
+                    if (root.suggestions.length > 0) {
+                        root.chooseSuggestion(root.suggestionIndex)
+                        return
+                    }
                     const submitted = text
                     clear()
                     root.controller.submit(submitted)
@@ -220,6 +285,29 @@ Item {
                     root.controller.submit(submitted)
                     root.focusInput()
                 }
+            }
+        }
+
+        ListView {
+            id: suggestionList
+            Layout.fillWidth: true
+            Layout.preferredHeight: root.suggestions.length > 0
+                                   ? Math.min(root.suggestions.length, 5) * 38 : 0
+            visible: root.suggestions.length > 0
+            model: root.suggestions
+            clip: true
+            boundsBehavior: Flickable.StopAtBounds
+            Accessible.name: qsTr("Command completion suggestions")
+            delegate: ItemDelegate {
+                required property var modelData
+                required property int index
+                width: suggestionList.width
+                height: 38
+                highlighted: index === root.suggestionIndex
+                text: modelData.text
+                Accessible.name: qsTr("Suggestion: %1").arg(modelData.text)
+                onHoveredChanged: if (hovered) root.suggestionIndex = index
+                onClicked: root.chooseSuggestion(index)
             }
         }
 
