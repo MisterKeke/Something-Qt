@@ -3,6 +3,7 @@
 #include "../application/application_service_graph.h"
 #include "../domain/clock.h"
 #include "../models/tasks_model.h"
+#include "../services/application_mutation_workflow.h"
 
 #include <QHash>
 #include <QDate>
@@ -35,6 +36,7 @@ class TasksController final : public QObject {
 public:
     explicit TasksController(application::ApplicationServiceGraph *graph,
                              const domain::Clock *clock,
+                             services::ApplicationMutationWorkflow *mutations,
                              QObject *parent = nullptr);
 
     models::TasksModel *model() noexcept { return &m_model; }
@@ -79,6 +81,7 @@ signals:
     void conflictTaskLoaded(const QVariantMap &task);
     void notificationChanged();
     void taskMutationCommitted(qint64 taskId, const QVariantMap &currentTask, bool deleted);
+    void taskMutationMayHaveCommitted();
 
 private:
     enum class Action { List, Create, Update, Complete, Priority, Subtask, Delete, ReloadConflict };
@@ -90,6 +93,8 @@ private:
     void onStorageFinished(quint64 operationId, const QVariantMap &values,
                            domain::AppError error);
     void onLifecycleChanged(application::ApplicationLifecycle::State state);
+    void onSharedMutationFinished(const services::MutationResult &result);
+    void onSharedTaskCommitted(const QString &requestId, const QVariantMap &task, bool created);
     storage::TaskFilter currentFilter() const;
     storage::TaskInput taskInput(const QVariantMap &draft) const;
     QStringList stringList(const QVariant &value) const;
@@ -103,6 +108,7 @@ private:
                              qint64 revision, bool completed);
 
     application::ApplicationServiceGraph *m_graph{nullptr};
+    services::ApplicationMutationWorkflow *m_mutations{nullptr};
     const domain::Clock *m_clock{nullptr};
     models::TasksModel m_model;
     QTimer m_filterTimer;
@@ -110,6 +116,7 @@ private:
     QDate m_observedLocalDate;
     QVariantMap m_filters;
     QHash<quint64, PendingAction> m_pending;
+    QHash<QString, PendingAction> m_sharedPending;
     quint64 m_listOperationId{0};
     qint64 m_conflictTaskId{0};
     int m_pageSize{50};
@@ -124,6 +131,7 @@ private:
     bool m_conflictReloadAvailable{false};
     bool m_hasMore{false};
     bool m_reconcileNextList{false};
+    bool m_externalMutationWhileHidden{false};
     QString m_errorMessage;
     QString m_editorErrorMessage;
     QString m_conflictReloadMessage;

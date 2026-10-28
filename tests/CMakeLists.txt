@@ -1,3 +1,100 @@
+add_executable(SomethingQtApplicationCommandTests
+    application_command_test.cpp
+    ../src/controllers/tasks_controller.cpp
+    ../src/controllers/terminal_controller.cpp
+    ../src/models/tasks_model.cpp
+    ../src/models/terminal_output_model.cpp
+    ../src/application/application_lifecycle.cpp
+    ../src/application/application_service_graph.cpp
+    ../src/application/capability_registry.cpp
+    ../src/application/command_parser.cpp
+    ../src/application/command_completion.cpp
+    ../src/application/command_registry.cpp
+    ../src/application/operation_coordinator.cpp
+    ../src/domain/app_error.cpp
+    ../src/domain/task_date_rules.cpp
+    ../src/domain/task_rules.cpp
+    ../src/platform/profile_instance_lock.cpp
+    ../src/providers/network_worker.cpp
+    ../src/providers/provider_policy.cpp
+    ../src/providers/provider_response_cache.cpp
+    ../src/services/application_command_service.cpp
+    ../src/services/application_mutation_workflow.cpp
+    ../src/services/preferences_service.cpp
+    ../src/services/bounded_worker_pool.cpp
+    ../src/services/task_service.cpp
+    ../src/services/wallpaper_service.cpp
+    ../src/services/wallpaper_asset_store.cpp
+    ../src/services/favorites_service.cpp
+    ../src/services/desktop_applications_service.cpp
+    ../src/services/setups_service.cpp
+    ../src/services/setup_icon_store.cpp
+    ../src/domain/favorite_rules.cpp
+    ../src/domain/desktop_application_rules.cpp
+    ../src/providers/provider_parsers.cpp
+    ../src/application/route_catalog.cpp
+    ../src/storage/repositories.cpp
+    ../src/storage/schema_migrator.cpp
+    ../src/storage/storage_worker.cpp
+)
+target_include_directories(SomethingQtApplicationCommandTests PRIVATE ../src)
+target_link_libraries(SomethingQtApplicationCommandTests PRIVATE
+    Qt6::Core Qt6::Gui Qt6::Network Qt6::Sql Qt6::Test lexbor_static)
+add_test(NAME SomethingQtApplicationCommandTests COMMAND SomethingQtApplicationCommandTests
+    -o "${CMAKE_CURRENT_BINARY_DIR}/application-command-results.txt,txt")
+
+add_executable(SomethingQtTerminalOutputTests
+    terminal_output_model_test.cpp
+    ../src/models/terminal_output_model.cpp
+)
+target_include_directories(SomethingQtTerminalOutputTests PRIVATE ../src)
+target_link_libraries(SomethingQtTerminalOutputTests PRIVATE Qt6::Core Qt6::Test)
+add_test(NAME SomethingQtTerminalOutputTests COMMAND SomethingQtTerminalOutputTests
+    -o "${CMAKE_CURRENT_BINARY_DIR}/terminal-output-results.txt,txt")
+
+add_executable(SomethingQtConsolePhaseThreeTests
+    console_phase_three_test.cpp
+    ../src/application/application_lifecycle.cpp
+    ../src/application/application_service_graph.cpp
+    ../src/application/capability_registry.cpp
+    ../src/application/command_parser.cpp
+    ../src/application/command_completion.cpp
+    ../src/application/command_registry.cpp
+    ../src/application/operation_coordinator.cpp
+    ../src/application/route_catalog.cpp
+    ../src/domain/app_error.cpp
+    ../src/domain/desktop_application_rules.cpp
+    ../src/domain/favorite_rules.cpp
+    ../src/domain/task_date_rules.cpp
+    ../src/domain/task_rules.cpp
+    ../src/platform/profile_instance_lock.cpp
+    ../src/providers/network_worker.cpp
+    ../src/providers/provider_policy.cpp
+    ../src/providers/provider_response_cache.cpp
+    ../src/providers/provider_parsers.cpp
+    ../src/services/application_command_service.cpp
+    ../src/services/application_mutation_workflow.cpp
+    ../src/services/preferences_service.cpp
+    ../src/services/bounded_worker_pool.cpp
+    ../src/services/task_service.cpp
+    ../src/services/wallpaper_service.cpp
+    ../src/services/wallpaper_asset_store.cpp
+    ../src/services/favorites_service.cpp
+    ../src/services/desktop_applications_service.cpp
+    ../src/services/setups_service.cpp
+    ../src/services/setup_icon_store.cpp
+    ../src/storage/repositories.cpp
+    ../src/storage/schema_migrator.cpp
+    ../src/storage/storage_worker.cpp
+)
+target_include_directories(SomethingQtConsolePhaseThreeTests PRIVATE ../src)
+target_link_libraries(SomethingQtConsolePhaseThreeTests PRIVATE
+    Qt6::Core Qt6::Gui Qt6::Network Qt6::Sql Qt6::Test lexbor_static)
+add_test(NAME SomethingQtConsolePhaseThreeTests COMMAND SomethingQtConsolePhaseThreeTests
+    -o "${CMAKE_CURRENT_BINARY_DIR}/console-phase-three-results.txt,txt")
+set_tests_properties(SomethingQtApplicationCommandTests SomethingQtTerminalOutputTests
+    SomethingQtConsolePhaseThreeTests PROPERTIES TIMEOUT 60)
+
 add_executable(SomethingQtLifecycleTests
     lifecycle_error_test.cpp
     ../src/application/application_lifecycle.cpp

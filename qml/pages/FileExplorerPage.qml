@@ -17,7 +17,8 @@ Item {
     readonly property bool showType: width >= 680
     readonly property bool showModified: width >= 900
     implicitHeight: Math.max(660, viewportHeight)
-    Component.onCompleted: controller.setPageVisible(true)
+    Component.onCompleted: controller.setPageVisible(visible)
+    onVisibleChanged: if (controller) controller.setPageVisible(visible)
     Component.onDestruction: controller.setPageVisible(false)
     function captureViewState() { return { scrollY: entryList.contentY } }
     function restoreViewState(state) { Qt.callLater(function() { entryList.contentY = Number(state.scrollY || 0) }) }

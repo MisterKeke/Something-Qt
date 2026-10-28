@@ -22,6 +22,7 @@ class WallpaperController final : public QObject {
     Q_PROPERTY(QString selectedWallpaper READ selectedWallpaper NOTIFY selectedWallpaperChanged)
     Q_PROPERTY(QString wallpaperImageSource READ wallpaperImageSource NOTIFY selectedWallpaperChanged)
     Q_PROPERTY(bool ready READ ready NOTIFY readyChanged)
+    Q_PROPERTY(bool catalogLoaded READ catalogLoaded NOTIFY wallpapersChanged)
     Q_PROPERTY(bool busy READ busy NOTIFY busyChanged)
     Q_PROPERTY(QString errorMessage READ errorMessage NOTIFY errorMessageChanged)
     Q_PROPERTY(QString notification READ notification NOTIFY notificationChanged)
@@ -35,6 +36,7 @@ public:
     QString selectedWallpaper() const { return m_selectedWallpaper; }
     QString wallpaperImageSource() const { return m_wallpaperImageSource; }
     bool ready() const noexcept { return m_ready; }
+    bool catalogLoaded() const noexcept { return m_catalogLoaded; }
     bool busy() const noexcept { return m_busy; }
     QString errorMessage() const { return m_errorMessage; }
     QString notification() const { return m_notification; }
@@ -87,6 +89,7 @@ private:
     QVector<storage::Wallpaper> m_customWallpapers;
     QFileSystemWatcher m_assetWatcher;
     bool m_ready{false};
+    bool m_catalogLoaded{false};
     bool m_busy{false};
 };
 

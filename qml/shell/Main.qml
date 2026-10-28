@@ -57,38 +57,55 @@ ApplicationWindow {
     property string currentRoute: "dashboard"
     property bool pageActive: true
     property var routeState: ({})
-    readonly property var routeTitles: ({
-        dashboard: qsTr("Main Page"),
-        calendar: qsTr("Calendar"),
-        tasks: qsTr("Tasks"),
-        telegram: qsTr("Telegram"),
-        youtube: qsTr("YouTube"),
-        weather: qsTr("Weather"),
-        currencies: qsTr("Currencies"),
-        applications: qsTr("Saved applications"),
-        runningApplications: qsTr("Running applications"),
-        setups: qsTr("Setups"),
-        fileExplorer: qsTr("File Explorer"),
-        steam: qsTr("Steam tracking"),
-        settings: qsTr("Settings")
-    })
-    readonly property var navigationItems: [
-        { id: "calendar", title: qsTr("Calendar"), glyph: "▦", asset: "" },
-        { id: "tasks", title: qsTr("Tasks"), glyph: "✓", asset: "qrc:/something/assets/navigation/todo-yelan.png" },
-        { id: "telegram", title: qsTr("Telegram"), glyph: "➤", asset: "qrc:/something/assets/navigation/telegram-varka.png" },
-        { id: "youtube", title: qsTr("YouTube"), glyph: "▶", asset: "qrc:/something/assets/navigation/youtube-charlotte.png" },
-        { id: "weather", title: qsTr("Weather"), glyph: "☼", asset: "qrc:/something/assets/navigation/weather-lisa.png" },
-        { id: "currencies", title: qsTr("Currencies"), glyph: "¤", asset: "qrc:/something/assets/navigation/currency-zhongli.png" },
-        { id: "applications", title: qsTr("Saved applications"), glyph: "▣", asset: "qrc:/something/assets/navigation/apps-furina.png" },
-        { id: "runningApplications", title: qsTr("Running apps"), glyph: "↗", asset: "" },
-        { id: "setups", title: qsTr("Setups"), glyph: "▱", asset: "qrc:/something/assets/navigation/setups-layers.svg" },
-        { id: "fileExplorer", title: qsTr("File Explorer"), glyph: "▰", asset: "qrc:/something/assets/navigation/file-explorer-aino.png" },
-        { id: "steam", title: qsTr("Steam tracking"), glyph: "◉", asset: "qrc:/something/assets/navigation/games-controller.svg" },
-        { id: "settings", title: qsTr("Settings"), glyph: "⚙", asset: "qrc:/something/assets/navigation/settings-sandrone.png" }
-    ]
+    readonly property var routeTitles: routeCatalog.routeTitles
+    readonly property var navigationItems: routeCatalog.navigationItems
+
+    function focusCurrentTab() {
+        Qt.callLater(function() {
+            if (workspaceTabs.currentIndex === 1)
+                terminalPage.focusInput()
+            else if (window.currentRoute === "dashboard" && pageLoader.item
+                     && typeof pageLoader.item.restoreShellFocus === "function")
+                pageLoader.item.restoreShellFocus()
+            else if (window.currentRoute !== "dashboard")
+                pageNavigationSelector.forceActiveFocus()
+            else
+                mainTabButton.forceActiveFocus()
+        })
+    }
+
+    function shortcutIsBlocked() {
+        if (legacyDataImportController.importActive || setupLaunchResult.visible)
+            return true
+        let item = window.activeFocusItem
+        let remaining = 32
+        let insideWindowContent = false
+        while (item && remaining-- > 0) {
+            if (item === window.contentItem) insideWindowContent = true
+            if (item.modal === true && item.visible !== false)
+                return true
+            if (item.inputMethodComposing !== undefined
+                    || item.maximumLength !== undefined
+                    || item.editable === true)
+                return true
+            item = item.parent
+        }
+        if (window.activeFocusItem && !insideWindowContent)
+            return true
+        return false
+    }
 
     function navigateTo(routeId) {
-        if (!routeTitles[routeId] || routeId === currentRoute)
+        if (!routeTitles[routeId])
+            return
+        if (routeId === "terminal") {
+            workspaceTabs.currentIndex = 1
+            focusCurrentTab()
+            return
+        }
+
+        workspaceTabs.currentIndex = 0
+        if (routeId === currentRoute)
             return
 
         if (pageLoader.item && typeof pageLoader.item.captureViewState === "function") {
@@ -229,120 +246,222 @@ ApplicationWindow {
         }
     }
 
-    ScrollView {
-        id: shellScroll
+    ColumnLayout {
         anchors.fill: parent
-        clip: true
-        contentWidth: availableWidth
-        ScrollBar.vertical.policy: ScrollBar.AsNeeded
-        ColumnLayout {
-            width: shellScroll.availableWidth
-            spacing: 18
-            RowLayout {
-                visible: window.currentRoute !== "dashboard"
-                Layout.fillWidth: true
-                Layout.leftMargin: 24
-                Layout.rightMargin: 24
-                Layout.topMargin: 18
-                spacing: 12
-                Shared.AppButton {
-                    text: qsTr("‹ Main Page")
-                    quiet: true
-                    onClicked: window.navigateTo("dashboard")
+        spacing: 0
+
+        TabBar {
+            id: workspaceTabs
+            Layout.fillWidth: true
+            Layout.leftMargin: 24
+            Layout.rightMargin: 24
+            Layout.topMargin: 12
+            Layout.bottomMargin: 6
+            spacing: 8
+            onCurrentIndexChanged: window.focusCurrentTab()
+            background: Rectangle { color: "transparent" }
+
+            TabButton {
+                id: mainTabButton
+                text: qsTr("Main Page")
+                width: Math.max(140, implicitWidth)
+                font.family: ThemeModule.Theme.displayFont
+                font.weight: Font.DemiBold
+                contentItem: Label {
+                    text: mainTabButton.text
+                    font: mainTabButton.font
+                    color: mainTabButton.checked ? ThemeModule.Theme.text : ThemeModule.Theme.textDim
+                    horizontalAlignment: Text.AlignHCenter
+                    verticalAlignment: Text.AlignVCenter
                 }
-                Shared.AppComboBox {
-                    Layout.preferredWidth: 220
-                    model: window.navigationItems
-                    textRole: "title"
-                    valueRole: "id"
-                    currentIndex: {
-                        for (let i = 0; i < window.navigationItems.length; ++i)
-                            if (window.navigationItems[i].id === window.currentRoute) return i
-                        return -1
-                    }
-                    Accessible.name: qsTr("Navigate to a page")
-                    onActivated: window.navigateTo(currentValue)
-                }
-                Item { Layout.fillWidth: true }
-                Shared.StatusBadge {
-                    text: appController.lifecycleState === "running" ? qsTr("Ready") : qsTr("Starting")
-                    badgeColor: appController.lifecycleState === "running" ? ThemeModule.Theme.success : ThemeModule.Theme.warning
-                }
-                Shared.AppButton {
-                    visible: setupsController.launching
-                    text: qsTr("Stop setup")
-                    quiet: true
-                    onClicked: setupsController.cancelLaunch()
+                background: Rectangle {
+                    implicitHeight: 42
+                    radius: 10
+                    color: mainTabButton.checked ? ThemeModule.Theme.panelAlt : ThemeModule.Theme.panel
+                    border.color: mainTabButton.activeFocus ? ThemeModule.Theme.cyan
+                                  : mainTabButton.checked ? ThemeModule.Theme.accent : ThemeModule.Theme.border
                 }
             }
-            ColumnLayout {
-                visible: window.currentRoute !== "dashboard"
-                Layout.fillWidth: true
-                Layout.leftMargin: 24
-                Layout.rightMargin: 24
-                spacing: 4
-                Label {
-                    text: window.routeTitles[window.currentRoute] || qsTr("Something")
-                    color: ThemeModule.Theme.text
-                    font.family: ThemeModule.Theme.displayFont
-                    font.pixelSize: 30
-                    font.bold: true
+            TabButton {
+                id: consoleTabButton
+                text: qsTr("Console")
+                width: Math.max(140, implicitWidth)
+                font.family: ThemeModule.Theme.displayFont
+                font.weight: Font.DemiBold
+                contentItem: Label {
+                    text: consoleTabButton.text
+                    font: consoleTabButton.font
+                    color: consoleTabButton.checked ? ThemeModule.Theme.text : ThemeModule.Theme.textDim
+                    horizontalAlignment: Text.AlignHCenter
+                    verticalAlignment: Text.AlignVCenter
                 }
-                Label {
-                    Layout.fillWidth: true
-                    text: window.currentRoute === "fileExplorer" ? qsTr("Your drives, folders, and files in one place")
-                        : window.currentRoute === "tasks" ? qsTr("Search, plan, and track task completion")
-                        : window.currentRoute === "calendar" ? qsTr("Your schedule at a glance")
-                        : window.currentRoute === "weather" ? qsTr("Your local forecast and city weather")
-                        : window.currentRoute === "currencies" ? qsTr("Rates, conversions, and favorite pairs")
-                        : window.currentRoute === "setups" ? qsTr("Launch your saved application groups")
-                        : window.currentRoute === "applications" ? qsTr("Your favorite desktop applications") : ""
-                    visible: text.length > 0
-                    color: ThemeModule.Theme.textDim
-                    font.pixelSize: 13
-                    wrapMode: Text.Wrap
+                background: Rectangle {
+                    implicitHeight: 42
+                    radius: 10
+                    color: consoleTabButton.checked ? ThemeModule.Theme.panelAlt : ThemeModule.Theme.panel
+                    border.color: consoleTabButton.activeFocus ? ThemeModule.Theme.cyan
+                                  : consoleTabButton.checked ? ThemeModule.Theme.accent : ThemeModule.Theme.border
                 }
             }
-            Shared.AppCard {
-                Layout.fillWidth: true
-                Layout.leftMargin: 24
-                Layout.rightMargin: 24
-                visible: appController.startupErrorMessage.length > 0
+        }
+
+        StackLayout {
+            Layout.fillWidth: true
+            Layout.fillHeight: true
+            currentIndex: workspaceTabs.currentIndex
+
+            ScrollView {
+                id: shellScroll
+                clip: true
+                contentWidth: availableWidth
+                ScrollBar.vertical.policy: ScrollBar.AsNeeded
                 ColumnLayout {
-                    width: parent.width
-                    Label { text: qsTr("Startup could not complete"); color: ThemeModule.Theme.error; font.bold: true }
-                    Label { Layout.fillWidth: true; text: appController.startupErrorMessage; color: ThemeModule.Theme.textDim; wrapMode: Text.Wrap }
+                    width: shellScroll.availableWidth
+                    spacing: 18
+                    RowLayout {
+                        visible: window.currentRoute !== "dashboard"
+                        Layout.fillWidth: true
+                        Layout.leftMargin: 24
+                        Layout.rightMargin: 24
+                        Layout.topMargin: 18
+                        spacing: 12
+                        Shared.AppButton {
+                            text: qsTr("‹ Main Page")
+                            quiet: true
+                            onClicked: window.navigateTo("dashboard")
+                        }
+                        Shared.AppComboBox {
+                            id: pageNavigationSelector
+                            Layout.preferredWidth: 220
+                            model: window.navigationItems
+                            textRole: "title"
+                            valueRole: "id"
+                            currentIndex: {
+                                for (let i = 0; i < window.navigationItems.length; ++i)
+                                    if (window.navigationItems[i].id === window.currentRoute) return i
+                                return -1
+                            }
+                            Accessible.name: qsTr("Navigate to a page")
+                            onActivated: window.navigateTo(currentValue)
+                        }
+                        Item { Layout.fillWidth: true }
+                        Shared.StatusBadge {
+                            text: appController.lifecycleState === "running" ? qsTr("Ready") : qsTr("Starting")
+                            badgeColor: appController.lifecycleState === "running" ? ThemeModule.Theme.success : ThemeModule.Theme.warning
+                        }
+                        Shared.AppButton {
+                            visible: setupsController.launching
+                            text: qsTr("Stop setup")
+                            quiet: true
+                            onClicked: setupsController.cancelLaunch()
+                        }
+                    }
+                    ColumnLayout {
+                        visible: window.currentRoute !== "dashboard"
+                        Layout.fillWidth: true
+                        Layout.leftMargin: 24
+                        Layout.rightMargin: 24
+                        spacing: 4
+                        Label {
+                            text: window.routeTitles[window.currentRoute] || qsTr("Something")
+                            color: ThemeModule.Theme.text
+                            font.family: ThemeModule.Theme.displayFont
+                            font.pixelSize: 30
+                            font.bold: true
+                        }
+                        Label {
+                            Layout.fillWidth: true
+                            text: window.currentRoute === "fileExplorer" ? qsTr("Your drives, folders, and files in one place")
+                                : window.currentRoute === "tasks" ? qsTr("Search, plan, and track task completion")
+                                : window.currentRoute === "calendar" ? qsTr("Your schedule at a glance")
+                                : window.currentRoute === "weather" ? qsTr("Your local forecast and city weather")
+                                : window.currentRoute === "currencies" ? qsTr("Rates, conversions, and favorite pairs")
+                                : window.currentRoute === "setups" ? qsTr("Launch your saved application groups")
+                                : window.currentRoute === "applications" ? qsTr("Your favorite desktop applications")
+                                : ""
+                            visible: text.length > 0
+                            color: ThemeModule.Theme.textDim
+                            font.pixelSize: 13
+                            wrapMode: Text.Wrap
+                        }
+                    }
+                    Shared.AppCard {
+                        Layout.fillWidth: true
+                        Layout.leftMargin: 24
+                        Layout.rightMargin: 24
+                        visible: appController.startupErrorMessage.length > 0
+                        ColumnLayout {
+                            width: parent.width
+                            Label { text: qsTr("Startup could not complete"); color: ThemeModule.Theme.error; font.bold: true }
+                            Label { Layout.fillWidth: true; text: appController.startupErrorMessage; color: ThemeModule.Theme.textDim; wrapMode: Text.Wrap }
+                        }
+                    }
+                    Loader {
+                        id: pageLoader
+                        Layout.fillWidth: true
+                        Layout.leftMargin: 24
+                        Layout.rightMargin: 24
+                        Layout.topMargin: window.currentRoute === "dashboard" ? 22 : 0
+                        Layout.bottomMargin: 28
+                        Layout.preferredHeight: item ? item.implicitHeight : 640
+                        active: window.pageActive
+                        asynchronous: true
+                        opacity: status === Loader.Ready ? 1 : 0
+                        Behavior on opacity { NumberAnimation { duration: ThemeModule.Theme.pageMotion; easing.type: Easing.OutCubic } }
+                        sourceComponent: window.currentRoute === "settings" ? wallpaperPageComponent
+                            : window.currentRoute === "tasks" ? tasksPageComponent
+                            : window.currentRoute === "calendar" ? calendarPageComponent
+                            : window.currentRoute === "dashboard" ? dashboardPageComponent
+                            : window.currentRoute === "weather" ? weatherPageComponent
+                            : window.currentRoute === "currencies" ? currenciesPageComponent
+                            : window.currentRoute === "applications" ? desktopApplicationsPageComponent
+                            : window.currentRoute === "runningApplications" ? runningApplicationsPageComponent
+                            : window.currentRoute === "setups" ? setupsPageComponent
+                            : window.currentRoute === "fileExplorer" ? fileExplorerPageComponent
+                            : window.currentRoute === "steam" ? steamPageComponent
+                            : (window.currentRoute === "telegram" || window.currentRoute === "youtube") ? favoritesPageComponent
+                            : dashboardPageComponent
+                        onLoaded: {
+                            if (item && typeof item.restoreViewState === "function")
+                                item.restoreViewState(window.routeState[window.currentRoute] || {})
+                            shellScroll.contentItem.contentY = Number(window.routeScrollPositions[window.currentRoute] || 0)
+                        }
+                    }
                 }
             }
-            Loader {
-                id: pageLoader
-                Layout.fillWidth: true
-                Layout.leftMargin: 24
-                Layout.rightMargin: 24
-                Layout.topMargin: window.currentRoute === "dashboard" ? 22 : 0
-                Layout.bottomMargin: 28
-                Layout.preferredHeight: item ? item.implicitHeight : 640
-                active: window.pageActive
-                asynchronous: true
-                opacity: status === Loader.Ready ? 1 : 0
-                Behavior on opacity { NumberAnimation { duration: ThemeModule.Theme.pageMotion; easing.type: Easing.OutCubic } }
-                sourceComponent: window.currentRoute === "settings" ? wallpaperPageComponent
-                    : window.currentRoute === "tasks" ? tasksPageComponent
-                    : window.currentRoute === "calendar" ? calendarPageComponent
-                    : window.currentRoute === "dashboard" ? dashboardPageComponent
-                    : window.currentRoute === "weather" ? weatherPageComponent
-                    : window.currentRoute === "currencies" ? currenciesPageComponent
-                    : window.currentRoute === "applications" ? desktopApplicationsPageComponent
-                    : window.currentRoute === "runningApplications" ? runningApplicationsPageComponent
-                    : window.currentRoute === "setups" ? setupsPageComponent
-                    : window.currentRoute === "fileExplorer" ? fileExplorerPageComponent
-                    : window.currentRoute === "steam" ? steamPageComponent
-                    : (window.currentRoute === "telegram" || window.currentRoute === "youtube") ? favoritesPageComponent
-                    : dashboardPageComponent
-                onLoaded: {
-                    if (item && typeof item.restoreViewState === "function")
-                        item.restoreViewState(window.routeState[window.currentRoute] || {})
-                    shellScroll.contentItem.contentY = Number(window.routeScrollPositions[window.currentRoute] || 0)
+
+            ScrollView {
+                id: consoleScroll
+                clip: true
+                contentWidth: availableWidth
+                ScrollBar.vertical.policy: ScrollBar.AsNeeded
+
+                ColumnLayout {
+                    width: consoleScroll.availableWidth
+                    spacing: 18
+                    Label {
+                        Layout.fillWidth: true
+                        Layout.leftMargin: 24
+                        Layout.rightMargin: 24
+                        Layout.topMargin: 18
+                        text: qsTr("Console")
+                        color: ThemeModule.Theme.text
+                        font.family: ThemeModule.Theme.displayFont
+                        font.pixelSize: 30
+                        font.bold: true
+                    }
+                    Pages.TerminalPage {
+                        id: terminalPage
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: implicitHeight
+                        Layout.leftMargin: 24
+                        Layout.rightMargin: 24
+                        Layout.bottomMargin: 28
+                        controller: terminalController
+                        returnRoute: window.currentRoute
+                        returnTitle: window.routeTitles[window.currentRoute] || qsTr("Main Page")
+                        onNavigateRequested: function(routeId) { window.navigateTo(routeId) }
+                    }
                 }
             }
         }
@@ -415,6 +534,18 @@ ApplicationWindow {
             Item { Layout.fillWidth: true }
             Shared.AppButton { text: qsTr("Close"); onClicked: setupLaunchResult.close() }
         }
+    }
+
+    Shortcut {
+        sequence: "Ctrl+`"
+        context: Qt.WindowShortcut
+        enabled: !window.shortcutIsBlocked()
+        onActivated: window.navigateTo("terminal")
+    }
+
+    Connections {
+        target: terminalController
+        function onRouteRequested(routeId) { window.navigateTo(routeId) }
     }
 
     Shared.NotificationToast {

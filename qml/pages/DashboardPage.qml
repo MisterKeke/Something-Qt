@@ -13,13 +13,22 @@ Item {
     readonly property int railWidth: width >= 1600 ? 280 : width >= 1300 ? 250 : 224
     signal navigateRequested(string routeId)
     implicitHeight: dashboardGrid.implicitHeight
+    function restoreShellFocus() {
+        Qt.callLater(function() {
+            if (root.visible) navigation.focusFirstItem()
+        })
+    }
     Component.onCompleted: {
-        controller.setPageVisible(true)
-        runningController.setDashboardVisible(true)
+        controller.setPageVisible(visible)
+        runningController.setDashboardVisible(visible)
     }
     Component.onDestruction: {
         controller.setPageVisible(false)
         runningController.setDashboardVisible(false)
+    }
+    onVisibleChanged: {
+        if (controller) controller.setPageVisible(visible)
+        if (runningController) runningController.setDashboardVisible(visible)
     }
     GridLayout {
         id: dashboardGrid
@@ -46,6 +55,7 @@ Item {
             Layout.alignment: Qt.AlignTop
             spacing: 18
             Shared.OrbitNavigation {
+                id: navigation
                 Layout.fillWidth: true
                 items: root.navigationItems
                 currentId: "dashboard"

@@ -16,6 +16,8 @@ Item {
     readonly property real orbitItemSize: routeCount > 0
         ? Math.max(60, Math.min(88, Math.floor(2 * Math.PI * orbitRadius / routeCount * 0.7)))
         : 64
+    readonly property real orbitButtonWidth: routeCount > 0
+        ? Math.min(124, 2 * orbitRadius * Math.sin(Math.PI / routeCount)) : 124
     readonly property int columns: width < 520 ? 3 : 4
     implicitHeight: compact
                      ? Math.ceil(routeCount / columns) * 86 + 100
@@ -23,12 +25,17 @@ Item {
 
     function spokeX(index) {
         const angle = -Math.PI / 2 + index * 2 * Math.PI / routeCount
-        return width / 2 + Math.cos(angle) * orbitRadius - 62
+        return width / 2 + Math.cos(angle) * orbitRadius - orbitButtonWidth / 2
     }
 
     function spokeY(index) {
         const angle = -Math.PI / 2 + index * 2 * Math.PI / routeCount
         return height / 2 + Math.sin(angle) * orbitRadius - 49
+    }
+
+    function focusFirstItem() {
+        const button = root.compact ? compactNavRepeater.itemAt(0) : orbitNavRepeater.itemAt(0)
+        if (button) button.forceActiveFocus()
     }
 
     Canvas {
@@ -70,6 +77,7 @@ Item {
     }
 
     Repeater {
+        id: orbitNavRepeater
         model: root.items
         delegate: Button {
             id: orbitButton
@@ -80,7 +88,7 @@ Item {
             visible: !root.compact
             x: root.spokeX(index)
             y: root.spokeY(index)
-            width: 124
+            width: root.orbitButtonWidth
             height: 104
             padding: 0
             hoverEnabled: true
@@ -235,6 +243,7 @@ Item {
     }
 
     Repeater {
+        id: compactNavRepeater
         model: root.items
         delegate: Button {
             id: compactNavButton

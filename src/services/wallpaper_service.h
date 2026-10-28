@@ -12,6 +12,7 @@ namespace something::services {
 
 class WallpaperService final {
 public:
+    static QVariantList builtInCatalog();
     static QString defaultSelection();
     static bool isBuiltInSelection(const QString &selection);
     static bool isCustomSelection(const QString &selection);

@@ -3,6 +3,7 @@
 #include "../services/preferences_service.h"
 
 #include <QThread>
+#include <QUuid>
 
 #include <utility>
 
@@ -10,12 +11,14 @@ namespace something::controllers {
 
 SettingsController::SettingsController(application::ApplicationServiceGraph *graph,
                                        const domain::Clock *clock,
+                                       services::ApplicationMutationWorkflow *mutations,
                                        QObject *parent)
     : QObject(parent)
     , m_graph(graph)
     , m_clock(clock)
+    , m_mutations(mutations)
 {
-    Q_ASSERT(m_graph && m_clock);
+    Q_ASSERT(m_graph && m_clock && m_mutations);
     Q_ASSERT(QThread::currentThread() == thread());
     m_localTimeZone = QString::fromUtf8(m_clock->localTimeZone().id());
     if (m_localTimeZone.isEmpty())
@@ -23,6 +26,10 @@ SettingsController::SettingsController(application::ApplicationServiceGraph *gra
 
     connect(m_graph, &application::ApplicationServiceGraph::storageOperationFinished,
             this, &SettingsController::onStorageFinished);
+    connect(m_mutations, &services::ApplicationMutationWorkflow::requestFinished,
+            this, &SettingsController::onSharedMutationFinished);
+    connect(m_mutations, &services::ApplicationMutationWorkflow::weekStartCommitted,
+            this, &SettingsController::onSharedWeekStartCommitted);
     connect(&m_graph->lifecycle(), &application::ApplicationLifecycle::stateChanged,
             this, &SettingsController::onLifecycleChanged);
     onLifecycleChanged(m_graph->lifecycle().state());
@@ -65,29 +72,62 @@ void SettingsController::reload()
 void SettingsController::setWeekStart(int sundayZero)
 {
     if (!m_ready || !m_loaded || m_saving || sundayZero < 0 || sundayZero > 6) {
-        if (sundayZero < 0 || sundayZero > 6) {
-            m_errorMessage = QStringLiteral("Choose a valid first day of the week.");
-            emit stateChanged();
-        }
+        m_errorMessage = sundayZero < 0 || sundayZero > 6
+            ? QStringLiteral("Choose a valid first day of the week.")
+            : QStringLiteral("Settings are not available right now.");
+        emit stateChanged();
         return;
     }
     if (sundayZero == m_weekStart) return;
     m_errorMessage.clear();
-    if (!submit(Action::SaveWeekStart,
-                services::PreferencesService::setWeekStart(sundayZero))) {
-        emit stateChanged();
-        return;
-    }
     m_saving = true;
+    const QString requestId = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    m_sharedPending.insert(requestId, true);
+    const auto admission = m_mutations->setWeekStart(requestId, sundayZero, [this] {
+        emit stateChanged();
+    });
+    if (!admission.accepted && m_sharedPending.remove(requestId) > 0) {
+        m_saving = false;
+        m_errorMessage = admission.message;
+    }
+    emit stateChanged();
+}
+
+void SettingsController::onSharedWeekStartCommitted(const QString &requestId, int sundayZero)
+{
+    Q_UNUSED(requestId);
+    if (sundayZero < 0 || sundayZero > 6) return;
+    m_loaded = true;
+    m_errorMessage.clear();
+    if (m_weekStart != sundayZero) {
+        m_weekStart = sundayZero;
+        emit weekStartChanged(sundayZero);
+    }
+    emit stateChanged();
+}
+
+void SettingsController::onSharedMutationFinished(const services::MutationResult &result)
+{
+    const bool guiRequest = m_sharedPending.remove(result.requestId) != 0;
+    if (guiRequest) {
+        m_saving = false;
+        m_errorMessage = result.state == QStringLiteral("succeeded") ? QString() : result.message;
+    }
+    if (result.kind == QStringLiteral("week-start")
+        && result.state == QStringLiteral("cancelled")) {
+        // The storage reply may be suppressed after a commit. Re-read the
+        // retained value to reconcile Settings and Dashboard without retrying.
+        m_saving = !m_sharedPending.isEmpty();
+        reload();
+        if (!guiRequest) emit stateChanged();
+    }
+    if (!guiRequest) return;
     emit stateChanged();
 }
 
 bool SettingsController::submit(Action action, storage::StorageCommand command)
 {
-    const auto operation = m_graph->beginOperation(
-        action == Action::LoadWeekStart
-            ? QStringLiteral("load retained settings")
-            : QStringLiteral("save task week-start preference"));
+    const auto operation = m_graph->beginOperation(QStringLiteral("load retained settings"));
     if (!operation.isValid()) {
         m_errorMessage = QStringLiteral("Settings are not available right now.");
         return false;
@@ -99,7 +139,7 @@ bool SettingsController::submit(Action action, storage::StorageCommand command)
     m_operationId = 0;
     m_graph->completeOperation(operation.id,
                                domain::AppError(domain::ErrorCategory::Busy));
-    m_errorMessage = QStringLiteral("Settings could not be saved. Try again.");
+    m_errorMessage = QStringLiteral("Settings could not be loaded. Try again.");
     return false;
 }
 
@@ -112,8 +152,7 @@ void SettingsController::onStorageFinished(quint64 operationId,
     const Action action = it.value();
     m_pending.erase(it);
     if (m_operationId == operationId) m_operationId = 0;
-    if (action == Action::LoadWeekStart) m_loading = false;
-    else m_saving = false;
+    m_loading = false;
 
     if (error.isError()) {
         m_errorMessage = error.userMessage();

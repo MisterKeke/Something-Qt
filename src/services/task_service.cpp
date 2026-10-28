@@ -75,6 +75,28 @@ storage::StorageCommand TaskService::calendarDate(QDate date)
     };
 }
 
+storage::StorageCommand TaskService::calendarDatePage(QDate date, int offset, int pageSize)
+{
+    return [date, offset, pageSize](storage::StorageRepositories &repositories,
+                                    const std::function<bool()> &cancelled) {
+        if (!date.isValid() || offset < 0 || offset > 50000000 || pageSize < 1 || pageSize > 100)
+            return errorReply(domain::AppError(domain::ErrorCategory::Validation));
+        storage::TaskFilter filter;
+        filter.dueDate = date.toString(Qt::ISODate);
+        filter.offset = offset;
+        filter.limit = pageSize + 1;
+        const auto result = queryTasks(repositories.tasks, cancelled, filter);
+        if (!result.succeeded()) return errorReply(result.error);
+        QVariantList rows = taskRows(result.value);
+        const bool hasMore = rows.size() > pageSize;
+        if (hasMore) rows.removeLast();
+        storage::StorageReply reply;
+        reply.values.insert(QStringLiteral("tasks"), rows);
+        reply.values.insert(QStringLiteral("hasMore"), hasMore);
+        return reply;
+    };
+}
+
 storage::StorageCommand TaskService::dashboardToday(QDate today,
                                                      bool includeOverdue,
                                                      bool includeUndated)
