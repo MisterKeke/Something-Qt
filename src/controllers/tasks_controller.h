@@ -81,6 +81,7 @@ signals:
     void conflictTaskLoaded(const QVariantMap &task);
     void notificationChanged();
     void taskMutationCommitted(qint64 taskId, const QVariantMap &currentTask, bool deleted);
+    void taskMutationMayHaveCommitted();
 
 private:
     enum class Action { List, Create, Update, Complete, Priority, Subtask, Delete, ReloadConflict };

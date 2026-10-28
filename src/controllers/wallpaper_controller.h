@@ -22,7 +22,7 @@ class WallpaperController final : public QObject {
     Q_PROPERTY(QString selectedWallpaper READ selectedWallpaper NOTIFY selectedWallpaperChanged)
     Q_PROPERTY(QString wallpaperImageSource READ wallpaperImageSource NOTIFY selectedWallpaperChanged)
     Q_PROPERTY(bool ready READ ready NOTIFY readyChanged)
-    Q_PROPERTY(bool catalogLoaded READ catalogLoaded NOTIFY stateChanged)
+    Q_PROPERTY(bool catalogLoaded READ catalogLoaded NOTIFY wallpapersChanged)
     Q_PROPERTY(bool busy READ busy NOTIFY busyChanged)
     Q_PROPERTY(QString errorMessage READ errorMessage NOTIFY errorMessageChanged)
     Q_PROPERTY(QString notification READ notification NOTIFY notificationChanged)

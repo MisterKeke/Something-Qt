@@ -103,6 +103,13 @@ void DashboardController::setWeekStart(int sundayZero)
     if (m_ready) loadWeek();
 }
 
+void DashboardController::refreshTaskSummaries()
+{
+    if (!m_ready) return;
+    loadToday();
+    loadWeek();
+}
+
 void DashboardController::onTaskMutation(qint64 taskId, const QVariantMap &currentTask,
                                           bool deleted)
 {

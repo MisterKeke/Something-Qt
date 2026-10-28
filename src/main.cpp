@@ -192,6 +192,10 @@ int main(int argc, char *argv[])
                      &calendarController, &something::controllers::CalendarController::onTaskMutation);
     QObject::connect(&tasksController, &something::controllers::TasksController::taskMutationCommitted,
                      &dashboardController, &something::controllers::DashboardController::onTaskMutation);
+    QObject::connect(&tasksController, &something::controllers::TasksController::taskMutationMayHaveCommitted,
+                     &calendarController, &something::controllers::CalendarController::refreshSelectedDate);
+    QObject::connect(&tasksController, &something::controllers::TasksController::taskMutationMayHaveCommitted,
+                     &dashboardController, &something::controllers::DashboardController::refreshTaskSummaries);
     QObject::connect(&favoritesController, &something::controllers::FavoritesController::newsChanged,
                      &dashboardController, &something::controllers::DashboardController::reloadFavoriteNews);
     QObject::connect(&settingsController, &something::controllers::SettingsController::weekStartChanged,

@@ -18,6 +18,9 @@ AppError normalizeTaskInput(TaskInput &input)
 {
     input.title = input.title.trimmed();
     input.description = input.description.trimmed();
+    // An omitted description is empty text, not SQL NULL. Both GUI and
+    // console callers may supply a default-constructed (null) QString.
+    if (input.description.isNull()) input.description = QStringLiteral("");
     input.dueDate = input.dueDate.trimmed();
     input.priority = input.priority.trimmed().toLower();
     if (input.priority.isEmpty()) input.priority = QStringLiteral("medium");

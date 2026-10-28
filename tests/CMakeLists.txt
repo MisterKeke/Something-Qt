@@ -1,7 +1,9 @@
 add_executable(SomethingQtApplicationCommandTests
     application_command_test.cpp
     ../src/controllers/tasks_controller.cpp
+    ../src/controllers/terminal_controller.cpp
     ../src/models/tasks_model.cpp
+    ../src/models/terminal_output_model.cpp
     ../src/application/application_lifecycle.cpp
     ../src/application/application_service_graph.cpp
     ../src/application/capability_registry.cpp
@@ -38,7 +40,17 @@ add_executable(SomethingQtApplicationCommandTests
 target_include_directories(SomethingQtApplicationCommandTests PRIVATE ../src)
 target_link_libraries(SomethingQtApplicationCommandTests PRIVATE
     Qt6::Core Qt6::Gui Qt6::Network Qt6::Sql Qt6::Test lexbor_static)
-add_test(NAME SomethingQtApplicationCommandTests COMMAND SomethingQtApplicationCommandTests)
+add_test(NAME SomethingQtApplicationCommandTests COMMAND SomethingQtApplicationCommandTests
+    -o "${CMAKE_CURRENT_BINARY_DIR}/application-command-results.txt,txt")
+
+add_executable(SomethingQtTerminalOutputTests
+    terminal_output_model_test.cpp
+    ../src/models/terminal_output_model.cpp
+)
+target_include_directories(SomethingQtTerminalOutputTests PRIVATE ../src)
+target_link_libraries(SomethingQtTerminalOutputTests PRIVATE Qt6::Core Qt6::Test)
+add_test(NAME SomethingQtTerminalOutputTests COMMAND SomethingQtTerminalOutputTests
+    -o "${CMAKE_CURRENT_BINARY_DIR}/terminal-output-results.txt,txt")
 
 add_executable(SomethingQtConsolePhaseThreeTests
     console_phase_three_test.cpp
@@ -78,7 +90,10 @@ add_executable(SomethingQtConsolePhaseThreeTests
 target_include_directories(SomethingQtConsolePhaseThreeTests PRIVATE ../src)
 target_link_libraries(SomethingQtConsolePhaseThreeTests PRIVATE
     Qt6::Core Qt6::Gui Qt6::Network Qt6::Sql Qt6::Test lexbor_static)
-add_test(NAME SomethingQtConsolePhaseThreeTests COMMAND SomethingQtConsolePhaseThreeTests)
+add_test(NAME SomethingQtConsolePhaseThreeTests COMMAND SomethingQtConsolePhaseThreeTests
+    -o "${CMAKE_CURRENT_BINARY_DIR}/console-phase-three-results.txt,txt")
+set_tests_properties(SomethingQtApplicationCommandTests SomethingQtTerminalOutputTests
+    SomethingQtConsolePhaseThreeTests PROPERTIES TIMEOUT 60)
 
 add_executable(SomethingQtLifecycleTests
     lifecycle_error_test.cpp

@@ -29,6 +29,7 @@ struct MutationAdmission final {
 class ApplicationMutationWorkflow final : public QObject {
     Q_OBJECT
 public:
+    static constexpr int MaximumPendingRequests = 8;
     explicit ApplicationMutationWorkflow(application::ApplicationServiceGraph *graph,
                                           QObject *parent = nullptr);
     MutationAdmission addTask(QString requestId, storage::TaskInput input,
@@ -49,7 +50,7 @@ private:
     MutationAdmission dispatch(QString requestId, QString kind,
                                storage::StorageCommand command,
                                std::function<void()> admitted);
-    void finish(const QString &requestId, QString state, domain::AppError error,
+    void finish(QString requestId, QString state, domain::AppError error,
                 const QVariantMap &values = {});
     void onStorageFinished(quint64 operationId, const QVariantMap &values,
                            domain::AppError error);

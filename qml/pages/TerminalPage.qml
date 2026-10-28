@@ -106,7 +106,8 @@ Item {
         function onCountChanged() {
             if (root.scrollAfterAppend) {
                 Qt.callLater(function() {
-                    root.scrollToNewest()
+                    if (root.followNewest)
+                        root.scrollToNewest()
                 })
             }
         }
@@ -194,7 +195,7 @@ Item {
                         required property string text
                         required property string kind
                         width: ListView.view.width - 10
-                        implicitHeight: outputText.implicitHeight + 14
+                        implicitHeight: outputText.implicitHeight + 16
                         radius: 7
                         color: kind === "normal" ? "#171a2a"
                              : kind === "pending" ? "#14252d"
@@ -206,12 +207,15 @@ Item {
                                     : kind === "error" ? "#704052"
                                     : kind === "warning" ? "#705a31" : "#202638"
 
-                        Text {
+                        TextEdit {
                             id: outputText
-                            anchors.fill: parent
+                            anchors.left: parent.left
+                            anchors.right: parent.right
+                            anchors.top: parent.top
                             anchors.margins: 8
                             text: outputRow.text
-                            textFormat: Text.PlainText
+                            textFormat: TextEdit.PlainText
+                            readOnly: true
                             color: outputRow.kind === "success" ? ThemeModule.Theme.success
                                  : outputRow.kind === "warning" ? ThemeModule.Theme.warning
                                  : outputRow.kind === "error" ? ThemeModule.Theme.error
@@ -220,7 +224,7 @@ Item {
                                  : ThemeModule.Theme.textDim
                             font.family: ThemeModule.Theme.bodyFont
                             font.pixelSize: 13
-                            wrapMode: Text.Wrap
+                            wrapMode: TextEdit.Wrap
                             selectByMouse: true
                             Accessible.name: text
                         }
@@ -240,7 +244,7 @@ Item {
                 selectByMouse: true
                 Keys.onPressed: function(event) {
                     if (event.key === Qt.Key_Tab) {
-                        if (root.requestCompletion()) event.accepted = true
+                        event.accepted = root.requestCompletion()
                     } else if ((event.key === Qt.Key_Return || event.key === Qt.Key_Enter)
                                && root.suggestions.length > 0) {
                         root.chooseSuggestion(root.suggestionIndex)
@@ -349,6 +353,4 @@ Item {
             }
         }
     }
-
-    Component.onCompleted: Qt.callLater(root.focusInput)
 }

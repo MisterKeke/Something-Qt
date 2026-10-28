@@ -108,9 +108,20 @@ void SettingsController::onSharedWeekStartCommitted(const QString &requestId, in
 
 void SettingsController::onSharedMutationFinished(const services::MutationResult &result)
 {
-    if (m_sharedPending.remove(result.requestId) == 0) return;
-    m_saving = false;
-    m_errorMessage = result.state == QStringLiteral("succeeded") ? QString() : result.message;
+    const bool guiRequest = m_sharedPending.remove(result.requestId) != 0;
+    if (guiRequest) {
+        m_saving = false;
+        m_errorMessage = result.state == QStringLiteral("succeeded") ? QString() : result.message;
+    }
+    if (result.kind == QStringLiteral("week-start")
+        && result.state == QStringLiteral("cancelled")) {
+        // The storage reply may be suppressed after a commit. Re-read the
+        // retained value to reconcile Settings and Dashboard without retrying.
+        m_saving = !m_sharedPending.isEmpty();
+        reload();
+        if (!guiRequest) emit stateChanged();
+    }
+    if (!guiRequest) return;
     emit stateChanged();
 }
 

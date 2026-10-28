@@ -11,10 +11,11 @@ Item {
     property var controller: taskController
     property var filterState: taskController.filters
     Component.onCompleted: {
-        controller.setPageVisible(true)
+        controller.setPageVisible(visible)
         refreshControls()
     }
     Component.onDestruction: controller.setPageVisible(false)
+    onVisibleChanged: if (controller) controller.setPageVisible(visible)
     readonly property var dateModes: [
         { label: qsTr("Any date"), value: "any" },
         { label: qsTr("Today"), value: "today" },

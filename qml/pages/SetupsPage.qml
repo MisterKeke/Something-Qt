@@ -79,7 +79,8 @@ Item {
         selectedApplicationIds = next
     }
 
-    Component.onCompleted: controller.setPageVisible(true)
+    Component.onCompleted: controller.setPageVisible(visible)
+    onVisibleChanged: if (controller) controller.setPageVisible(visible)
     Component.onDestruction: controller.setPageVisible(false)
 
     Connections {

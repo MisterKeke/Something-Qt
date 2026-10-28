@@ -14,15 +14,21 @@ Item {
     signal navigateRequested(string routeId)
     implicitHeight: dashboardGrid.implicitHeight
     function restoreShellFocus() {
-        Qt.callLater(function() { navigation.focusFirstItem() })
+        Qt.callLater(function() {
+            if (root.visible) navigation.focusFirstItem()
+        })
     }
     Component.onCompleted: {
-        controller.setPageVisible(true)
-        runningController.setDashboardVisible(true)
+        controller.setPageVisible(visible)
+        runningController.setDashboardVisible(visible)
     }
     Component.onDestruction: {
         controller.setPageVisible(false)
         runningController.setDashboardVisible(false)
+    }
+    onVisibleChanged: {
+        if (controller) controller.setPageVisible(visible)
+        if (runningController) runningController.setDashboardVisible(visible)
     }
     GridLayout {
         id: dashboardGrid

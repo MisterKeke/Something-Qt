@@ -83,7 +83,9 @@ void ConsolePhaseThreeTest::unavailableSteamSnapshotIsExplicit()
     });
     QSignalSpy finished(&service, &services::ApplicationCommandService::requestFinished);
     graph.start();
-    QTRY_COMPARE_WITH_TIMEOUT(graph.lifecycle().state(), application::ApplicationLifecycle::State::Running, 5000);
+    QTRY_VERIFY_WITH_TIMEOUT(graph.lifecycle().state() != application::ApplicationLifecycle::State::Starting, 5000);
+    QVERIFY2(graph.lifecycle().state() == application::ApplicationLifecycle::State::Running,
+             qPrintable(graph.lifecycle().startupError().userMessage()));
     const QString id = service.submit(QStringLiteral("steam list"));
     QCOMPARE(finished.size(), 1);
     const auto result = qvariant_cast<services::ConsoleRequestResult>(finished.constFirst().constFirst());
@@ -103,7 +105,9 @@ void ConsolePhaseThreeTest::freshTaskOutputIsBoundedAndErrorsAreSafe()
     QSignalSpy storageFinished(&graph, &application::ApplicationServiceGraph::storageOperationFinished);
     QSignalSpy commandFinished(&service, &services::ApplicationCommandService::requestFinished);
     graph.start();
-    QTRY_COMPARE_WITH_TIMEOUT(graph.lifecycle().state(), application::ApplicationLifecycle::State::Running, 5000);
+    QTRY_VERIFY_WITH_TIMEOUT(graph.lifecycle().state() != application::ApplicationLifecycle::State::Starting, 5000);
+    QVERIFY2(graph.lifecycle().state() == application::ApplicationLifecycle::State::Running,
+             qPrintable(graph.lifecycle().startupError().userMessage()));
 
     const auto seed = graph.beginOperation(QStringLiteral("console test fixture"));
     QVERIFY(seed.isValid());
@@ -121,6 +125,8 @@ void ConsolePhaseThreeTest::freshTaskOutputIsBoundedAndErrorsAreSafe()
         return reply;
     }));
     QTRY_COMPARE_WITH_TIMEOUT(storageFinished.size(), 1, 5000);
+    const auto seedError = qvariant_cast<domain::AppError>(storageFinished.constFirst().at(2));
+    QVERIFY2(!seedError.isError() && !seedError.isCancelled(), qPrintable(seedError.userMessage()));
 
     const QString listId = service.submit(QStringLiteral("task list --page 1"));
     QTRY_COMPARE_WITH_TIMEOUT(commandFinished.size(), 1, 5000);

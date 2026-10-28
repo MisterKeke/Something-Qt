@@ -64,6 +64,23 @@ application::CommandExecution pagedStorage(storage::StorageCommand command,
     return execution;
 }
 
+QString errorCodeFor(domain::ErrorCategory category)
+{
+    using domain::ErrorCategory;
+    switch (category) {
+    case ErrorCategory::Validation: return QStringLiteral("validation");
+    case ErrorCategory::NotFound: return QStringLiteral("not-found");
+    case ErrorCategory::Conflict: return QStringLiteral("conflict");
+    case ErrorCategory::Cancelled: return QStringLiteral("cancelled");
+    case ErrorCategory::Busy: return QStringLiteral("busy");
+    case ErrorCategory::CapabilityUnavailable: return QStringLiteral("unavailable");
+    case ErrorCategory::Startup: return QStringLiteral("starting");
+    case ErrorCategory::Storage: return QStringLiteral("storage");
+    case ErrorCategory::None: return {};
+    default: return QStringLiteral("operation-failed");
+    }
+}
+
 } // namespace
 
 ApplicationCommandService::ApplicationCommandService(
@@ -235,11 +252,23 @@ void ApplicationCommandService::registerBuiltins()
             QStringList values;
             if (complete.isEmpty()) values = {QStringLiteral("list"), QStringLiteral("show"),
                                               QStringLiteral("add"), QStringLiteral("complete")};
-            else if (complete.first() == QStringLiteral("add")) {
-                if (!complete.contains(QStringLiteral("--priority"))) values << QStringLiteral("--priority");
-                if (!complete.contains(QStringLiteral("--due"))) values << QStringLiteral("--due");
-                if (complete.contains(QStringLiteral("--priority")))
-                    values << QStringLiteral("low") << QStringLiteral("medium") << QStringLiteral("high");
+            else if (complete.first() == QStringLiteral("add") && complete.size() >= 2) {
+                // The title occupies argument 1. Only later pairs are options;
+                // a title equal to an option name must remain ordinary text.
+                QSet<QString> usedOptions;
+                for (qsizetype i = 2; i < complete.size(); i += 2) {
+                    const QString option = complete.at(i);
+                    if ((option != QStringLiteral("--priority") && option != QStringLiteral("--due"))
+                        || usedOptions.contains(option)) return QStringList{};
+                    usedOptions.insert(option);
+                    if (i + 1 == complete.size()) {
+                        return option == QStringLiteral("--priority")
+                            ? QStringList{QStringLiteral("low"), QStringLiteral("medium"), QStringLiteral("high")}
+                            : QStringList{};
+                    }
+                }
+                if (!usedOptions.contains(QStringLiteral("--priority"))) values << QStringLiteral("--priority");
+                if (!usedOptions.contains(QStringLiteral("--due"))) values << QStringLiteral("--due");
             }
             values.removeAll(partial);
             return values;
@@ -348,7 +377,7 @@ void ApplicationCommandService::registerPhaseThreeCommands()
              return execution;
          }, [](const QStringList &complete, const QString &partial) {
              if (complete.isEmpty()) return QStringList{QStringLiteral("show"), QStringLiteral("week-start")};
-             if (complete.first() == QStringLiteral("week-start"))
+             if (complete == QStringList{QStringLiteral("week-start")})
                  return QStringList{QStringLiteral("0"), QStringLiteral("1"), QStringLiteral("2"),
                                     QStringLiteral("3"), QStringLiteral("4"), QStringLiteral("5"), QStringLiteral("6")};
              Q_UNUSED(partial);
@@ -508,11 +537,14 @@ QString ApplicationCommandService::submit(const QString &input)
         return requestId;
     };
     const auto parsed = application::CommandParser::parse(input);
-    if (!parsed.succeeded()) return reject({}, parsed.error);
-    if (parsed.tokens.isEmpty()) return reject({}, QStringLiteral("Enter a command."));
+    if (!parsed.succeeded()) return reject({}, parsed.error, QStringLiteral("syntax"));
+    if (parsed.tokens.isEmpty()) return reject({}, QStringLiteral("Enter a command."),
+                                               QStringLiteral("validation"));
     const QString commandName = parsed.tokens.constFirst();
     const auto *definition = m_registry.find(commandName);
-    if (!definition) return reject(commandName, QStringLiteral("Unknown command. Use 'help' to list registered commands."));
+    if (!definition) return reject(commandName,
+        QStringLiteral("Unknown command. Use 'help' to list registered commands."),
+        QStringLiteral("unknown-command"));
     const QStringList arguments = parsed.tokens.mid(1);
     const QString validationError = m_registry.validate(*definition, arguments);
     if (!validationError.isEmpty()) return reject(commandName, validationError, QStringLiteral("validation"));
@@ -527,18 +559,30 @@ QString ApplicationCommandService::submit(const QString &input)
             && arguments.first() == QStringLiteral("week-start"));
     if (queryCommand && !mutationCommand) {
         const QString unavailable = queryAvailabilityError();
-        if (!unavailable.isEmpty()) return reject(commandName, unavailable);
+        if (!unavailable.isEmpty()) {
+            QString code = QStringLiteral("unavailable");
+            if (m_graph->lifecycle().state() == application::ApplicationLifecycle::State::Starting)
+                code = QStringLiteral("starting");
+            else if (m_graph->isProfileMaintenance()) code = QStringLiteral("maintenance");
+            else if (m_graph->lifecycle().state() == application::ApplicationLifecycle::State::ShuttingDown
+                     || m_graph->lifecycle().state() == application::ApplicationLifecycle::State::Stopped)
+                code = QStringLiteral("shutdown");
+            return reject(commandName, unavailable, std::move(code));
+        }
     } else if (!mutationCommand && (m_graph->lifecycle().state() == application::ApplicationLifecycle::State::ShuttingDown
                || m_graph->lifecycle().state() == application::ApplicationLifecycle::State::Stopped)) {
-        return reject(commandName, QStringLiteral("The application is shutting down."));
+        return reject(commandName, QStringLiteral("The application is shutting down."),
+                      QStringLiteral("shutdown"));
     }
 
     const application::CommandExecution execution = definition->handler(arguments);
     const QString mutationKind = execution.data.value(QStringLiteral("mutationKind")).toString();
     if (!mutationKind.isEmpty()) {
-        if (!m_mutations) return reject(commandName, QStringLiteral("Application mutations are unavailable."));
+        if (!m_mutations) return reject(commandName, QStringLiteral("Application mutations are unavailable."),
+                                        QStringLiteral("unavailable"));
         if (m_pending.size() + m_mutationRequests.size() >= MaximumPendingRequests)
-            return reject(commandName, QStringLiteral("Console is busy; try again when a request finishes."));
+            return reject(commandName, QStringLiteral("Console is busy; try again when a request finishes."),
+                          QStringLiteral("busy"));
         m_mutationRequests.insert(requestId);
         m_mutationCommands.insert(requestId, commandName);
         const QVariantMap pendingData = execution.data;
@@ -592,13 +636,23 @@ QString ApplicationCommandService::submit(const QString &input)
         return requestId;
     }
     if (m_pending.size() + m_mutationRequests.size() >= MaximumPendingRequests)
-        return reject(commandName, QStringLiteral("Console is busy; try again when a request finishes."));
+        return reject(commandName, QStringLiteral("Console is busy; try again when a request finishes."),
+                      QStringLiteral("busy"));
 
     const auto operation = m_graph->beginOperation(QStringLiteral("console: ") + commandName);
     if (!operation.isValid()) {
         QString reason = availabilityError();
         if (reason.isEmpty()) reason = QStringLiteral("The application could not accept this request.");
-        return reject(commandName, std::move(reason));
+        QString code = QStringLiteral("busy");
+        if (m_graph->lifecycle().state() == application::ApplicationLifecycle::State::Starting)
+            code = QStringLiteral("starting");
+        else if (m_graph->isProfileMaintenance()) code = QStringLiteral("maintenance");
+        else if (m_graph->lifecycle().state() == application::ApplicationLifecycle::State::ShuttingDown
+                 || m_graph->lifecycle().state() == application::ApplicationLifecycle::State::Stopped)
+            code = QStringLiteral("shutdown");
+        else if (!m_graph->capabilities().isAvailable(QStringLiteral("local-storage")))
+            code = QStringLiteral("unavailable");
+        return reject(commandName, std::move(reason), std::move(code));
     }
     PendingRequest pending;
     pending.result = accepted;
@@ -665,11 +719,13 @@ void ApplicationCommandService::onStorageFinished(quint64 operationId,
     const auto pending = m_pending.constFind(requestId);
     if (pending == m_pending.cend()) return;
     if (error.isCancelled()) {
-        finish(requestId, QStringLiteral("cancelled"), QStringLiteral("Request cancelled."));
+        finish(requestId, QStringLiteral("cancelled"), QStringLiteral("Request cancelled."),
+               {{QStringLiteral("errorCode"), QStringLiteral("cancelled")}});
         return;
     }
     if (error.isError()) {
-        finish(requestId, QStringLiteral("failed"), error.userMessage());
+        finish(requestId, QStringLiteral("failed"), error.userMessage(),
+               {{QStringLiteral("errorCode"), errorCodeFor(error.category())}});
         return;
     }
     QVariantMap data = pending->result.data;
@@ -783,7 +839,8 @@ void ApplicationCommandService::onOperationFinished(
     if (state != application::OperationCoordinator::State::Cancelled) return;
     const auto requestIt = m_requestByOperation.constFind(operationId);
     if (requestIt != m_requestByOperation.cend())
-        finish(requestIt.value(), QStringLiteral("cancelled"), QStringLiteral("Request cancelled."));
+        finish(requestIt.value(), QStringLiteral("cancelled"), QStringLiteral("Request cancelled."),
+               {{QStringLiteral("errorCode"), QStringLiteral("cancelled")}});
 }
 
 } // namespace something::services

@@ -52,6 +52,7 @@ public:
 
 public slots:
     void setWeekStart(int sundayZero);
+    void refreshTaskSummaries();
 
     void onTaskMutation(qint64 taskId, const QVariantMap &currentTask, bool deleted);
 

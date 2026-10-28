@@ -493,6 +493,12 @@ void TasksController::onSharedTaskCommitted(const QString &requestId,
 void TasksController::onSharedMutationFinished(const services::MutationResult &result)
 {
     auto found = m_sharedPending.find(result.requestId);
+    if (result.state == QStringLiteral("cancelled")
+        && result.kind.startsWith(QStringLiteral("task-"))) {
+        emit taskMutationMayHaveCommitted();
+        if (m_pageVisible) refreshAfterMutation();
+        else m_externalMutationWhileHidden = true;
+    }
     if (found == m_sharedPending.end()) return;
     const PendingAction action = found.value();
     m_sharedPending.erase(found);

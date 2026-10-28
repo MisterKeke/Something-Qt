@@ -27,7 +27,7 @@ struct ConsoleRequestResult final {
 class ApplicationCommandService final : public QObject {
     Q_OBJECT
 public:
-    static constexpr int MaximumPendingRequests = 8;
+    static constexpr int MaximumPendingRequests = ApplicationMutationWorkflow::MaximumPendingRequests;
 
     explicit ApplicationCommandService(application::ApplicationServiceGraph *graph,
                                         QObject *parent = nullptr);

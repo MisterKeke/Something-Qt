@@ -55,7 +55,8 @@ QVariantList CommandRegistry::metadata() const
 QString CommandRegistry::validate(const CommandDefinition &definition,
                                  const QStringList &arguments) const
 {
-    if (!m_commands.contains(definition.name) || &m_commands[definition.name] != &definition)
+    const auto registered = m_commands.constFind(definition.name);
+    if (registered == m_commands.cend() || &registered.value() != &definition)
         return QStringLiteral("Command is not registered.");
     return definition.validateArguments(arguments);
 }

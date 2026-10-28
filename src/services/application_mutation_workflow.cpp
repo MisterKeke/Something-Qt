@@ -5,8 +5,6 @@
 #include "../application/operation_coordinator.h"
 #include "../domain/task_rules.h"
 
-#include <QUuid>
-
 namespace something::services {
 namespace {
 
@@ -76,6 +74,8 @@ MutationAdmission ApplicationMutationWorkflow::dispatch(
     QString requestId, QString kind, storage::StorageCommand command,
     std::function<void()> admitted)
 {
+    if (requestId.isEmpty())
+        return {false, QStringLiteral("validation"), QStringLiteral("A mutation request ID is required.")};
     using State = application::ApplicationLifecycle::State;
     const State state = m_graph->lifecycle().state();
     if (state == State::Starting)
@@ -88,9 +88,8 @@ MutationAdmission ApplicationMutationWorkflow::dispatch(
         return {false, QStringLiteral("maintenance"), QStringLiteral("Mutations are unavailable during profile maintenance.")};
     if (!m_graph->capabilities().isAvailable(QStringLiteral("local-storage")))
         return rejected(domain::AppError(domain::ErrorCategory::CapabilityUnavailable));
-    if (m_pending.size() >= 8)
+    if (m_pending.size() >= MaximumPendingRequests)
         return rejected(domain::AppError(domain::ErrorCategory::Busy));
-    if (requestId.isEmpty()) requestId = QUuid::createUuid().toString(QUuid::WithoutBraces);
     if (m_pending.contains(requestId))
         return rejected(domain::AppError(domain::ErrorCategory::Busy));
     const auto operation = m_graph->beginOperation(QStringLiteral("application mutation: ") + kind);
@@ -108,7 +107,7 @@ MutationAdmission ApplicationMutationWorkflow::dispatch(
     return {true, {}, {}};
 }
 
-void ApplicationMutationWorkflow::finish(const QString &requestId, QString state,
+void ApplicationMutationWorkflow::finish(QString requestId, QString state,
                                          domain::AppError error, const QVariantMap &values)
 {
     auto it = m_pending.find(requestId);
@@ -116,6 +115,7 @@ void ApplicationMutationWorkflow::finish(const QString &requestId, QString state
     it->final = true;
     const QString kind = it->kind;
     const quint64 operationId = it->operationId;
+    // Own the ID before removing the operation map: callers may pass its value.
     m_pending.erase(it);
     m_byOperation.remove(operationId);
 
