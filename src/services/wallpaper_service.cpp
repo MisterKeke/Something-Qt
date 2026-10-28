@@ -28,6 +28,32 @@ QString WallpaperService::defaultSelection()
     return defaultWallpaper;
 }
 
+QVariantList WallpaperService::builtInCatalog()
+{
+    return {
+        QVariantMap{{QStringLiteral("id"), QStringLiteral("builtin:original")},
+                    {QStringLiteral("label"), QStringLiteral("Original")},
+                    {QStringLiteral("description"), QStringLiteral("Midnight glow")},
+                    {QStringLiteral("imageSource"), QString()},
+                    {QStringLiteral("builtIn"), true}, {QStringLiteral("available"), true}},
+        QVariantMap{{QStringLiteral("id"), QStringLiteral("builtin:sandrone")},
+                    {QStringLiteral("label"), QStringLiteral("Sandrone")},
+                    {QStringLiteral("description"), QStringLiteral("Warm crimson")},
+                    {QStringLiteral("imageSource"), QStringLiteral("qrc:/something/assets/wallpapers/sandrone.jpg")},
+                    {QStringLiteral("builtIn"), true}, {QStringLiteral("available"), true}},
+        QVariantMap{{QStringLiteral("id"), QStringLiteral("builtin:hu-tao")},
+                    {QStringLiteral("label"), QStringLiteral("Hu Tao")},
+                    {QStringLiteral("description"), QStringLiteral("Dusky violet")},
+                    {QStringLiteral("imageSource"), QStringLiteral("qrc:/something/assets/wallpapers/hu-tao.jpg")},
+                    {QStringLiteral("builtIn"), true}, {QStringLiteral("available"), true}},
+        QVariantMap{{QStringLiteral("id"), QStringLiteral("builtin:skirk")},
+                    {QStringLiteral("label"), QStringLiteral("Skirk")},
+                    {QStringLiteral("description"), QStringLiteral("Deep ocean")},
+                    {QStringLiteral("imageSource"), QStringLiteral("qrc:/something/assets/wallpapers/skirk.jpg")},
+                    {QStringLiteral("builtIn"), true}, {QStringLiteral("available"), true}},
+    };
+}
+
 bool WallpaperService::isBuiltInSelection(const QString &selection)
 {
     return builtIns.contains(selection);

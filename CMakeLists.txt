@@ -63,6 +63,7 @@ qt_add_executable(SomethingQt WIN32
     src/application/application_service_graph.cpp
     src/application/command_parser.cpp
     src/application/command_registry.cpp
+    src/application/route_catalog.cpp
     src/application/capability_registry.cpp
     src/application/operation_coordinator.cpp
     src/controllers/application_controller.cpp
@@ -79,6 +80,7 @@ qt_add_executable(SomethingQt WIN32
     src/controllers/running_applications_controller.cpp
     src/controllers/settings_controller.cpp
     src/controllers/tasks_controller.cpp
+    src/controllers/terminal_controller.cpp
     src/controllers/wallpaper_controller.cpp
     src/controllers/weather_controller.cpp
     src/domain/app_error.cpp
@@ -126,6 +128,7 @@ qt_add_executable(SomethingQt WIN32
     src/storage/schema_migrator.cpp
     src/storage/storage_worker.cpp
     src/models/tasks_model.cpp
+    src/models/terminal_output_model.cpp
     src/models/calendar_months_model.cpp
     src/models/currency_rates_model.cpp
     src/models/dashboard_news_model.cpp
@@ -171,6 +174,7 @@ qt_add_qml_module(SomethingQt
         qml/pages/SetupsPage.qml
         qml/pages/SteamGamesPage.qml
         qml/pages/TasksPage.qml
+        qml/pages/TerminalPage.qml
         qml/pages/WeatherPage.qml
         qml/pages/WallpaperSettingsPage.qml
         qml/theme/Theme.qml

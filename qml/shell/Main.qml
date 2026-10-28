@@ -57,39 +57,43 @@ ApplicationWindow {
     property string currentRoute: "dashboard"
     property bool pageActive: true
     property var routeState: ({})
-    readonly property var routeTitles: ({
-        dashboard: qsTr("Main Page"),
-        calendar: qsTr("Calendar"),
-        tasks: qsTr("Tasks"),
-        telegram: qsTr("Telegram"),
-        youtube: qsTr("YouTube"),
-        weather: qsTr("Weather"),
-        currencies: qsTr("Currencies"),
-        applications: qsTr("Saved applications"),
-        runningApplications: qsTr("Running applications"),
-        setups: qsTr("Setups"),
-        fileExplorer: qsTr("File Explorer"),
-        steam: qsTr("Steam tracking"),
-        settings: qsTr("Settings")
-    })
-    readonly property var navigationItems: [
-        { id: "calendar", title: qsTr("Calendar"), glyph: "▦", asset: "" },
-        { id: "tasks", title: qsTr("Tasks"), glyph: "✓", asset: "qrc:/something/assets/navigation/todo-yelan.png" },
-        { id: "telegram", title: qsTr("Telegram"), glyph: "➤", asset: "qrc:/something/assets/navigation/telegram-varka.png" },
-        { id: "youtube", title: qsTr("YouTube"), glyph: "▶", asset: "qrc:/something/assets/navigation/youtube-charlotte.png" },
-        { id: "weather", title: qsTr("Weather"), glyph: "☼", asset: "qrc:/something/assets/navigation/weather-lisa.png" },
-        { id: "currencies", title: qsTr("Currencies"), glyph: "¤", asset: "qrc:/something/assets/navigation/currency-zhongli.png" },
-        { id: "applications", title: qsTr("Saved applications"), glyph: "▣", asset: "qrc:/something/assets/navigation/apps-furina.png" },
-        { id: "runningApplications", title: qsTr("Running apps"), glyph: "↗", asset: "" },
-        { id: "setups", title: qsTr("Setups"), glyph: "▱", asset: "qrc:/something/assets/navigation/setups-layers.svg" },
-        { id: "fileExplorer", title: qsTr("File Explorer"), glyph: "▰", asset: "qrc:/something/assets/navigation/file-explorer-aino.png" },
-        { id: "steam", title: qsTr("Steam tracking"), glyph: "◉", asset: "qrc:/something/assets/navigation/games-controller.svg" },
-        { id: "settings", title: qsTr("Settings"), glyph: "⚙", asset: "qrc:/something/assets/navigation/settings-sandrone.png" }
-    ]
+    property string consoleOriginRoute: "dashboard"
+    property bool consoleOpenedByShortcut: false
+    property bool restoreShellFocusAfterConsole: false
+    readonly property var routeTitles: routeCatalog.routeTitles
+    readonly property var navigationItems: routeCatalog.navigationItems
+
+    function shortcutIsBlocked() {
+        if (legacyDataImportController.importActive || setupLaunchResult.visible)
+            return true
+        let item = window.activeFocusItem
+        let remaining = 32
+        let insideWindowContent = false
+        while (item && remaining-- > 0) {
+            if (item === window.contentItem) insideWindowContent = true
+            if (item.modal === true && item.visible !== false)
+                return true
+            if (item.inputMethodComposing !== undefined
+                    || item.maximumLength !== undefined
+                    || item.editable === true)
+                return true
+            item = item.parent
+        }
+        if (window.activeFocusItem && !insideWindowContent)
+            return true
+        return false
+    }
 
     function navigateTo(routeId) {
         if (!routeTitles[routeId] || routeId === currentRoute)
             return
+
+        if (currentRoute === "terminal" && routeId !== "terminal" && consoleOpenedByShortcut) {
+            restoreShellFocusAfterConsole = true
+            consoleOpenedByShortcut = false
+        }
+        if (routeId === "terminal" && currentRoute !== "terminal" && !consoleOpenedByShortcut)
+            consoleOriginRoute = currentRoute
 
         if (pageLoader.item && typeof pageLoader.item.captureViewState === "function") {
             const nextState = Object.assign({}, routeState)
@@ -183,6 +187,16 @@ ApplicationWindow {
         Pages.SteamGamesPage { controller: steamGamesController }
     }
 
+    Component {
+        id: terminalPageComponent
+        Pages.TerminalPage {
+            controller: terminalController
+            returnRoute: window.consoleOriginRoute
+            returnTitle: window.routeTitles[window.consoleOriginRoute] || qsTr("Main Page")
+            onNavigateRequested: function(routeId) { window.navigateTo(routeId) }
+        }
+    }
+
     background: Item {
         clip: true
 
@@ -251,6 +265,7 @@ ApplicationWindow {
                     onClicked: window.navigateTo("dashboard")
                 }
                 Shared.AppComboBox {
+                    id: pageNavigationSelector
                     Layout.preferredWidth: 220
                     model: window.navigationItems
                     textRole: "title"
@@ -296,7 +311,8 @@ ApplicationWindow {
                         : window.currentRoute === "weather" ? qsTr("Your local forecast and city weather")
                         : window.currentRoute === "currencies" ? qsTr("Rates, conversions, and favorite pairs")
                         : window.currentRoute === "setups" ? qsTr("Launch your saved application groups")
-                        : window.currentRoute === "applications" ? qsTr("Your favorite desktop applications") : ""
+                        : window.currentRoute === "applications" ? qsTr("Your favorite desktop applications")
+                        : window.currentRoute === "terminal" ? qsTr("Read-only commands for this application") : ""
                     visible: text.length > 0
                     color: ThemeModule.Theme.textDim
                     font.pixelSize: 13
@@ -337,12 +353,31 @@ ApplicationWindow {
                     : window.currentRoute === "setups" ? setupsPageComponent
                     : window.currentRoute === "fileExplorer" ? fileExplorerPageComponent
                     : window.currentRoute === "steam" ? steamPageComponent
+                    : window.currentRoute === "terminal" ? terminalPageComponent
                     : (window.currentRoute === "telegram" || window.currentRoute === "youtube") ? favoritesPageComponent
                     : dashboardPageComponent
                 onLoaded: {
                     if (item && typeof item.restoreViewState === "function")
                         item.restoreViewState(window.routeState[window.currentRoute] || {})
                     shellScroll.contentItem.contentY = Number(window.routeScrollPositions[window.currentRoute] || 0)
+                    const loadedRoute = window.currentRoute
+                    if (loadedRoute === "terminal" && item && typeof item.focusInput === "function")
+                        Qt.callLater(function() {
+                            if (window.currentRoute === loadedRoute && pageLoader.item
+                                    && typeof pageLoader.item.focusInput === "function")
+                                pageLoader.item.focusInput()
+                        })
+                    else if (window.restoreShellFocusAfterConsole) {
+                        window.restoreShellFocusAfterConsole = false
+                        Qt.callLater(function() {
+                            if (window.currentRoute !== loadedRoute) return
+                            if (loadedRoute === "dashboard" && pageLoader.item
+                                    && typeof pageLoader.item.restoreShellFocus === "function")
+                                pageLoader.item.restoreShellFocus()
+                            else
+                                pageNavigationSelector.forceActiveFocus()
+                        })
+                    }
                 }
             }
         }
@@ -415,6 +450,27 @@ ApplicationWindow {
             Item { Layout.fillWidth: true }
             Shared.AppButton { text: qsTr("Close"); onClicked: setupLaunchResult.close() }
         }
+    }
+
+    Shortcut {
+        sequence: "Ctrl+`"
+        context: Qt.WindowShortcut
+        enabled: !window.shortcutIsBlocked()
+        onActivated: {
+            if (window.currentRoute === "terminal") {
+                if (pageLoader.item && typeof pageLoader.item.focusInput === "function")
+                    pageLoader.item.focusInput()
+                return
+            }
+            window.consoleOriginRoute = window.currentRoute
+            window.consoleOpenedByShortcut = true
+            window.navigateTo("terminal")
+        }
+    }
+
+    Connections {
+        target: terminalController
+        function onRouteRequested(routeId) { window.navigateTo(routeId) }
     }
 
     Shared.NotificationToast {

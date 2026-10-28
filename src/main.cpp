@@ -6,11 +6,15 @@
 #include <QQuickStyle>
 #include <QScreen>
 #include <QString>
+#include <QStringList>
+#include <QVariantList>
+#include <QVariantMap>
 #include <QWindow>
 
 #include <algorithm>
 
 #include "application/application_service_graph.h"
+#include "application/route_catalog.h"
 #include "controllers/application_controller.h"
 #include "controllers/calendar_controller.h"
 #include "controllers/currency_controller.h"
@@ -25,6 +29,7 @@
 #include "controllers/setups_controller.h"
 #include "controllers/steam_games_controller.h"
 #include "controllers/tasks_controller.h"
+#include "controllers/terminal_controller.h"
 #include "controllers/wallpaper_controller.h"
 #include "controllers/weather_controller.h"
 #include "platform/location_provider.h"
@@ -87,8 +92,8 @@ int main(int argc, char *argv[])
 
     something::application::ApplicationServiceGraph services;
     something::services::ApplicationCommandService commandService(&services);
-    Q_UNUSED(commandService);
     something::platform::SystemClock clock;
+    commandService.setClock(&clock);
     something::platform::NativeLocationProvider locationProvider;
     something::platform::NativeDesktopApplicationsPlatform desktopApplicationsPlatform;
     something::platform::NativeRunningWindowsPlatform runningWindowsPlatform;
@@ -111,6 +116,7 @@ int main(int argc, char *argv[])
     something::controllers::WallpaperController wallpaperController(&services,
                                                                      wallpaperImages);
     something::controllers::TasksController tasksController(&services, &clock);
+    something::controllers::TerminalController terminalController(&commandService);
     something::controllers::CalendarController calendarController(&services, &clock);
     something::controllers::DashboardController dashboardController(&services, &clock);
     something::controllers::FavoritesController favoritesController(
@@ -128,6 +134,45 @@ int main(int argc, char *argv[])
     something::controllers::FileExplorerController fileExplorerController(
         &services, &fileExplorerService, &fileExplorerShell);
     something::controllers::SteamGamesController steamGamesController(&services);
+    commandService.setSnapshotProvider(QStringLiteral("settings"), [&settingsController, &wallpaperController,
+                                                                     &steamGamesController] {
+        QVariantMap fields;
+        QVariantList unavailable;
+        if (settingsController.loaded()) fields.insert(QStringLiteral("weekStartSundayZero"), settingsController.weekStart());
+        else unavailable.push_back(QStringLiteral("weekStartSundayZero"));
+        if (wallpaperController.catalogLoaded()) fields.insert(QStringLiteral("selectedWallpaper"), wallpaperController.selectedWallpaper());
+        else unavailable.push_back(QStringLiteral("selectedWallpaper"));
+        if (steamGamesController.snapshotLoaded()) fields.insert(QStringLiteral("steamCountry"), steamGamesController.countryCode());
+        else unavailable.push_back(QStringLiteral("steamCountry"));
+        return QVariantMap{{QStringLiteral("available"), !fields.isEmpty()},
+                           {QStringLiteral("source"), QStringLiteral("retained-controller-state")},
+                           {QStringLiteral("settings"), fields},
+                           {QStringLiteral("unavailableFields"), unavailable}};
+    });
+    commandService.setSnapshotProvider(QStringLiteral("steam"), [&steamGamesController] {
+        QVariantMap result;
+        if (!steamGamesController.snapshotLoaded())
+            return QVariantMap{{QStringLiteral("available"), false},
+                               {QStringLiteral("source"), QStringLiteral("loaded-snapshot")},
+                               {QStringLiteral("message"), QStringLiteral("Steam snapshot is not loaded.")}};
+        QVariantList games;
+        auto *model = steamGamesController.games();
+        const QStringList fields{QStringLiteral("id"), QStringLiteral("steamAppId"),
+            QStringLiteral("name"), QStringLiteral("priceStatus"), QStringLiteral("currency"),
+            QStringLiteral("currentPriceMinor"), QStringLiteral("regularPriceMinor"),
+            QStringLiteral("lastCheckedAt"), QStringLiteral("priceCountryCode")};
+        for (int row = 0; row < model->count(); ++row) {
+            const QVariantMap source = model->rowAt(row);
+            QVariantMap safe;
+            for (const QString &field : fields)
+                if (source.contains(field)) safe.insert(field, source.value(field));
+            games.push_back(safe);
+        }
+        return QVariantMap{{QStringLiteral("available"), true},
+                           {QStringLiteral("source"), QStringLiteral("loaded-snapshot")},
+                           {QStringLiteral("games"), games},
+                           {QStringLiteral("total"), games.size()}};
+    });
     QObject::connect(&steamGamesController,
                      &something::controllers::SteamGamesController::artworkInvalidated,
                      &steamGamesController,
@@ -161,6 +206,9 @@ int main(int argc, char *argv[])
     engine.addImageProvider(QStringLiteral("setup-icons"), setupImages);
     engine.addImageProvider(QStringLiteral("steam-artwork"), steamArtworkImages);
     engine.rootContext()->setContextProperty(QStringLiteral("appController"), &controller);
+    engine.rootContext()->setContextProperty(QStringLiteral("routeCatalog"), QVariantMap{
+        {QStringLiteral("routeTitles"), something::application::RouteCatalog::titleMap()},
+        {QStringLiteral("navigationItems"), something::application::RouteCatalog::navigationItems()}});
     engine.rootContext()->setContextProperty(QStringLiteral("cursorTrailController"), &cursorTrailController);
     engine.rootContext()->setContextProperty(QStringLiteral("wallpaperController"),
                                              &wallpaperController);
@@ -168,6 +216,8 @@ int main(int argc, char *argv[])
                                              &legacyDataImportController);
     engine.rootContext()->setContextProperty(QStringLiteral("taskController"),
                                              &tasksController);
+    engine.rootContext()->setContextProperty(QStringLiteral("terminalController"),
+                                             &terminalController);
     engine.rootContext()->setContextProperty(QStringLiteral("calendarController"),
                                              &calendarController);
     engine.rootContext()->setContextProperty(QStringLiteral("dashboardController"),

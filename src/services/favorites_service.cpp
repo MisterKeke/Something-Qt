@@ -376,6 +376,8 @@ storage::StorageCommand FavoritesService::recentNews(int limit)
         if (!state.value || state.value->scanStartedAt.trimmed().isEmpty()) {
             storage::StorageReply reply;
             reply.values.insert(QStringLiteral("items"), QVariantList{});
+            reply.values.insert(QStringLiteral("available"), false);
+            reply.values.insert(QStringLiteral("source"), QStringLiteral("fresh-query"));
             return reply;
         }
         const auto result = repositories.news.newsForScan(state.value->scanStartedAt, limit);
@@ -388,6 +390,8 @@ storage::StorageCommand FavoritesService::recentNews(int limit)
         }
         storage::StorageReply reply;
         reply.values.insert(QStringLiteral("items"), items);
+        reply.values.insert(QStringLiteral("available"), true);
+        reply.values.insert(QStringLiteral("source"), QStringLiteral("fresh-query"));
         return reply;
     };
 }
