@@ -37,6 +37,7 @@
 #include "providers/setup_icon_image_provider.h"
 #include "providers/steam_artwork_image_provider.h"
 #include "services/file_explorer_service.h"
+#include "services/application_command_service.h"
 
 namespace {
 
@@ -85,6 +86,8 @@ int main(int argc, char *argv[])
     QQuickStyle::setStyle(QStringLiteral("Basic"));
 
     something::application::ApplicationServiceGraph services;
+    something::services::ApplicationCommandService commandService(&services);
+    Q_UNUSED(commandService);
     something::platform::SystemClock clock;
     something::platform::NativeLocationProvider locationProvider;
     something::platform::NativeDesktopApplicationsPlatform desktopApplicationsPlatform;

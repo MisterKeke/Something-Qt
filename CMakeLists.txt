@@ -61,6 +61,8 @@ qt_add_executable(SomethingQt WIN32
     src/main.cpp
     src/application/application_lifecycle.cpp
     src/application/application_service_graph.cpp
+    src/application/command_parser.cpp
+    src/application/command_registry.cpp
     src/application/capability_registry.cpp
     src/application/operation_coordinator.cpp
     src/controllers/application_controller.cpp
@@ -114,6 +116,7 @@ qt_add_executable(SomethingQt WIN32
     src/services/currency_service.cpp
     src/services/favorites_service.cpp
     src/services/task_service.cpp
+    src/services/application_command_service.cpp
     src/services/preferences_service.cpp
     src/services/weather_service.cpp
     src/services/wallpaper_asset_store.cpp

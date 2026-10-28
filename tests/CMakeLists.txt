@@ -1,3 +1,30 @@
+add_executable(SomethingQtApplicationCommandTests
+    application_command_test.cpp
+    ../src/application/application_lifecycle.cpp
+    ../src/application/application_service_graph.cpp
+    ../src/application/capability_registry.cpp
+    ../src/application/command_parser.cpp
+    ../src/application/command_registry.cpp
+    ../src/application/operation_coordinator.cpp
+    ../src/domain/app_error.cpp
+    ../src/domain/task_date_rules.cpp
+    ../src/domain/task_rules.cpp
+    ../src/platform/profile_instance_lock.cpp
+    ../src/providers/network_worker.cpp
+    ../src/providers/provider_policy.cpp
+    ../src/providers/provider_response_cache.cpp
+    ../src/services/application_command_service.cpp
+    ../src/services/bounded_worker_pool.cpp
+    ../src/services/task_service.cpp
+    ../src/storage/repositories.cpp
+    ../src/storage/schema_migrator.cpp
+    ../src/storage/storage_worker.cpp
+)
+target_include_directories(SomethingQtApplicationCommandTests PRIVATE ../src)
+target_link_libraries(SomethingQtApplicationCommandTests PRIVATE
+    Qt6::Core Qt6::Network Qt6::Sql Qt6::Test)
+add_test(NAME SomethingQtApplicationCommandTests COMMAND SomethingQtApplicationCommandTests)
+
 add_executable(SomethingQtLifecycleTests
     lifecycle_error_test.cpp
     ../src/application/application_lifecycle.cpp

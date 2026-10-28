@@ -59,6 +59,7 @@ public:
     QString profileDirectory() const { return m_profileDirectory; }
     QString shutdownPhase() const { return m_shutdownPhase; }
     bool isShutdownComplete() const noexcept { return m_shutdownComplete; }
+    bool isProfileMaintenance() const noexcept { return m_profileMaintenance; }
 
 signals:
     void httpsFinished(quint64 operationId,
