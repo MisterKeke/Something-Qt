@@ -30,8 +30,8 @@ Dialog {
 
     contentItem: Label {
         text: root.message
-        color: ThemeModule.Theme.textDim
-        font.family: ThemeModule.Theme.bodyFont
+        color: ThemeModule.Theme.textSecondary
+        font.family: ThemeModule.Theme.fontFamily
         font.pixelSize: 14
         wrapMode: Text.Wrap
     }
@@ -52,9 +52,9 @@ Dialog {
     }
 
     background: Rectangle {
-        color: ThemeModule.Theme.panelAlt
-        border.color: ThemeModule.Theme.accent
+        color: ThemeModule.Theme.raisedSurface
+        border.color: ThemeModule.Theme.accentCyan
         border.width: 1
-        radius: 16
+        radius: ThemeModule.Theme.panelRadius
     }
 }

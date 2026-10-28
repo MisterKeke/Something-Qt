@@ -1,4 +1,6 @@
 #include <QGuiApplication>
+#include <QFont>
+#include <QFontDatabase>
 #include <QIcon>
 #include <QCursor>
 #include <QQmlContext>
@@ -83,6 +85,16 @@ void showCenteredOnLaunch(QWindow &window)
 int main(int argc, char *argv[])
 {
     QGuiApplication app(argc, argv);
+    const int bundledFontId = QFontDatabase::addApplicationFont(
+        QStringLiteral(":/something/assets/fonts/CascadiaCode.ttf"));
+    if (bundledFontId >= 0) {
+        const QStringList bundledFontFamilies = QFontDatabase::applicationFontFamilies(bundledFontId);
+        if (!bundledFontFamilies.isEmpty()) {
+            QFont applicationFont(bundledFontFamilies.constFirst());
+            applicationFont.setPointSizeF(10.5);
+            QGuiApplication::setFont(applicationFont);
+        }
+    }
     QGuiApplication::setApplicationName(QStringLiteral("Something"));
     QGuiApplication::setOrganizationName(QStringLiteral("Something"));
     QGuiApplication::setWindowIcon(QIcon(QStringLiteral(":/something/assets/appicon.png")));

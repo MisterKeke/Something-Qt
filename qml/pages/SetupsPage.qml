@@ -100,9 +100,9 @@ Item {
             Label {
                 Layout.fillWidth: true
                 text: qsTr("Setups")
-                color: ThemeModule.Theme.text
-                font.family: ThemeModule.Theme.displayFont
-                font.pixelSize: 20
+                color: ThemeModule.Theme.textPrimary
+                font.family: ThemeModule.Theme.fontFamily
+                font.pixelSize: ThemeModule.Theme.headingFontSize
                 font.weight: Font.DemiBold
             }
             BusyIndicator { visible: root.controller.loading; running: visible; implicitWidth: 24; implicitHeight: 24 }
@@ -132,7 +132,7 @@ Item {
             Layout.fillWidth: true
             visible: root.controller.launching
             text: qsTr("Starting applications in the saved order. Applications already opened will keep running.")
-            color: ThemeModule.Theme.textDim
+            color: ThemeModule.Theme.textSecondary
             wrapMode: Text.Wrap
         }
         Shared.AppButton {
@@ -191,9 +191,9 @@ Item {
                         Rectangle {
                             Layout.preferredWidth: 50
                             Layout.preferredHeight: 50
-                            radius: 14
-                            color: "#23263c"
-                            border.color: ThemeModule.Theme.border
+                            radius: ThemeModule.Theme.panelRadius
+                            color: ThemeModule.Theme.raisedSurface
+                            border.color: ThemeModule.Theme.borderColor
                             Image {
                                 id: setupIconImage
                                 anchors.fill: parent
@@ -210,8 +210,8 @@ Item {
                                 visible: model.iconSource.length === 0
                                          || setupIconImage.status === Image.Error
                                 text: model.name.length > 0 ? model.name.slice(0, 1).toUpperCase() : "S"
-                                color: ThemeModule.Theme.cyan
-                                font.family: ThemeModule.Theme.displayFont
+                                color: ThemeModule.Theme.accentCyan
+                                font.family: ThemeModule.Theme.fontFamily
                                 font.pixelSize: 20
                                 font.weight: Font.Bold
                             }
@@ -221,8 +221,8 @@ Item {
                             Label {
                                 Layout.fillWidth: true
                                 text: model.name
-                                color: ThemeModule.Theme.text
-                                font.family: ThemeModule.Theme.displayFont
+                                color: ThemeModule.Theme.textPrimary
+                                font.family: ThemeModule.Theme.fontFamily
                                 font.pixelSize: 17
                                 font.weight: Font.DemiBold
                                 elide: Text.ElideRight
@@ -230,22 +230,22 @@ Item {
                             Label {
                                 Layout.fillWidth: true
                                 text: model.description.length > 0 ? model.description : model.applicationSummary
-                                color: ThemeModule.Theme.textDim
-                                font.family: ThemeModule.Theme.bodyFont
+                                color: ThemeModule.Theme.textSecondary
+                                font.family: ThemeModule.Theme.fontFamily
                                 font.pixelSize: 12
                                 wrapMode: Text.Wrap
                             }
                         }
                         Shared.StatusBadge {
                             text: qsTr("%1 apps").arg(model.applicationIds.length)
-                            badgeColor: ThemeModule.Theme.cyan
+                            badgeColor: ThemeModule.Theme.accentCyan
                         }
                     }
                     Label {
                         Layout.fillWidth: true
                         text: qsTr("Launch order: %1").arg(model.applicationSummary || qsTr("No saved applications"))
-                        color: ThemeModule.Theme.textDim
-                        font.family: ThemeModule.Theme.bodyFont
+                        color: ThemeModule.Theme.textSecondary
+                        font.family: ThemeModule.Theme.fontFamily
                         font.pixelSize: 11
                         wrapMode: Text.Wrap
                     }
@@ -303,12 +303,12 @@ Item {
         closePolicy: root.controller.busy ? Popup.NoAutoClose : Popup.CloseOnEscape | Popup.CloseOnPressOutside
         title: qsTr("Create setup")
         Accessible.name: title
-        background: Rectangle { color: ThemeModule.Theme.panelAlt; border.color: ThemeModule.Theme.accent; radius: 16 }
+        background: Rectangle { color: ThemeModule.Theme.raisedSurface; border.color: ThemeModule.Theme.strongBorder; radius: ThemeModule.Theme.panelRadius }
         contentItem: Flickable {
             clip: true
             contentWidth: width
             contentHeight: editorContent.implicitHeight
-            ScrollBar.vertical: ScrollBar {}
+            ScrollBar.vertical: ThemeModule.AppScrollBar {}
             ColumnLayout {
                 id: editorContent
                 width: parent.width
@@ -325,13 +325,19 @@ Item {
                     Layout.preferredHeight: 82
                     placeholderText: qsTr("Description (optional, up to 300 characters)")
                     Accessible.name: qsTr("Setup description")
-                    color: ThemeModule.Theme.text
+                    hoverEnabled: true
+                    color: ThemeModule.Theme.textPrimary
+                    placeholderTextColor: ThemeModule.Theme.textSecondary
+                    selectionColor: ThemeModule.Theme.accentCyan
+                    selectedTextColor: ThemeModule.Theme.textPrimary
+                    font.family: ThemeModule.Theme.fontFamily
+                    font.pixelSize: ThemeModule.Theme.bodyFontSize
                     wrapMode: TextEdit.Wrap
                     onTextChanged: {
                         const characters = Array.from(text)
                         if (characters.length > 300) text = characters.slice(0, 300).join("")
                     }
-                    background: Rectangle { color: "#0d101a"; border.color: descriptionField.activeFocus ? ThemeModule.Theme.cyan : ThemeModule.Theme.border; radius: 9 }
+                    background: Rectangle { color: descriptionField.hovered && !descriptionField.activeFocus ? ThemeModule.Theme.raisedSurface : ThemeModule.Theme.insetSurface; border.color: descriptionField.activeFocus ? ThemeModule.Theme.focusHighlight : ThemeModule.Theme.borderColor; border.width: descriptionField.activeFocus ? ThemeModule.Theme.focusBorderWidth : ThemeModule.Theme.panelBorderWidth; radius: ThemeModule.Theme.controlRadius }
                 }
                 RowLayout {
                     Layout.fillWidth: true
@@ -346,7 +352,7 @@ Item {
                               : root.removeExistingIcon ? qsTr("Existing icon will be removed")
                               : editorDialog.existingIconFilename.length > 0 ? qsTr("Current icon retained")
                               : qsTr("No custom icon")
-                        color: ThemeModule.Theme.textDim
+                        color: ThemeModule.Theme.textSecondary
                         elide: Text.ElideMiddle
                     }
                     Shared.AppButton {
@@ -358,13 +364,13 @@ Item {
                 }
                 Label {
                     text: qsTr("Choose one or more saved applications. Their order below controls launch order.")
-                    color: ThemeModule.Theme.textDim
+                    color: ThemeModule.Theme.textSecondary
                     wrapMode: Text.Wrap
                     Layout.fillWidth: true
                 }
                 Repeater {
                     model: root.controller.applications
-                    delegate: CheckBox {
+                    delegate: ThemeModule.AppCheckBox {
                         Layout.fillWidth: true
                         text: modelData.displayName
                         checked: root.selectedApplicationIds.indexOf(Number(modelData.id)) >= 0
@@ -372,11 +378,13 @@ Item {
                         onToggled: root.toggleApplication(modelData.id, checked)
                         contentItem: Text {
                             text: parent.text
-                            color: ThemeModule.Theme.text
+                            color: parent.enabled ? ThemeModule.Theme.textPrimary : ThemeModule.Theme.textDisabled
                             leftPadding: 8
                             verticalAlignment: Text.AlignVCenter
-                            font.family: ThemeModule.Theme.bodyFont
+                            font.family: ThemeModule.Theme.fontFamily
                             font.pixelSize: 13
+                            wrapMode: Text.Wrap
+                            elide: Text.ElideRight
                         }
                     }
                 }
@@ -384,7 +392,7 @@ Item {
                     Layout.fillWidth: true
                     visible: root.controller.applications.length === 0
                     text: qsTr("Save an application first, then add it to a setup.")
-                    color: ThemeModule.Theme.textDim
+                    color: ThemeModule.Theme.textSecondary
                     wrapMode: Text.Wrap
                 }
                 Shared.AppButton {
@@ -398,7 +406,7 @@ Item {
                 }
                 Label {
                     text: qsTr("Launch order")
-                    color: ThemeModule.Theme.text
+                    color: ThemeModule.Theme.textPrimary
                     font.weight: Font.DemiBold
                 }
                 Repeater {
@@ -409,7 +417,7 @@ Item {
                         Label {
                             Layout.fillWidth: true
                             text: parent.app ? parent.app.displayName : qsTr("Removed application")
-                            color: ThemeModule.Theme.textDim
+                            color: ThemeModule.Theme.textSecondary
                             elide: Text.ElideRight
                         }
                         Shared.AppButton {

@@ -15,7 +15,21 @@ ApplicationWindow {
     // C++ fits and centers the native frame before its first show.
     visible: false
     title: qsTr("Something")
-    color: ThemeModule.Theme.background
+    color: ThemeModule.Theme.windowBackground
+    palette.window: ThemeModule.Theme.windowBackground
+    palette.windowText: ThemeModule.Theme.textPrimary
+    palette.base: ThemeModule.Theme.insetSurface
+    palette.alternateBase: ThemeModule.Theme.panelSurface
+    palette.text: ThemeModule.Theme.textPrimary
+    palette.button: ThemeModule.Theme.raisedSurface
+    palette.buttonText: ThemeModule.Theme.textPrimary
+    palette.highlight: ThemeModule.Theme.selectionBlue
+    palette.highlightedText: ThemeModule.Theme.textPrimary
+    palette.placeholderText: ThemeModule.Theme.textSecondary
+    palette.light: ThemeModule.Theme.strongBorder
+    palette.mid: ThemeModule.Theme.borderColor
+    palette.dark: ThemeModule.Theme.shadowBorder
+    palette.shadow: ThemeModule.Theme.windowBackground
 
     Dialog {
         title: legacyDataImportController.restartRequired ? qsTr("Profile imported") : qsTr("Importing profile")
@@ -27,17 +41,17 @@ ApplicationWindow {
         width: Math.min(480, window.width - 40)
         padding: 22
         background: Rectangle {
-            color: ThemeModule.Theme.panelAlt
-            border.color: ThemeModule.Theme.accent
-            radius: 16
+            color: ThemeModule.Theme.raisedSurface
+            border.color: ThemeModule.Theme.accentCyan
+            radius: ThemeModule.Theme.panelRadius
         }
         contentItem: Label {
             text: legacyDataImportController.busy ? legacyDataImportController.progressMessage
                   : qsTr("The retained data is saved in this Qt profile. Close Something and start it again to load it. The import report is available in Settings.")
             textFormat: Text.PlainText
             wrapMode: Text.Wrap
-            color: ThemeModule.Theme.text
-            font.family: ThemeModule.Theme.bodyFont
+            color: ThemeModule.Theme.textPrimary
+            font.family: ThemeModule.Theme.fontFamily
         }
         footer: DialogButtonBox {
             Shared.AppButton {
@@ -221,29 +235,9 @@ ApplicationWindow {
 
         Rectangle {
             anchors.fill: parent
-            color: "#7803070d"
+            color: ThemeModule.Theme.scrim
         }
 
-        Canvas {
-            anchors.fill: parent
-            opacity: 0.55
-            onPaint: {
-                const context = getContext("2d")
-                context.reset()
-                const left = context.createRadialGradient(0, 0, 0, 0, 0, Math.max(width, height) * 0.72)
-                left.addColorStop(0, "rgba(34, 211, 238, 0.17)")
-                left.addColorStop(1, "rgba(34, 211, 238, 0)")
-                context.fillStyle = left
-                context.fillRect(0, 0, width, height)
-                const right = context.createRadialGradient(width, 0, 0, width, 0, Math.max(width, height) * 0.62)
-                right.addColorStop(0, "rgba(255, 79, 216, 0.15)")
-                right.addColorStop(1, "rgba(255, 79, 216, 0)")
-                context.fillStyle = right
-                context.fillRect(0, 0, width, height)
-            }
-            onWidthChanged: requestPaint()
-            onHeightChanged: requestPaint()
-        }
     }
 
     ColumnLayout {
@@ -265,42 +259,48 @@ ApplicationWindow {
                 id: mainTabButton
                 text: qsTr("Main Page")
                 width: Math.max(140, implicitWidth)
-                font.family: ThemeModule.Theme.displayFont
+                font.family: ThemeModule.Theme.fontFamily
                 font.weight: Font.DemiBold
                 contentItem: Label {
                     text: mainTabButton.text
                     font: mainTabButton.font
-                    color: mainTabButton.checked ? ThemeModule.Theme.text : ThemeModule.Theme.textDim
+                    color: mainTabButton.checked ? ThemeModule.Theme.textPrimary : ThemeModule.Theme.textSecondary
                     horizontalAlignment: Text.AlignHCenter
                     verticalAlignment: Text.AlignVCenter
                 }
                 background: Rectangle {
                     implicitHeight: 42
-                    radius: 10
-                    color: mainTabButton.checked ? ThemeModule.Theme.panelAlt : ThemeModule.Theme.panel
-                    border.color: mainTabButton.activeFocus ? ThemeModule.Theme.cyan
-                                  : mainTabButton.checked ? ThemeModule.Theme.accent : ThemeModule.Theme.border
+                    radius: ThemeModule.Theme.panelRadius
+                    color: mainTabButton.checked ? ThemeModule.Theme.selectionBlue
+                           : mainTabButton.down ? ThemeModule.Theme.shadowBorder
+                           : mainTabButton.hovered ? ThemeModule.Theme.hoverSurface : ThemeModule.Theme.panelSurface
+                    border.color: mainTabButton.activeFocus ? ThemeModule.Theme.focusHighlight
+                                  : mainTabButton.checked ? ThemeModule.Theme.strongBorder : ThemeModule.Theme.borderColor
+                    border.width: mainTabButton.activeFocus ? ThemeModule.Theme.focusBorderWidth : ThemeModule.Theme.panelBorderWidth
                 }
             }
             TabButton {
                 id: consoleTabButton
                 text: qsTr("Console")
                 width: Math.max(140, implicitWidth)
-                font.family: ThemeModule.Theme.displayFont
+                font.family: ThemeModule.Theme.fontFamily
                 font.weight: Font.DemiBold
                 contentItem: Label {
                     text: consoleTabButton.text
                     font: consoleTabButton.font
-                    color: consoleTabButton.checked ? ThemeModule.Theme.text : ThemeModule.Theme.textDim
+                    color: consoleTabButton.checked ? ThemeModule.Theme.textPrimary : ThemeModule.Theme.textSecondary
                     horizontalAlignment: Text.AlignHCenter
                     verticalAlignment: Text.AlignVCenter
                 }
                 background: Rectangle {
                     implicitHeight: 42
-                    radius: 10
-                    color: consoleTabButton.checked ? ThemeModule.Theme.panelAlt : ThemeModule.Theme.panel
-                    border.color: consoleTabButton.activeFocus ? ThemeModule.Theme.cyan
-                                  : consoleTabButton.checked ? ThemeModule.Theme.accent : ThemeModule.Theme.border
+                    radius: ThemeModule.Theme.panelRadius
+                    color: consoleTabButton.checked ? ThemeModule.Theme.selectionBlue
+                           : consoleTabButton.down ? ThemeModule.Theme.shadowBorder
+                           : consoleTabButton.hovered ? ThemeModule.Theme.hoverSurface : ThemeModule.Theme.panelSurface
+                    border.color: consoleTabButton.activeFocus ? ThemeModule.Theme.focusHighlight
+                                  : consoleTabButton.checked ? ThemeModule.Theme.strongBorder : ThemeModule.Theme.borderColor
+                    border.width: consoleTabButton.activeFocus ? ThemeModule.Theme.focusBorderWidth : ThemeModule.Theme.panelBorderWidth
                 }
             }
         }
@@ -314,7 +314,7 @@ ApplicationWindow {
                 id: shellScroll
                 clip: true
                 contentWidth: availableWidth
-                ScrollBar.vertical.policy: ScrollBar.AsNeeded
+                ScrollBar.vertical: ThemeModule.AppScrollBar { policy: ScrollBar.AsNeeded }
                 ColumnLayout {
                     width: shellScroll.availableWidth
                     spacing: 18
@@ -364,8 +364,8 @@ ApplicationWindow {
                         spacing: 4
                         Label {
                             text: window.routeTitles[window.currentRoute] || qsTr("Something")
-                            color: ThemeModule.Theme.text
-                            font.family: ThemeModule.Theme.displayFont
+                            color: ThemeModule.Theme.textPrimary
+                            font.family: ThemeModule.Theme.fontFamily
                             font.pixelSize: 30
                             font.bold: true
                         }
@@ -380,7 +380,7 @@ ApplicationWindow {
                                 : window.currentRoute === "applications" ? qsTr("Your favorite desktop applications")
                                 : ""
                             visible: text.length > 0
-                            color: ThemeModule.Theme.textDim
+                            color: ThemeModule.Theme.textSecondary
                             font.pixelSize: 13
                             wrapMode: Text.Wrap
                         }
@@ -393,7 +393,7 @@ ApplicationWindow {
                         ColumnLayout {
                             width: parent.width
                             Label { text: qsTr("Startup could not complete"); color: ThemeModule.Theme.error; font.bold: true }
-                            Label { Layout.fillWidth: true; text: appController.startupErrorMessage; color: ThemeModule.Theme.textDim; wrapMode: Text.Wrap }
+                            Label { Layout.fillWidth: true; text: appController.startupErrorMessage; color: ThemeModule.Theme.textSecondary; wrapMode: Text.Wrap }
                         }
                     }
                     Loader {
@@ -434,7 +434,7 @@ ApplicationWindow {
                 id: consoleScroll
                 clip: true
                 contentWidth: availableWidth
-                ScrollBar.vertical.policy: ScrollBar.AsNeeded
+                ScrollBar.vertical: ThemeModule.AppScrollBar { policy: ScrollBar.AsNeeded }
 
                 ColumnLayout {
                     width: consoleScroll.availableWidth
@@ -445,8 +445,8 @@ ApplicationWindow {
                         Layout.rightMargin: 24
                         Layout.topMargin: 18
                         text: qsTr("Console")
-                        color: ThemeModule.Theme.text
-                        font.family: ThemeModule.Theme.displayFont
+                        color: ThemeModule.Theme.textPrimary
+                        font.family: ThemeModule.Theme.fontFamily
                         font.pixelSize: 30
                         font.bold: true
                     }
@@ -484,7 +484,7 @@ ApplicationWindow {
         padding: 20
         title: qsTr("Setup launch results")
         closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
-        background: Rectangle { color: ThemeModule.Theme.panelAlt; border.color: ThemeModule.Theme.accent; radius: 16 }
+        background: Rectangle { color: ThemeModule.Theme.raisedSurface; border.color: ThemeModule.Theme.strongBorder; radius: ThemeModule.Theme.panelRadius }
         contentItem: ColumnLayout {
             spacing: 12
             Label {
@@ -492,7 +492,7 @@ ApplicationWindow {
                 text: qsTr("Launched %1 of %2 attempted applications.")
                     .arg(setupLaunchResult.summary.launched || 0)
                     .arg(setupLaunchResult.summary.attempted || 0)
-                color: ThemeModule.Theme.text
+                color: ThemeModule.Theme.textPrimary
                 wrapMode: Text.Wrap
             }
             Label {
@@ -517,14 +517,14 @@ ApplicationWindow {
                     Label {
                         Layout.fillWidth: true
                         text: modelData.applicationName || qsTr("Application")
-                        color: ThemeModule.Theme.text
+                        color: ThemeModule.Theme.textPrimary
                         font.weight: Font.DemiBold
                         wrapMode: Text.Wrap
                     }
                     Label {
                         Layout.fillWidth: true
                         text: modelData.message
-                        color: ThemeModule.Theme.textDim
+                        color: ThemeModule.Theme.textSecondary
                         wrapMode: Text.Wrap
                     }
                 }

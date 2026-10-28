@@ -34,8 +34,8 @@ Item {
                         Label {
                             Layout.fillWidth: true
                             text: qsTr("%1 Calendar").arg(root.controller.visibleYear)
-                            color: ThemeModule.Theme.text
-                            font.family: ThemeModule.Theme.displayFont
+                            color: ThemeModule.Theme.textPrimary
+                            font.family: ThemeModule.Theme.fontFamily
                             font.pixelSize: 18
                             font.weight: Font.DemiBold
                             horizontalAlignment: root.embedded ? Text.AlignLeft : Text.AlignHCenter
@@ -43,8 +43,8 @@ Item {
                         Label {
                             Layout.fillWidth: true
                             text: root.controller.rangeLabel
-                            color: ThemeModule.Theme.textDim
-                            font.family: ThemeModule.Theme.bodyFont
+                            color: ThemeModule.Theme.textSecondary
+                            font.family: ThemeModule.Theme.fontFamily
                             font.pixelSize: 11
                             horizontalAlignment: root.embedded ? Text.AlignLeft : Text.AlignHCenter
                         }
@@ -100,15 +100,15 @@ Item {
                                     Label {
                                         Layout.fillWidth: true
                                         text: monthName
-                                        color: ThemeModule.Theme.text
-                                        font.family: ThemeModule.Theme.displayFont
+                                        color: ThemeModule.Theme.textPrimary
+                                        font.family: ThemeModule.Theme.fontFamily
                                         font.pixelSize: 15
                                         font.weight: Font.DemiBold
                                     }
                                     Label {
                                         text: String(year)
-                                        color: ThemeModule.Theme.textDim
-                                        font.family: ThemeModule.Theme.bodyFont
+                                        color: ThemeModule.Theme.textSecondary
+                                        font.family: ThemeModule.Theme.fontFamily
                                         font.pixelSize: 11
                                     }
                                 }
@@ -126,9 +126,9 @@ Item {
                                             Layout.minimumWidth: 0
                                             Layout.preferredWidth: 1
                                             text: modelData
-                                            color: ThemeModule.Theme.textDim
-                                            font.family: ThemeModule.Theme.bodyFont
-                                            font.pixelSize: 9
+                                            color: ThemeModule.Theme.textSecondary
+                                            font.family: ThemeModule.Theme.fontFamily
+                                            font.pixelSize: ThemeModule.Theme.metadataFontSize
                                             horizontalAlignment: Text.AlignHCenter
                                         }
                                     }
@@ -152,10 +152,10 @@ Item {
                                                 onClicked: root.controller.selectDate(String(modelData.date))
                                                 contentItem: Text {
                                                     text: parent.text
-                                                    color: modelData.selected ? ThemeModule.Theme.text
-                                                           : modelData.today ? ThemeModule.Theme.cyan
-                                                                             : ThemeModule.Theme.textDim
-                                                    font.family: ThemeModule.Theme.bodyFont
+                                                    color: modelData.selected ? ThemeModule.Theme.textPrimary
+                                                           : modelData.today ? ThemeModule.Theme.accentCyan
+                                                                             : ThemeModule.Theme.textSecondary
+                                                    font.family: ThemeModule.Theme.fontFamily
                                                     font.pixelSize: 12
                                                     font.weight: modelData.today || modelData.selected
                                                                   ? Font.Bold : Font.Normal
@@ -163,14 +163,15 @@ Item {
                                                     verticalAlignment: Text.AlignVCenter
                                                 }
                                                 background: Rectangle {
-                                                    radius: 8
-                                                    color: modelData.selected ? ThemeModule.Theme.accent
-                                                           : parent.down ? "#2b3048"
-                                                           : modelData.weekend ? "#151827" : "transparent"
+                                                    radius: ThemeModule.Theme.controlRadius
+                                                    color: parent.down ? ThemeModule.Theme.primaryButtonPressed
+                                                           : modelData.selected ? ThemeModule.Theme.selectionBlue
+                                                           : parent.hovered ? ThemeModule.Theme.hoverSurface
+                                                           : modelData.weekend ? ThemeModule.Theme.raisedSurface : "transparent"
                                                     border.width: modelData.today || parent.activeFocus ? 2 : 1
-                                                    border.color: parent.activeFocus ? ThemeModule.Theme.cyan
-                                                        : modelData.today ? ThemeModule.Theme.cyan
-                                                        : modelData.selected ? ThemeModule.Theme.accentHover
+                                                    border.color: parent.activeFocus ? ThemeModule.Theme.focusHighlight
+                                                        : modelData.today ? ThemeModule.Theme.accentCyan
+                                                        : modelData.selected ? ThemeModule.Theme.focusHighlight
                                                                              : "transparent"
                                                     Behavior on color { ColorAnimation { duration: ThemeModule.Theme.controlMotion } }
                                                     Behavior on border.color { ColorAnimation { duration: ThemeModule.Theme.controlMotion } }
@@ -199,16 +200,16 @@ Item {
                         Layout.fillWidth: true
                         Label {
                             text: qsTr("Tasks for %1").arg(root.controller.selectedDateLabel)
-                            color: ThemeModule.Theme.text
-                            font.family: ThemeModule.Theme.displayFont
+                            color: ThemeModule.Theme.textPrimary
+                            font.family: ThemeModule.Theme.fontFamily
                             font.pixelSize: 17
                             font.weight: Font.DemiBold
                             wrapMode: Text.Wrap
                         }
                         Label {
                             text: root.controller.summary
-                            color: ThemeModule.Theme.textDim
-                            font.family: ThemeModule.Theme.bodyFont
+                            color: ThemeModule.Theme.textSecondary
+                            font.family: ThemeModule.Theme.fontFamily
                             font.pixelSize: 11
                         }
                     }

@@ -104,6 +104,7 @@ Item {
         contentWidth: width
         contentHeight: pageColumn.implicitHeight
         boundsBehavior: Flickable.StopAtBounds
+        ScrollBar.vertical: ThemeModule.AppScrollBar { policy: ScrollBar.AsNeeded }
 
         ColumnLayout {
             id: pageColumn
@@ -123,16 +124,16 @@ Item {
                         spacing: 6
                         Label {
                             text: qsTr("Appearance")
-                            color: ThemeModule.Theme.text
-                            font.family: ThemeModule.Theme.displayFont
+                            color: ThemeModule.Theme.textPrimary
+                            font.family: ThemeModule.Theme.fontFamily
                             font.pixelSize: 18
                             font.weight: Font.DemiBold
                         }
                         Label {
                             Layout.fillWidth: true
                             text: qsTr("Choose a built-in scene or import your own JPEG, PNG, or WebP image. Imported files are copied into this profile and limited to 20 MB.")
-                            color: ThemeModule.Theme.textDim
-                            font.family: ThemeModule.Theme.bodyFont
+                            color: ThemeModule.Theme.textSecondary
+                            font.family: ThemeModule.Theme.fontFamily
                             font.pixelSize: 13
                             wrapMode: Text.Wrap
                         }
@@ -150,7 +151,7 @@ Item {
                     visible: root.controller.errorMessage.length > 0
                     text: root.controller.errorMessage
                     color: ThemeModule.Theme.error
-                    font.family: ThemeModule.Theme.bodyFont
+                    font.family: ThemeModule.Theme.fontFamily
                     font.pixelSize: 13
                     wrapMode: Text.Wrap
                     Accessible.role: Accessible.AlertMessage
@@ -169,8 +170,8 @@ Item {
                     Label {
                         Layout.fillWidth: true
                         text: qsTr("Retained settings")
-                        color: ThemeModule.Theme.text
-                        font.family: ThemeModule.Theme.displayFont
+                        color: ThemeModule.Theme.textPrimary
+                        font.family: ThemeModule.Theme.fontFamily
                         font.pixelSize: 18
                         font.weight: Font.DemiBold
                     }
@@ -180,7 +181,7 @@ Item {
                         Label {
                             Layout.fillWidth: true
                             text: qsTr("First day of the Dashboard week")
-                            color: ThemeModule.Theme.textDim
+                            color: ThemeModule.Theme.textSecondary
                             wrapMode: Text.Wrap
                         }
                         Shared.AppComboBox {
@@ -205,11 +206,11 @@ Item {
                         Label {
                             Layout.fillWidth: true
                             text: qsTr("Current local time zone")
-                            color: ThemeModule.Theme.textDim
+                            color: ThemeModule.Theme.textSecondary
                         }
                         Label {
                             text: root.settingsController.localTimeZone
-                            color: ThemeModule.Theme.text
+                            color: ThemeModule.Theme.textPrimary
                             textFormat: Text.PlainText
                             Accessible.name: qsTr("Current local time zone: %1").arg(text)
                         }
@@ -238,16 +239,16 @@ Item {
                     Label {
                         Layout.fillWidth: true
                         text: qsTr("One-time Something-v2 import")
-                        color: ThemeModule.Theme.text
-                        font.family: ThemeModule.Theme.displayFont
+                        color: ThemeModule.Theme.textPrimary
+                        font.family: ThemeModule.Theme.fontFamily
                         font.pixelSize: 18
                         font.weight: Font.DemiBold
                     }
                     Label {
                         Layout.fillWidth: true
                         text: qsTr("Supports source schema versions 24 and 25. Built-in Qt wallpaper choices are allowed and kept. The source remains untouched; a consistent copy is made after you confirm it is closed.")
-                        color: ThemeModule.Theme.textDim
-                        font.family: ThemeModule.Theme.bodyFont
+                        color: ThemeModule.Theme.textSecondary
+                        font.family: ThemeModule.Theme.fontFamily
                         font.pixelSize: 13
                         wrapMode: Text.Wrap
                     }
@@ -292,7 +293,7 @@ Item {
                         text: root.importController.errorMessage
                         textFormat: Text.PlainText
                         color: ThemeModule.Theme.error
-                        font.family: ThemeModule.Theme.bodyFont
+                        font.family: ThemeModule.Theme.fontFamily
                         font.pixelSize: 12
                         wrapMode: Text.Wrap
                         Accessible.role: Accessible.AlertMessage
@@ -301,16 +302,28 @@ Item {
                         Layout.fillWidth: true
                         Layout.preferredHeight: Math.min(200, reportText.implicitHeight + 16)
                         visible: root.importController.reportJson.length > 0
+                        ScrollBar.vertical: ThemeModule.AppScrollBar { policy: ScrollBar.AsNeeded }
                         TextArea {
                             id: reportText
                             text: root.importReportText(root.importController.reportJson)
                             readOnly: true
                             textFormat: TextEdit.PlainText
-                            color: ThemeModule.Theme.textDim
-                            font.family: ThemeModule.Theme.bodyFont
+                            hoverEnabled: true
+                            color: ThemeModule.Theme.textSecondary
+                            placeholderTextColor: ThemeModule.Theme.textSecondary
+                            selectionColor: ThemeModule.Theme.accentCyan
+                            selectedTextColor: ThemeModule.Theme.textPrimary
+                            font.family: ThemeModule.Theme.fontFamily
                             font.pixelSize: 12
                             wrapMode: TextEdit.Wrap
                             Accessible.name: qsTr("Import report with record counts and skipped assets")
+                            background: Rectangle {
+                                color: reportText.hovered && !reportText.activeFocus
+                                       ? ThemeModule.Theme.raisedSurface : ThemeModule.Theme.insetSurface
+                                border.color: reportText.activeFocus ? ThemeModule.Theme.focusHighlight : ThemeModule.Theme.borderColor
+                                border.width: reportText.activeFocus ? ThemeModule.Theme.focusBorderWidth : ThemeModule.Theme.panelBorderWidth
+                                radius: ThemeModule.Theme.controlRadius
+                            }
                         }
                     }
                 }
@@ -319,9 +332,9 @@ Item {
             Label {
                 Layout.fillWidth: true
                 text: qsTr("Wallpaper gallery")
-                color: ThemeModule.Theme.text
-                font.family: ThemeModule.Theme.displayFont
-                font.pixelSize: 20
+                color: ThemeModule.Theme.textPrimary
+                font.family: ThemeModule.Theme.fontFamily
+                font.pixelSize: ThemeModule.Theme.headingFontSize
                 font.weight: Font.Bold
             }
 
@@ -350,13 +363,9 @@ Item {
 
                             Rectangle {
                                 anchors.fill: parent
-                                radius: 10
-                                color: wallpaper.id === "builtin:original" ? "#0d101a" : "#1b2034"
-                                gradient: Gradient {
-                                    GradientStop { position: 0.0; color: "#171b2a" }
-                                    GradientStop { position: 0.55; color: "#10141f" }
-                                    GradientStop { position: 1.0; color: "#260f20" }
-                                }
+                                radius: ThemeModule.Theme.panelRadius
+                                color: wallpaper.id === "builtin:original"
+                                       ? ThemeModule.Theme.insetSurface : ThemeModule.Theme.raisedSurface
                             }
 
                             Image {
@@ -378,8 +387,8 @@ Item {
                                 anchors.left: parent.left
                                 anchors.bottom: parent.bottom
                                 anchors.margins: 8
-                                radius: 9
-                                color: "#c906070d"
+                                radius: ThemeModule.Theme.controlRadius
+                                color: Qt.alpha(ThemeModule.Theme.windowBackground, 0.9)
                                 width: selectedBadge.implicitWidth + 16
                                 height: selectedBadge.implicitHeight + 8
                                 visible: root.controller.selectedWallpaper === wallpaper.id
@@ -387,7 +396,7 @@ Item {
                                     id: selectedBadge
                                     anchors.centerIn: parent
                                     text: qsTr("Selected")
-                                    badgeColor: ThemeModule.Theme.cyan
+                                    badgeColor: ThemeModule.Theme.accentCyan
                                 }
                             }
                         }
@@ -401,8 +410,8 @@ Item {
                                 Label {
                                     Layout.fillWidth: true
                                     text: wallpaper.label
-                                    color: ThemeModule.Theme.text
-                                    font.family: ThemeModule.Theme.displayFont
+                                    color: ThemeModule.Theme.textPrimary
+                                    font.family: ThemeModule.Theme.fontFamily
                                     font.pixelSize: 14
                                     font.weight: Font.DemiBold
                                     elide: Text.ElideRight
@@ -410,8 +419,8 @@ Item {
                                 Label {
                                     Layout.fillWidth: true
                                     text: wallpaper.description
-                                    color: wallpaper.available ? ThemeModule.Theme.textDim : ThemeModule.Theme.error
-                                    font.family: ThemeModule.Theme.bodyFont
+                                    color: wallpaper.available ? ThemeModule.Theme.textSecondary : ThemeModule.Theme.error
+                                    font.family: ThemeModule.Theme.fontFamily
                                     font.pixelSize: 11
                                     elide: Text.ElideRight
                                 }

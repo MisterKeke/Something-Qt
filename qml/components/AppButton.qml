@@ -13,12 +13,12 @@ Button {
 
     implicitHeight: 40
     implicitWidth: Math.max(88, label.implicitWidth + 30)
-    leftPadding: 15
-    rightPadding: 15
+    leftPadding: ThemeModule.Theme.controlPadding
+    rightPadding: ThemeModule.Theme.controlPadding
     topPadding: 8
     bottomPadding: 8
-    font.family: ThemeModule.Theme.displayFont
-    font.pixelSize: 13
+    font.family: ThemeModule.Theme.fontFamily
+    font.pixelSize: ThemeModule.Theme.labelFontSize
     font.weight: Font.DemiBold
     Accessible.role: Accessible.Button
     Accessible.name: text
@@ -26,8 +26,8 @@ Button {
     contentItem: Text {
         id: label
         text: root.text
-        color: root.enabled ? ThemeModule.Theme.text
-                             : Qt.darker(ThemeModule.Theme.textDim, 1.1)
+        color: root.enabled ? ThemeModule.Theme.textPrimary
+                             : ThemeModule.Theme.textDisabled
         Behavior on color { ColorAnimation { duration: ThemeModule.Theme.controlMotion } }
         font: root.font
         horizontalAlignment: Text.AlignHCenter
@@ -36,25 +36,30 @@ Button {
     }
 
     background: Rectangle {
-        radius: 10
-        color: root.destructive
-               ? (root.down ? "#54202f" : "#341924")
+        radius: ThemeModule.Theme.controlRadius
+        color: !root.enabled ? ThemeModule.Theme.disabledSurface
+               : root.destructive
+               ? (root.down ? ThemeModule.Theme.errorSurface
+                  : root.hovered ? ThemeModule.Theme.destructiveHover : ThemeModule.Theme.destructiveSurface)
                : root.quiet
-                 ? (root.down ? "#292d43" : root.hovered ? "#22263a" : "#171a2a")
-                 : (root.down ? "#6474df" : root.hovered ? "#8998ff" : "#7c8cff")
-        border.width: root.activeFocus ? 2 : 1
-        border.color: root.activeFocus ? ThemeModule.Theme.cyan
-                     : root.destructive ? "#884155"
-                     : root.quiet ? ThemeModule.Theme.border : "#9ca9ff"
+                 ? (root.down ? ThemeModule.Theme.shadowBorder
+                              : root.hovered ? ThemeModule.Theme.hoverSurface : ThemeModule.Theme.raisedSurface)
+                 : (root.down ? ThemeModule.Theme.primaryButtonPressed
+                              : root.hovered ? ThemeModule.Theme.primaryButtonHover : ThemeModule.Theme.selectionBlue)
+        border.width: root.activeFocus ? ThemeModule.Theme.focusBorderWidth : ThemeModule.Theme.panelBorderWidth
+        border.color: !root.enabled ? ThemeModule.Theme.borderColor
+                     : root.activeFocus ? ThemeModule.Theme.focusHighlight
+                     : root.destructive ? ThemeModule.Theme.error
+                     : root.quiet ? ThemeModule.Theme.borderColor : ThemeModule.Theme.strongBorder
         Behavior on color { ColorAnimation { duration: ThemeModule.Theme.controlMotion } }
         Behavior on border.color { ColorAnimation { duration: ThemeModule.Theme.controlMotion } }
 
         Rectangle {
             anchors.fill: parent
             anchors.margins: -4
-            radius: parent.radius + 4
+            radius: parent.radius + 2
             color: "transparent"
-            border.color: ThemeModule.Theme.accentHover
+            border.color: ThemeModule.Theme.focusHighlight
             border.width: 2
             visible: root.activeFocus
             z: -1

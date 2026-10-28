@@ -67,15 +67,15 @@ Item {
                 spacing: 3
                 Label {
                     text: qsTr("Main Page")
-                    color: ThemeModule.Theme.text
-                    font.family: ThemeModule.Theme.displayFont
+                    color: ThemeModule.Theme.textPrimary
+                    font.family: ThemeModule.Theme.fontFamily
                     font.pixelSize: root.sideBySide ? 42 : 32
                     font.weight: Font.Bold
                 }
                 Label {
                     Layout.fillWidth: true
                     text: qsTr("Your navigation hub, favorite updates, and calendar at a glance")
-                    color: ThemeModule.Theme.accentHover
+                    color: ThemeModule.Theme.focusHighlight
                     font.pixelSize: 13
                     wrapMode: Text.Wrap
                 }

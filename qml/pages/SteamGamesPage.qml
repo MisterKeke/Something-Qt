@@ -46,16 +46,16 @@ Item {
             Label {
                 width: parent.width
                 text: qsTr("Track Steam Store prices")
-                color: ThemeModule.Theme.text
-                font.family: ThemeModule.Theme.displayFont
+                color: ThemeModule.Theme.textPrimary
+                font.family: ThemeModule.Theme.fontFamily
                 font.pixelSize: 18
                 font.weight: Font.DemiBold
             }
             Label {
                 width: parent.width
                 text: qsTr("Prices are stored locally in the selected country’s currency. Cached results stay visible if Steam is unavailable.")
-                color: ThemeModule.Theme.textDim
-                font.family: ThemeModule.Theme.bodyFont
+                color: ThemeModule.Theme.textSecondary
+                font.family: ThemeModule.Theme.fontFamily
                 font.pixelSize: 13
                 wrapMode: Text.Wrap
             }
@@ -66,7 +66,7 @@ Item {
 
                 Label {
                     text: qsTr("Store country")
-                    color: ThemeModule.Theme.textDim
+                    color: ThemeModule.Theme.textSecondary
                     Accessible.name: qsTr("Steam Store country")
                 }
                 Shared.AppComboBox {
@@ -128,8 +128,8 @@ Item {
                 color: root.controller && root.controller.selectedCountry !== root.controller.countryCode
                        ? ThemeModule.Theme.warning
                        : root.controller && root.controller.stalePriceCount > 0
-                         ? ThemeModule.Theme.warning : ThemeModule.Theme.textDim
-                font.family: ThemeModule.Theme.bodyFont
+                         ? ThemeModule.Theme.warning : ThemeModule.Theme.textSecondary
+                font.family: ThemeModule.Theme.fontFamily
                 font.pixelSize: 11
                 wrapMode: Text.Wrap
             }
@@ -157,7 +157,7 @@ Item {
                 visible: root.controller && root.controller.addError.length > 0
                 text: root.controller ? root.controller.addError : ""
                 color: ThemeModule.Theme.error
-                font.family: ThemeModule.Theme.bodyFont
+                font.family: ThemeModule.Theme.fontFamily
                 font.pixelSize: 13
                 wrapMode: Text.Wrap
                 Accessible.role: Accessible.AlertMessage
@@ -177,15 +177,15 @@ Item {
             Shared.StatusBadge {
                 visible: root.controller && root.controller.refreshBusy
                 text: root.controller ? root.controller.refreshStatus : ""
-                badgeColor: ThemeModule.Theme.cyan
+                badgeColor: ThemeModule.Theme.accentCyan
             }
             Label {
                 Layout.fillWidth: true
                 visible: root.controller && root.controller.refreshStatus.length > 0
                          && !root.controller.refreshBusy
                 text: root.controller ? root.controller.refreshStatus : ""
-                color: ThemeModule.Theme.textDim
-                font.family: ThemeModule.Theme.bodyFont
+                color: ThemeModule.Theme.textSecondary
+                font.family: ThemeModule.Theme.fontFamily
                 font.pixelSize: 13
                 wrapMode: Text.Wrap
             }
@@ -270,9 +270,9 @@ Item {
                             Layout.alignment: Qt.AlignTop
                             Rectangle {
                                 anchors.fill: parent
-                                radius: 9
-                                color: ThemeModule.Theme.panelAlt
-                                border.color: ThemeModule.Theme.border
+                                radius: ThemeModule.Theme.controlRadius
+                                color: ThemeModule.Theme.raisedSurface
+                                border.color: ThemeModule.Theme.borderColor
                             }
                             Image {
                                 id: artwork
@@ -295,12 +295,12 @@ Item {
                                 Text {
                                     anchors.horizontalCenter: parent.horizontalCenter
                                     text: "◉"
-                                    color: ThemeModule.Theme.accent
+                                    color: ThemeModule.Theme.accentCyan
                                     font.pixelSize: 27
                                 }
                                 Label {
                                     text: qsTr("Artwork unavailable")
-                                    color: ThemeModule.Theme.textDim
+                                    color: ThemeModule.Theme.textSecondary
                                     font.pixelSize: 11
                                 }
                             }
@@ -315,8 +315,8 @@ Item {
                             Label {
                                 Layout.fillWidth: true
                                 text: delegateRoot.name
-                                color: ThemeModule.Theme.text
-                                font.family: ThemeModule.Theme.displayFont
+                                color: ThemeModule.Theme.textPrimary
+                                font.family: ThemeModule.Theme.fontFamily
                                 font.pixelSize: 17
                                 font.weight: Font.DemiBold
                                 elide: Text.ElideRight
@@ -332,29 +332,29 @@ Item {
                                     badgeColor: delegateRoot.priceStatus === "priced"
                                                 ? ThemeModule.Theme.success
                                                 : delegateRoot.priceStatus === "free"
-                                                  ? ThemeModule.Theme.cyan
+                                                  ? ThemeModule.Theme.accentCyan
                                                   : ThemeModule.Theme.warning
                                 }
                                 Label {
                                     text: delegateRoot.priceDisplay
                                     visible: delegateRoot.priceDisplay.length > 0
-                                    color: ThemeModule.Theme.text
-                                    font.family: ThemeModule.Theme.displayFont
+                                    color: ThemeModule.Theme.textPrimary
+                                    font.family: ThemeModule.Theme.fontFamily
                                     font.pixelSize: 16
                                     font.weight: Font.Bold
                                 }
                                 Label {
                                     text: delegateRoot.regularPriceDisplay
                                     visible: delegateRoot.discountPercent > 0
-                                    color: ThemeModule.Theme.textDim
-                                    font.family: ThemeModule.Theme.bodyFont
+                                    color: ThemeModule.Theme.textSecondary
+                                    font.family: ThemeModule.Theme.fontFamily
                                     font.pixelSize: 12
                                     font.strikeout: true
                                 }
                                 Shared.StatusBadge {
                                     visible: delegateRoot.discountPercent > 0
                                     text: qsTr("−%1%").arg(delegateRoot.discountPercent)
-                                    badgeColor: ThemeModule.Theme.pink
+                                    badgeColor: ThemeModule.Theme.success
                                 }
                             }
 
@@ -366,8 +366,8 @@ Item {
                                 color: delegateRoot.priceCountryCode.length > 0
                                        && root.controller
                                        && delegateRoot.priceCountryCode !== root.controller.countryCode
-                                       ? ThemeModule.Theme.warning : ThemeModule.Theme.textDim
-                                font.family: ThemeModule.Theme.bodyFont
+                                       ? ThemeModule.Theme.warning : ThemeModule.Theme.textSecondary
+                                font.family: ThemeModule.Theme.fontFamily
                                 font.pixelSize: 11
                                 wrapMode: Text.Wrap
                             }
@@ -379,7 +379,7 @@ Item {
                                          && delegateRoot.priceCountryCode !== root.controller.countryCode
                                 text: qsTr("Cached price is from another country; refresh to update it.")
                                 color: ThemeModule.Theme.warning
-                                font.family: ThemeModule.Theme.bodyFont
+                                font.family: ThemeModule.Theme.fontFamily
                                 font.pixelSize: 11
                                 wrapMode: Text.Wrap
                             }
@@ -388,8 +388,8 @@ Item {
                                 Layout.fillWidth: true
                                 visible: delegateRoot.lastCheckedAt.length > 0
                                 text: qsTr("Last successful check: %1").arg(delegateRoot.lastCheckedAt)
-                                color: ThemeModule.Theme.textDim
-                                font.family: ThemeModule.Theme.bodyFont
+                                color: ThemeModule.Theme.textSecondary
+                                font.family: ThemeModule.Theme.fontFamily
                                 font.pixelSize: 11
                                 wrapMode: Text.Wrap
                             }
@@ -400,7 +400,7 @@ Item {
                                       ? qsTr("Last attempt: %1 · %2").arg(delegateRoot.lastAttemptedAt, delegateRoot.lastRefreshError)
                                       : delegateRoot.lastRefreshError
                                 color: ThemeModule.Theme.error
-                                font.family: ThemeModule.Theme.bodyFont
+                                font.family: ThemeModule.Theme.fontFamily
                                 font.pixelSize: 12
                                 wrapMode: Text.Wrap
                                 Accessible.role: Accessible.AlertMessage

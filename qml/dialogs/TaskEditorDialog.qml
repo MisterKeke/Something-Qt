@@ -161,7 +161,7 @@ Dialog {
     contentItem: ScrollView {
         clip: true
         contentWidth: availableWidth
-        ScrollBar.vertical.policy: ScrollBar.AsNeeded
+        ScrollBar.vertical: ThemeModule.AppScrollBar { policy: ScrollBar.AsNeeded }
 
         ColumnLayout {
             width: parent.width
@@ -169,14 +169,14 @@ Dialog {
 
             Label {
                 text: qsTr("A title is required. Dates use YYYY-MM-DD and may be left blank.")
-                color: ThemeModule.Theme.textDim
-                font.family: ThemeModule.Theme.bodyFont
+                color: ThemeModule.Theme.textSecondary
+                font.family: ThemeModule.Theme.fontFamily
                 font.pixelSize: 12
                 wrapMode: Text.Wrap
                 Layout.fillWidth: true
             }
 
-            Label { text: qsTr("Title"); color: ThemeModule.Theme.text; font.bold: true }
+            Label { text: qsTr("Title"); color: ThemeModule.Theme.textPrimary; font.bold: true }
             Shared.AppTextField {
                 id: titleField
                 Layout.fillWidth: true
@@ -185,27 +185,30 @@ Dialog {
                 Keys.onReturnPressed: root.saveDraft()
             }
 
-            Label { text: qsTr("Description"); color: ThemeModule.Theme.text; font.bold: true }
+            Label { text: qsTr("Description"); color: ThemeModule.Theme.textPrimary; font.bold: true }
             ScrollView {
                 Layout.fillWidth: true
                 Layout.preferredHeight: 100
+                ScrollBar.vertical: ThemeModule.AppScrollBar { policy: ScrollBar.AsNeeded }
                 TextArea {
                     id: descriptionField
                     placeholderText: qsTr("Optional details")
-                    color: ThemeModule.Theme.text
-                    placeholderTextColor: ThemeModule.Theme.textDim
-                    selectionColor: ThemeModule.Theme.accent
-                    selectedTextColor: ThemeModule.Theme.text
-                    font.family: ThemeModule.Theme.bodyFont
+                    hoverEnabled: true
+                    color: ThemeModule.Theme.textPrimary
+                    placeholderTextColor: ThemeModule.Theme.textSecondary
+                    selectionColor: ThemeModule.Theme.accentCyan
+                    selectedTextColor: ThemeModule.Theme.textPrimary
+                    font.family: ThemeModule.Theme.fontFamily
                     font.pixelSize: 13
                     wrapMode: TextEdit.Wrap
                     Accessible.name: qsTr("Task description")
                     background: Rectangle {
-                        color: "#0d101a"
-                        radius: 9
-                        border.width: descriptionField.activeFocus ? 2 : 1
+                        color: descriptionField.hovered && !descriptionField.activeFocus
+                               ? ThemeModule.Theme.raisedSurface : ThemeModule.Theme.insetSurface
+                        radius: ThemeModule.Theme.controlRadius
+                        border.width: descriptionField.activeFocus ? ThemeModule.Theme.focusBorderWidth : ThemeModule.Theme.panelBorderWidth
                         border.color: descriptionField.activeFocus
-                                      ? ThemeModule.Theme.cyan : ThemeModule.Theme.border
+                                      ? ThemeModule.Theme.focusHighlight : ThemeModule.Theme.borderColor
                     }
                 }
             }
@@ -218,7 +221,7 @@ Dialog {
 
                 ColumnLayout {
                     Layout.fillWidth: true
-                    Label { text: qsTr("Due date"); color: ThemeModule.Theme.text; font.bold: true }
+                    Label { text: qsTr("Due date"); color: ThemeModule.Theme.textPrimary; font.bold: true }
                     Shared.AppTextField {
                         id: dueDateField
                         Layout.fillWidth: true
@@ -229,7 +232,7 @@ Dialog {
                 }
                 ColumnLayout {
                     Layout.fillWidth: true
-                    Label { text: qsTr("Priority"); color: ThemeModule.Theme.text; font.bold: true }
+                    Label { text: qsTr("Priority"); color: ThemeModule.Theme.textPrimary; font.bold: true }
                     Shared.AppComboBox {
                         id: priorityBox
                         Layout.fillWidth: true
@@ -245,7 +248,7 @@ Dialog {
                 }
                 ColumnLayout {
                     Layout.fillWidth: true
-                    Label { text: qsTr("Difficulty"); color: ThemeModule.Theme.text; font.bold: true }
+                    Label { text: qsTr("Difficulty"); color: ThemeModule.Theme.textPrimary; font.bold: true }
                     Shared.AppComboBox {
                         id: difficultyBox
                         Layout.fillWidth: true
@@ -274,7 +277,7 @@ Dialog {
                 }
                 ColumnLayout {
                     Layout.fillWidth: true
-                    Label { text: qsTr("Tags"); color: ThemeModule.Theme.text; font.bold: true }
+                    Label { text: qsTr("Tags"); color: ThemeModule.Theme.textPrimary; font.bold: true }
                     Shared.AppTextField {
                         id: tagsField
                         Layout.fillWidth: true
@@ -283,9 +286,9 @@ Dialog {
                     }
                     Label {
                         text: qsTr("Up to 32 tags, 64 characters each")
-                        color: ThemeModule.Theme.textDim
-                        font.family: ThemeModule.Theme.bodyFont
-                        font.pixelSize: 10
+                        color: ThemeModule.Theme.textSecondary
+                        font.family: ThemeModule.Theme.fontFamily
+                        font.pixelSize: ThemeModule.Theme.metadataFontSize
                         wrapMode: Text.Wrap
                     }
                 }
@@ -301,7 +304,7 @@ Dialog {
                     Label {
                         Layout.fillWidth: true
                         text: qsTr("Subtasks (%1/100)").arg(root.subtaskDrafts.length)
-                        color: ThemeModule.Theme.text
+                        color: ThemeModule.Theme.textPrimary
                         font.bold: true
                     }
                     Shared.AppButton {
@@ -318,20 +321,21 @@ Dialog {
                         required property var modelData
                         Layout.fillWidth: true
 
-                        CheckBox {
+                        ThemeModule.AppCheckBox {
                             checked: Boolean(modelData.completed)
                             Accessible.name: qsTr("Subtask complete")
                             onClicked: root.updateSubtask(index, { completed: checked })
                             indicator: Rectangle {
                                 implicitWidth: 20
                                 implicitHeight: 20
-                                radius: 5
-                                color: parent.checked ? ThemeModule.Theme.accent : "#0d101a"
-                                border.color: parent.activeFocus ? ThemeModule.Theme.cyan : ThemeModule.Theme.border
+                                radius: ThemeModule.Theme.controlRadius
+                                color: parent.checked ? ThemeModule.Theme.selectionBlue : ThemeModule.Theme.insetSurface
+                                border.color: parent.activeFocus ? ThemeModule.Theme.focusHighlight : ThemeModule.Theme.borderColor
+                                border.width: parent.activeFocus ? ThemeModule.Theme.focusBorderWidth : ThemeModule.Theme.panelBorderWidth
                                 Text {
                                     anchors.centerIn: parent
                                     text: parent.parent.checked ? "✓" : ""
-                                    color: ThemeModule.Theme.text
+                                    color: ThemeModule.Theme.textPrimary
                                     font.pixelSize: 13
                                 }
                             }
@@ -357,7 +361,7 @@ Dialog {
                 Label {
                     visible: root.subtaskDrafts.length === 0
                     text: qsTr("No subtasks yet.")
-                    color: ThemeModule.Theme.textDim
+                    color: ThemeModule.Theme.textSecondary
                     font.pixelSize: 12
                 }
             }
@@ -434,9 +438,9 @@ Dialog {
     }
 
     background: Rectangle {
-        color: ThemeModule.Theme.panelAlt
-        border.color: ThemeModule.Theme.accent
+        color: ThemeModule.Theme.raisedSurface
+        border.color: ThemeModule.Theme.accentCyan
         border.width: 1
-        radius: 16
+        radius: ThemeModule.Theme.panelRadius
     }
 }

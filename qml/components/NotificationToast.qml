@@ -12,9 +12,9 @@ Rectangle {
     visible: opacity > 0
     implicitWidth: Math.min(parent ? parent.width - 32 : 420, toastText.implicitWidth + 38)
     implicitHeight: 48
-    radius: 12
-    color: "#ec171a2a"
-    border.color: ThemeModule.Theme.cyan
+    radius: ThemeModule.Theme.panelRadius
+    color: ThemeModule.Theme.raisedSurface
+    border.color: ThemeModule.Theme.accentCyan
     border.width: 1
     opacity: root.message.length > 0 ? 1 : 0
     Accessible.role: Accessible.AlertMessage
@@ -25,8 +25,8 @@ Rectangle {
         anchors.centerIn: parent
         width: Math.min(480, parent.width - 32)
         text: root.displayedMessage
-        color: ThemeModule.Theme.text
-        font.family: ThemeModule.Theme.bodyFont
+        color: ThemeModule.Theme.textPrimary
+        font.family: ThemeModule.Theme.fontFamily
         font.pixelSize: 13
         horizontalAlignment: Text.AlignHCenter
         wrapMode: Text.Wrap
