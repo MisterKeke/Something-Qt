@@ -69,22 +69,41 @@ ApplicationWindow {
     }
 
     property string currentRoute: "dashboard"
-    property bool pageActive: true
+    property bool fullUiOpened: false
+    property bool pageActive: fullUiOpened
     property var routeState: ({})
     readonly property var routeTitles: routeCatalog.routeTitles
     readonly property var navigationItems: routeCatalog.navigationItems
+    property bool shuttingDown: false
 
-    function focusCurrentTab() {
+    onClosing: {
+        shuttingDown = true
+        consoleWindow.hide()
+        appController.requestShutdown()
+    }
+
+    ConsoleWindow {
+        id: consoleWindow
+        palette: window.palette
+        controller: terminalController
+        fullApplicationOpened: window.fullUiOpened
+        returnRoute: window.currentRoute
+        returnTitle: window.routeTitles[window.currentRoute] || qsTr("Main Page")
+        interactionBlocked: legacyDataImportController.importActive || window.shuttingDown
+        onNavigateRequested: function(routeId) { window.navigateTo(routeId) }
+    }
+
+    function focusMainPage() {
         Qt.callLater(function() {
-            if (workspaceTabs.currentIndex === 1)
-                terminalPage.focusInput()
-            else if (window.currentRoute === "dashboard" && pageLoader.item
-                     && typeof pageLoader.item.restoreShellFocus === "function")
+            if (!window.active || window.shuttingDown)
+                return
+            if (window.currentRoute === "dashboard" && pageLoader.item
+                    && typeof pageLoader.item.restoreShellFocus === "function")
                 pageLoader.item.restoreShellFocus()
             else if (window.currentRoute !== "dashboard")
                 pageNavigationSelector.forceActiveFocus()
             else
-                mainTabButton.forceActiveFocus()
+                mainPageButton.forceActiveFocus()
         })
     }
 
@@ -110,15 +129,16 @@ ApplicationWindow {
     }
 
     function navigateTo(routeId) {
-        if (!routeTitles[routeId])
+        if (shuttingDown || !routeTitles[routeId])
             return
         if (routeId === "terminal") {
-            workspaceTabs.currentIndex = 1
-            focusCurrentTab()
+            if (!legacyDataImportController.importActive && !setupLaunchResult.visible)
+                consoleWindow.present()
             return
         }
 
-        workspaceTabs.currentIndex = 0
+        appController.requestFullWindow()
+        focusMainPage()
         if (routeId === currentRoute)
             return
 
@@ -244,228 +264,153 @@ ApplicationWindow {
         anchors.fill: parent
         spacing: 0
 
-        TabBar {
-            id: workspaceTabs
+        RowLayout {
             Layout.fillWidth: true
             Layout.leftMargin: 24
             Layout.rightMargin: 24
             Layout.topMargin: 12
             Layout.bottomMargin: 6
             spacing: 8
-            onCurrentIndexChanged: window.focusCurrentTab()
-            background: Rectangle { color: "transparent" }
 
-            TabButton {
-                id: mainTabButton
+            Shared.AppButton {
+                id: mainPageButton
                 text: qsTr("Main Page")
-                width: Math.max(140, implicitWidth)
-                font.family: ThemeModule.Theme.fontFamily
-                font.weight: Font.DemiBold
-                contentItem: Label {
-                    text: mainTabButton.text
-                    font: mainTabButton.font
-                    color: mainTabButton.checked ? ThemeModule.Theme.textPrimary : ThemeModule.Theme.textSecondary
-                    horizontalAlignment: Text.AlignHCenter
-                    verticalAlignment: Text.AlignVCenter
-                }
-                background: Rectangle {
-                    implicitHeight: 42
-                    radius: ThemeModule.Theme.panelRadius
-                    color: mainTabButton.checked ? ThemeModule.Theme.selectionBlue
-                           : mainTabButton.down ? ThemeModule.Theme.shadowBorder
-                           : mainTabButton.hovered ? ThemeModule.Theme.hoverSurface : ThemeModule.Theme.panelSurface
-                    border.color: mainTabButton.activeFocus ? ThemeModule.Theme.focusHighlight
-                                  : mainTabButton.checked ? ThemeModule.Theme.strongBorder : ThemeModule.Theme.borderColor
-                    border.width: mainTabButton.activeFocus ? ThemeModule.Theme.focusBorderWidth : ThemeModule.Theme.panelBorderWidth
-                }
+                quiet: window.currentRoute !== "dashboard"
+                onClicked: window.navigateTo("dashboard")
             }
-            TabButton {
-                id: consoleTabButton
-                text: qsTr("Console")
-                width: Math.max(140, implicitWidth)
-                font.family: ThemeModule.Theme.fontFamily
-                font.weight: Font.DemiBold
-                contentItem: Label {
-                    text: consoleTabButton.text
-                    font: consoleTabButton.font
-                    color: consoleTabButton.checked ? ThemeModule.Theme.textPrimary : ThemeModule.Theme.textSecondary
-                    horizontalAlignment: Text.AlignHCenter
-                    verticalAlignment: Text.AlignVCenter
-                }
-                background: Rectangle {
-                    implicitHeight: 42
-                    radius: ThemeModule.Theme.panelRadius
-                    color: consoleTabButton.checked ? ThemeModule.Theme.selectionBlue
-                           : consoleTabButton.down ? ThemeModule.Theme.shadowBorder
-                           : consoleTabButton.hovered ? ThemeModule.Theme.hoverSurface : ThemeModule.Theme.panelSurface
-                    border.color: consoleTabButton.activeFocus ? ThemeModule.Theme.focusHighlight
-                                  : consoleTabButton.checked ? ThemeModule.Theme.strongBorder : ThemeModule.Theme.borderColor
-                    border.width: consoleTabButton.activeFocus ? ThemeModule.Theme.focusBorderWidth : ThemeModule.Theme.panelBorderWidth
-                }
+            Item { Layout.fillWidth: true }
+            Shared.AppButton {
+                text: qsTr("Open Console")
+                Accessible.name: qsTr("Open Console in a separate window")
+                enabled: !legacyDataImportController.importActive
+                         && !setupLaunchResult.visible && !window.shuttingDown
+                onClicked: window.navigateTo("terminal")
             }
         }
 
-        StackLayout {
+        ScrollView {
+            id: shellScroll
             Layout.fillWidth: true
             Layout.fillHeight: true
-            currentIndex: workspaceTabs.currentIndex
-
-            ScrollView {
-                id: shellScroll
-                clip: true
-                contentWidth: availableWidth
-                ScrollBar.vertical: ThemeModule.AppScrollBar { policy: ScrollBar.AsNeeded }
-                ColumnLayout {
-                    width: shellScroll.availableWidth
-                    spacing: 18
-                    RowLayout {
-                        visible: window.currentRoute !== "dashboard"
-                        Layout.fillWidth: true
-                        Layout.leftMargin: 24
-                        Layout.rightMargin: 24
-                        Layout.topMargin: 18
-                        spacing: 12
-                        Shared.AppButton {
-                            text: qsTr("‹ Main Page")
-                            quiet: true
-                            onClicked: window.navigateTo("dashboard")
-                        }
-                        Shared.AppComboBox {
-                            id: pageNavigationSelector
-                            Layout.preferredWidth: 220
-                            model: window.navigationItems
-                            textRole: "title"
-                            valueRole: "id"
-                            currentIndex: {
-                                for (let i = 0; i < window.navigationItems.length; ++i)
-                                    if (window.navigationItems[i].id === window.currentRoute) return i
-                                return -1
-                            }
-                            Accessible.name: qsTr("Navigate to a page")
-                            onActivated: window.navigateTo(currentValue)
-                        }
-                        Item { Layout.fillWidth: true }
-                        Shared.StatusBadge {
-                            text: appController.lifecycleState === "running" ? qsTr("Ready") : qsTr("Starting")
-                            badgeColor: appController.lifecycleState === "running" ? ThemeModule.Theme.success : ThemeModule.Theme.warning
-                        }
-                        Shared.AppButton {
-                            visible: setupsController.launching
-                            text: qsTr("Stop setup")
-                            quiet: true
-                            onClicked: setupsController.cancelLaunch()
-                        }
+            clip: true
+            contentWidth: availableWidth
+            ScrollBar.vertical: ThemeModule.AppScrollBar { policy: ScrollBar.AsNeeded }
+            ColumnLayout {
+                width: shellScroll.availableWidth
+                spacing: 18
+                RowLayout {
+                    visible: window.currentRoute !== "dashboard"
+                    Layout.fillWidth: true
+                    Layout.leftMargin: 24
+                    Layout.rightMargin: 24
+                    Layout.topMargin: 18
+                    spacing: 12
+                    Shared.AppButton {
+                        text: qsTr("‹ Main Page")
+                        quiet: true
+                        onClicked: window.navigateTo("dashboard")
                     }
-                    ColumnLayout {
-                        visible: window.currentRoute !== "dashboard"
-                        Layout.fillWidth: true
-                        Layout.leftMargin: 24
-                        Layout.rightMargin: 24
-                        spacing: 4
-                        Label {
-                            text: window.routeTitles[window.currentRoute] || qsTr("Something")
-                            color: ThemeModule.Theme.textPrimary
-                            font.family: ThemeModule.Theme.fontFamily
-                            font.pixelSize: 30
-                            font.bold: true
+                    Shared.AppComboBox {
+                        id: pageNavigationSelector
+                        Layout.preferredWidth: 220
+                        model: window.navigationItems
+                        textRole: "title"
+                        valueRole: "id"
+                        currentIndex: {
+                            for (let i = 0; i < window.navigationItems.length; ++i)
+                                if (window.navigationItems[i].id === window.currentRoute) return i
+                            return -1
                         }
-                        Label {
-                            Layout.fillWidth: true
-                            text: window.currentRoute === "fileExplorer" ? qsTr("Your drives, folders, and files in one place")
-                                : window.currentRoute === "tasks" ? qsTr("Search, plan, and track task completion")
-                                : window.currentRoute === "calendar" ? qsTr("Your schedule at a glance")
-                                : window.currentRoute === "weather" ? qsTr("Your local forecast and city weather")
-                                : window.currentRoute === "currencies" ? qsTr("Rates, conversions, and favorite pairs")
-                                : window.currentRoute === "setups" ? qsTr("Launch your saved application groups")
-                                : window.currentRoute === "applications" ? qsTr("Your favorite desktop applications")
-                                : ""
-                            visible: text.length > 0
-                            color: ThemeModule.Theme.textSecondary
-                            font.pixelSize: 13
-                            wrapMode: Text.Wrap
-                        }
+                        Accessible.name: qsTr("Navigate to a page")
+                        onActivated: window.navigateTo(currentValue)
                     }
-                    Shared.AppCard {
-                        Layout.fillWidth: true
-                        Layout.leftMargin: 24
-                        Layout.rightMargin: 24
-                        visible: appController.startupErrorMessage.length > 0
-                        ColumnLayout {
-                            width: parent.width
-                            Label { text: qsTr("Startup could not complete"); color: ThemeModule.Theme.error; font.bold: true }
-                            Label { Layout.fillWidth: true; text: appController.startupErrorMessage; color: ThemeModule.Theme.textSecondary; wrapMode: Text.Wrap }
-                        }
+                    Item { Layout.fillWidth: true }
+                    Shared.StatusBadge {
+                        text: appController.lifecycleState === "running" ? qsTr("Ready") : qsTr("Starting")
+                        badgeColor: appController.lifecycleState === "running" ? ThemeModule.Theme.success : ThemeModule.Theme.warning
                     }
-                    Loader {
-                        id: pageLoader
-                        Layout.fillWidth: true
-                        Layout.leftMargin: 24
-                        Layout.rightMargin: 24
-                        Layout.topMargin: window.currentRoute === "dashboard" ? 22 : 0
-                        Layout.bottomMargin: 28
-                        Layout.preferredHeight: item ? item.implicitHeight : 640
-                        active: window.pageActive
-                        asynchronous: true
-                        opacity: status === Loader.Ready ? 1 : 0
-                        Behavior on opacity { NumberAnimation { duration: ThemeModule.Theme.pageMotion; easing.type: Easing.OutCubic } }
-                        sourceComponent: window.currentRoute === "settings" ? wallpaperPageComponent
-                            : window.currentRoute === "tasks" ? tasksPageComponent
-                            : window.currentRoute === "calendar" ? calendarPageComponent
-                            : window.currentRoute === "dashboard" ? dashboardPageComponent
-                            : window.currentRoute === "weather" ? weatherPageComponent
-                            : window.currentRoute === "currencies" ? currenciesPageComponent
-                            : window.currentRoute === "applications" ? desktopApplicationsPageComponent
-                            : window.currentRoute === "runningApplications" ? runningApplicationsPageComponent
-                            : window.currentRoute === "setups" ? setupsPageComponent
-                            : window.currentRoute === "fileExplorer" ? fileExplorerPageComponent
-                            : window.currentRoute === "steam" ? steamPageComponent
-                            : (window.currentRoute === "telegram" || window.currentRoute === "youtube") ? favoritesPageComponent
-                            : dashboardPageComponent
-                        onLoaded: {
-                            if (item && typeof item.restoreViewState === "function")
-                                item.restoreViewState(window.routeState[window.currentRoute] || {})
-                            shellScroll.contentItem.contentY = Number(window.routeScrollPositions[window.currentRoute] || 0)
-                        }
+                    Shared.AppButton {
+                        visible: setupsController.launching
+                        text: qsTr("Stop setup")
+                        quiet: true
+                        onClicked: setupsController.cancelLaunch()
                     }
                 }
-            }
-
-            ScrollView {
-                id: consoleScroll
-                clip: true
-                contentWidth: availableWidth
-                ScrollBar.vertical: ThemeModule.AppScrollBar { policy: ScrollBar.AsNeeded }
-
                 ColumnLayout {
-                    width: consoleScroll.availableWidth
-                    spacing: 18
+                    visible: window.currentRoute !== "dashboard"
+                    Layout.fillWidth: true
+                    Layout.leftMargin: 24
+                    Layout.rightMargin: 24
+                    spacing: 4
                     Label {
-                        Layout.fillWidth: true
-                        Layout.leftMargin: 24
-                        Layout.rightMargin: 24
-                        Layout.topMargin: 18
-                        text: qsTr("Console")
+                        text: window.routeTitles[window.currentRoute] || qsTr("Something")
                         color: ThemeModule.Theme.textPrimary
                         font.family: ThemeModule.Theme.fontFamily
                         font.pixelSize: 30
                         font.bold: true
                     }
-                    Pages.TerminalPage {
-                        id: terminalPage
+                    Label {
                         Layout.fillWidth: true
-                        Layout.preferredHeight: implicitHeight
-                        Layout.leftMargin: 24
-                        Layout.rightMargin: 24
-                        Layout.bottomMargin: 28
-                        controller: terminalController
-                        returnRoute: window.currentRoute
-                        returnTitle: window.routeTitles[window.currentRoute] || qsTr("Main Page")
-                        onNavigateRequested: function(routeId) { window.navigateTo(routeId) }
+                        text: window.currentRoute === "fileExplorer" ? qsTr("Your drives, folders, and files in one place")
+                            : window.currentRoute === "tasks" ? qsTr("Search, plan, and track task completion")
+                            : window.currentRoute === "calendar" ? qsTr("Your schedule at a glance")
+                            : window.currentRoute === "weather" ? qsTr("Your local forecast and city weather")
+                            : window.currentRoute === "currencies" ? qsTr("Rates, conversions, and favorite pairs")
+                            : window.currentRoute === "setups" ? qsTr("Launch your saved application groups")
+                            : window.currentRoute === "applications" ? qsTr("Your favorite desktop applications")
+                            : ""
+                        visible: text.length > 0
+                        color: ThemeModule.Theme.textSecondary
+                        font.pixelSize: 13
+                        wrapMode: Text.Wrap
+                    }
+                }
+                Shared.AppCard {
+                    Layout.fillWidth: true
+                    Layout.leftMargin: 24
+                    Layout.rightMargin: 24
+                    visible: appController.startupErrorMessage.length > 0
+                    ColumnLayout {
+                        width: parent.width
+                        Label { text: qsTr("Startup could not complete"); color: ThemeModule.Theme.error; font.bold: true }
+                        Label { Layout.fillWidth: true; text: appController.startupErrorMessage; color: ThemeModule.Theme.textSecondary; wrapMode: Text.Wrap }
+                    }
+                }
+                Loader {
+                    id: pageLoader
+                    Layout.fillWidth: true
+                    Layout.leftMargin: 24
+                    Layout.rightMargin: 24
+                    Layout.topMargin: window.currentRoute === "dashboard" ? 22 : 0
+                    Layout.bottomMargin: 28
+                    Layout.preferredHeight: item ? item.implicitHeight : 640
+                    active: window.pageActive
+                    asynchronous: true
+                    opacity: status === Loader.Ready ? 1 : 0
+                    Behavior on opacity { NumberAnimation { duration: ThemeModule.Theme.pageMotion; easing.type: Easing.OutCubic } }
+                    sourceComponent: window.currentRoute === "settings" ? wallpaperPageComponent
+                        : window.currentRoute === "tasks" ? tasksPageComponent
+                        : window.currentRoute === "calendar" ? calendarPageComponent
+                        : window.currentRoute === "dashboard" ? dashboardPageComponent
+                        : window.currentRoute === "weather" ? weatherPageComponent
+                        : window.currentRoute === "currencies" ? currenciesPageComponent
+                        : window.currentRoute === "applications" ? desktopApplicationsPageComponent
+                        : window.currentRoute === "runningApplications" ? runningApplicationsPageComponent
+                        : window.currentRoute === "setups" ? setupsPageComponent
+                        : window.currentRoute === "fileExplorer" ? fileExplorerPageComponent
+                        : window.currentRoute === "steam" ? steamPageComponent
+                        : (window.currentRoute === "telegram" || window.currentRoute === "youtube") ? favoritesPageComponent
+                        : dashboardPageComponent
+                    onLoaded: {
+                        if (item && typeof item.restoreViewState === "function")
+                            item.restoreViewState(window.routeState[window.currentRoute] || {})
+                        shellScroll.contentItem.contentY = Number(window.routeScrollPositions[window.currentRoute] || 0)
                     }
                 }
             }
         }
     }
+
     Connections {
         target: setupsController
         function onLaunchFinished(summary) {
@@ -541,6 +486,11 @@ ApplicationWindow {
         context: Qt.WindowShortcut
         enabled: !window.shortcutIsBlocked()
         onActivated: window.navigateTo("terminal")
+    }
+
+    Connections {
+        target: appController
+        function onFullWindowRequested() { window.focusMainPage() }
     }
 
     Connections {

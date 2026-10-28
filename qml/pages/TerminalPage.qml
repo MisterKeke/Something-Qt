@@ -10,6 +10,7 @@ Item {
     required property var controller
     property string returnRoute: "dashboard"
     property string returnTitle: qsTr("Main Page")
+    property bool showReturnButton: true
     signal navigateRequested(string routeId)
 
     implicitHeight: pageContent.implicitHeight
@@ -326,6 +327,7 @@ Item {
             }
             Shared.AppButton {
                 text: qsTr("Return to %1").arg(root.returnTitle)
+                visible: root.showReturnButton
                 quiet: true
                 Accessible.name: text
                 onClicked: root.navigateRequested(root.returnRoute || "dashboard")

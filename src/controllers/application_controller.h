@@ -24,11 +24,13 @@ public:
     QStringList unavailableCapabilities() const;
 
     Q_INVOKABLE void requestShutdown();
+    Q_INVOKABLE void requestFullWindow();
 
 signals:
     void stateChanged();
     void capabilitiesChanged();
     void shutdownFinished();
+    void fullWindowRequested();
 
 private:
     void onGraphShutdownComplete();
