@@ -1092,6 +1092,8 @@ void FavoritesController::dispatchNewsFetches()
         pending.scanGeneration = generation;
         providers::ProviderRequest request;
         if (source == QStringLiteral("telegram")) {
+            // The shared parser uses this channel to build validated post links.
+            pending.reference = sourceId;
             request = {providers::ProviderId::Telegram,
                        domain::telegramPostsUrl(sourceId), true, 0};
         } else {
