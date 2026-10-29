@@ -29,6 +29,7 @@ private slots:
     void registryRequiresExplicitValidUniqueDefinitions();
     void completionHandlesPartialTokensQuotesAndUnknownCommands();
     void serviceRejectsInvalidAndUnavailableCommands();
+    void runFullIsDiscoverableAndOnlyRequestsTheFullWindow();
     void queryFailuresExposeStructuredErrorCodes();
     void acceptedStorageRequestHasOneFinalResult();
     void sharedMutationWorkflowCorrelatesCommittedValuesAndConflicts();
@@ -155,6 +156,64 @@ void ApplicationCommandTest::completionHandlesPartialTokensQuotesAndUnknownComma
     QCOMPARE(suggestionsFor(QStringLiteral("task add \"--priority\" ")),
              QStringList({QStringLiteral("--priority"), QStringLiteral("--due")}));
     QVERIFY(suggestionsFor(QStringLiteral("settings week-start 4 ")).isEmpty());
+}
+
+void ApplicationCommandTest::runFullIsDiscoverableAndOnlyRequestsTheFullWindow()
+{
+    application::ApplicationServiceGraph graph;
+    services::ApplicationCommandService service(&graph);
+    QSignalSpy accepted(&service, &services::ApplicationCommandService::requestAccepted);
+    QSignalSpy finished(&service, &services::ApplicationCommandService::requestFinished);
+    QSignalSpy rejected(&service, &services::ApplicationCommandService::requestRejected);
+    QSignalSpy fullWindow(&service, &services::ApplicationCommandService::fullWindowRequested);
+    QSignalSpy route(&service, &services::ApplicationCommandService::routeRequested);
+    QSignalSpy storage(&graph, &application::ApplicationServiceGraph::storageOperationFinished);
+
+    service.submit(QStringLiteral("help run"));
+    QCOMPARE(finished.size(), 1);
+    const auto help = qvariant_cast<services::ConsoleRequestResult>(finished.takeFirst().at(0));
+    QCOMPARE(help.data.value(QStringLiteral("usage")).toString(), QStringLiteral("run full"));
+    accepted.clear();
+    const auto completion = application::CommandCompletion::complete(
+        service.registry(), QStringLiteral("run f"), 5);
+    const auto suggestions = completion.value(QStringLiteral("suggestions")).toList();
+    QCOMPARE(suggestions.size(), 1);
+    QCOMPARE(suggestions.first().toMap().value(QStringLiteral("text")).toString(), QStringLiteral("full"));
+
+    for (const QString &invalid : {QStringLiteral("run"), QStringLiteral("run full extra"),
+                                  QStringLiteral("run calc.exe"), QStringLiteral("run full --page 1")})
+        service.submit(invalid);
+    QCOMPARE(rejected.size(), 4);
+    for (const auto &row : rejected) {
+        const auto result = qvariant_cast<services::ConsoleRequestResult>(row.at(0));
+        QCOMPARE(result.data.value(QStringLiteral("errorCode")).toString(), QStringLiteral("validation"));
+    }
+    QVERIFY(fullWindow.isEmpty());
+    QVERIFY(accepted.isEmpty());
+
+    // Showing the UI must work during startup and after startup failure, without
+    // querying storage or changing the user's selected main-page route.
+    for (int attempt = 0; attempt < 2; ++attempt) {
+        const QString id = service.submit(QStringLiteral("run full"));
+        QCOMPARE(accepted.size(), attempt + 1);
+        QCOMPARE(finished.size(), attempt + 1);
+        QCOMPARE(fullWindow.size(), attempt + 1);
+        const auto result = qvariant_cast<services::ConsoleRequestResult>(finished.last().at(0));
+        QCOMPARE(result.requestId, id);
+        QCOMPARE(result.state, QStringLiteral("succeeded"));
+        QVERIFY(result.data.value(QStringLiteral("openFullWindow")).toBool());
+        if (attempt == 0)
+            QVERIFY(graph.lifecycle().failStartup(domain::AppError(domain::ErrorCategory::Storage)));
+    }
+    QVERIFY(route.isEmpty());
+    QVERIFY(storage.isEmpty());
+    graph.shutdown();
+    service.submit(QStringLiteral("run full"));
+    QCOMPARE(fullWindow.size(), 2);
+    QCOMPARE(finished.size(), 2);
+    QCOMPARE(rejected.size(), 5);
+    const auto shutdown = qvariant_cast<services::ConsoleRequestResult>(rejected.last().at(0));
+    QCOMPARE(shutdown.data.value(QStringLiteral("errorCode")).toString(), QStringLiteral("shutdown"));
 }
 
 void ApplicationCommandTest::serviceRejectsInvalidAndUnavailableCommands()

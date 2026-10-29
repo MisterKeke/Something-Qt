@@ -36,6 +36,7 @@ Item {
         contentWidth: width
         contentHeight: pageColumn.implicitHeight
         boundsBehavior: Flickable.StopAtBounds
+        ScrollBar.vertical: ThemeModule.AppScrollBar { policy: ScrollBar.AsNeeded }
 
         ColumnLayout {
             id: pageColumn
@@ -55,22 +56,22 @@ Item {
                             spacing: 3
                             Label {
                                 text: qsTr("Your location")
-                                color: ThemeModule.Theme.text
-                                font.family: ThemeModule.Theme.displayFont
+                                color: ThemeModule.Theme.textPrimary
+                                font.family: ThemeModule.Theme.fontFamily
                                 font.pixelSize: 19
                                 font.weight: Font.DemiBold
                             }
                             Label {
                                 text: controller.primaryLocation
-                                color: ThemeModule.Theme.textDim
-                                font.family: ThemeModule.Theme.bodyFont
+                                color: ThemeModule.Theme.textSecondary
+                                font.family: ThemeModule.Theme.fontFamily
                                 font.pixelSize: 13
                             }
                             Label {
                                 text: controller.primaryStatus
                                 visible: text.length > 0
-                                color: controller.primaryError.length ? ThemeModule.Theme.warning : ThemeModule.Theme.textDim
-                                font.family: ThemeModule.Theme.bodyFont
+                                color: controller.primaryError.length ? ThemeModule.Theme.warning : ThemeModule.Theme.textSecondary
+                                font.family: ThemeModule.Theme.fontFamily
                                 font.pixelSize: 11
                                 wrapMode: Text.Wrap
                             }
@@ -96,7 +97,7 @@ Item {
                         visible: controller.primaryError.length > 0
                         text: controller.primaryError
                         color: ThemeModule.Theme.warning
-                        font.family: ThemeModule.Theme.bodyFont
+                        font.family: ThemeModule.Theme.fontFamily
                         font.pixelSize: 12
                         wrapMode: Text.Wrap
                     }
@@ -123,21 +124,21 @@ Item {
                             spacing: 4
                             Label {
                                 text: controller.primaryCurrent.icon || "🌡️"
-                                color: ThemeModule.Theme.text
+                                color: ThemeModule.Theme.textPrimary
                                 font.pixelSize: 36
                             }
                             Label {
                                 text: root.temperature(controller.primaryCurrent.temperature,
                                     controller.primaryCurrent.hasTemperature === true)
-                                color: ThemeModule.Theme.text
-                                font.family: ThemeModule.Theme.displayFont
+                                color: ThemeModule.Theme.textPrimary
+                                font.family: ThemeModule.Theme.fontFamily
                                 font.pixelSize: 38
                                 font.weight: Font.Bold
                             }
                             Label {
                                 text: controller.primaryCurrent.condition || qsTr("Weather unavailable")
-                                color: ThemeModule.Theme.textDim
-                                font.family: ThemeModule.Theme.bodyFont
+                                color: ThemeModule.Theme.textSecondary
+                                font.family: ThemeModule.Theme.fontFamily
                                 font.pixelSize: 13
                             }
                         }
@@ -149,8 +150,8 @@ Item {
                                 text: qsTr("Feels like %1").arg(root.temperature(
                                     controller.primaryCurrent.feelsLike,
                                     controller.primaryCurrent.hasFeelsLike === true))
-                                color: ThemeModule.Theme.text
-                                font.family: ThemeModule.Theme.bodyFont
+                                color: ThemeModule.Theme.textPrimary
+                                font.family: ThemeModule.Theme.fontFamily
                                 font.pixelSize: 13
                             }
                             Label {
@@ -158,16 +159,16 @@ Item {
                                 text: controller.primaryCurrent.hasWind === true
                                       ? qsTr("Wind %1 km/h").arg(Math.round(controller.primaryCurrent.wind))
                                       : qsTr("Wind —")
-                                color: ThemeModule.Theme.textDim
-                                font.family: ThemeModule.Theme.bodyFont
+                                color: ThemeModule.Theme.textSecondary
+                                font.family: ThemeModule.Theme.fontFamily
                                 font.pixelSize: 13
                             }
                             Label {
                                 Layout.fillWidth: true
                                 text: controller.primaryUpdatedAt.length
                                       ? qsTr("Updated %1").arg(controller.primaryUpdatedAt) : ""
-                                color: ThemeModule.Theme.textDim
-                                font.family: ThemeModule.Theme.bodyFont
+                                color: ThemeModule.Theme.textSecondary
+                                font.family: ThemeModule.Theme.fontFamily
                                 font.pixelSize: 11
                             }
                         }
@@ -191,18 +192,18 @@ Item {
                                 required property int index
                                 Layout.fillWidth: true
                                 Layout.preferredHeight: 146
-                                radius: 12
-                                color: index === 0 ? "#28223d" : ThemeModule.Theme.panelAlt
-                                border.color: index === 0 ? ThemeModule.Theme.accent : ThemeModule.Theme.border
+                                radius: ThemeModule.Theme.panelRadius
+                                color: index === 0 ? ThemeModule.Theme.selectionBlue : ThemeModule.Theme.raisedSurface
+                                border.color: index === 0 ? ThemeModule.Theme.accentCyan : ThemeModule.Theme.borderColor
                                 ColumnLayout {
                                     anchors.fill: parent
                                     anchors.margins: 10
                                     spacing: 4
-                                    Label { text: root.formatDate(date); color: ThemeModule.Theme.text; font.bold: true; font.pixelSize: 12 }
-                                    Label { text: icon; color: ThemeModule.Theme.text; font.pixelSize: 22 }
-                                    Label { text: condition; color: ThemeModule.Theme.textDim; font.pixelSize: 10; wrapMode: Text.Wrap; Layout.fillWidth: true }
-                                    Label { text: qsTr("%1° / %2°").arg(Math.round(maximum)).arg(Math.round(minimum)); color: ThemeModule.Theme.text; font.pixelSize: 12 }
-                                    Label { text: qsTr("%1% rain").arg(Math.round(precipitationProbability)); color: ThemeModule.Theme.textDim; font.pixelSize: 10 }
+                                    Label { text: root.formatDate(date); color: ThemeModule.Theme.textPrimary; font.bold: true; font.pixelSize: 12 }
+                                    Label { text: icon; color: ThemeModule.Theme.textPrimary; font.pixelSize: 22 }
+                                    Label { text: condition; color: ThemeModule.Theme.textSecondary; font.pixelSize: ThemeModule.Theme.metadataFontSize; wrapMode: Text.Wrap; Layout.fillWidth: true }
+                                    Label { text: qsTr("%1° / %2°").arg(Math.round(maximum)).arg(Math.round(minimum)); color: ThemeModule.Theme.textPrimary; font.pixelSize: 12 }
+                                    Label { text: qsTr("%1% rain").arg(Math.round(precipitationProbability)); color: ThemeModule.Theme.textSecondary; font.pixelSize: ThemeModule.Theme.metadataFontSize }
                                 }
                             }
                         }
@@ -218,15 +219,15 @@ Item {
                     spacing: 10
                     Label {
                         text: qsTr("Search another city")
-                        color: ThemeModule.Theme.text
-                        font.family: ThemeModule.Theme.displayFont
+                        color: ThemeModule.Theme.textPrimary
+                        font.family: ThemeModule.Theme.fontFamily
                         font.pixelSize: 18
                         font.weight: Font.DemiBold
                     }
                     Label {
                         text: qsTr("This forecast is temporary and does not replace your saved location.")
-                        color: ThemeModule.Theme.textDim
-                        font.family: ThemeModule.Theme.bodyFont
+                        color: ThemeModule.Theme.textSecondary
+                        font.family: ThemeModule.Theme.fontFamily
                         font.pixelSize: 12
                         wrapMode: Text.Wrap
                     }
@@ -263,23 +264,23 @@ Item {
                     Label {
                         text: controller.cityLocation
                         visible: controller.cityForecast.count > 0
-                        color: ThemeModule.Theme.text
-                        font.family: ThemeModule.Theme.displayFont
+                        color: ThemeModule.Theme.textPrimary
+                        font.family: ThemeModule.Theme.fontFamily
                         font.pixelSize: 15
                         font.weight: Font.DemiBold
                     }
                     RowLayout {
                         visible: controller.cityForecast.count > 0
-                        Label { text: controller.cityCurrent.icon || "🌡️"; color: ThemeModule.Theme.text; font.pixelSize: 28 }
+                        Label { text: controller.cityCurrent.icon || "🌡️"; color: ThemeModule.Theme.textPrimary; font.pixelSize: 28 }
                         Label {
                             text: root.temperature(controller.cityCurrent.temperature,
                                 controller.cityCurrent.hasTemperature === true)
-                            color: ThemeModule.Theme.text
-                            font.family: ThemeModule.Theme.displayFont
+                            color: ThemeModule.Theme.textPrimary
+                            font.family: ThemeModule.Theme.fontFamily
                             font.pixelSize: 27
                             font.weight: Font.Bold
                         }
-                        Label { text: controller.cityCurrent.condition || qsTr("Weather unavailable"); color: ThemeModule.Theme.textDim; font.pixelSize: 12 }
+                        Label { text: controller.cityCurrent.condition || qsTr("Weather unavailable"); color: ThemeModule.Theme.textSecondary; font.pixelSize: 12 }
                     }
                     GridLayout {
                         Layout.fillWidth: true
@@ -298,15 +299,15 @@ Item {
                                 required property int index
                                 Layout.fillWidth: true
                                 Layout.preferredHeight: 92
-                                radius: 10
-                                color: ThemeModule.Theme.panelAlt
-                                border.color: ThemeModule.Theme.border
+                                radius: ThemeModule.Theme.panelRadius
+                                color: ThemeModule.Theme.raisedSurface
+                                border.color: ThemeModule.Theme.borderColor
                                 Column {
                                     anchors.centerIn: parent
                                     spacing: 3
-                                    Label { anchors.horizontalCenter: parent.horizontalCenter; text: root.formatDate(date); color: ThemeModule.Theme.text; font.pixelSize: 11 }
-                                    Label { anchors.horizontalCenter: parent.horizontalCenter; text: icon; color: ThemeModule.Theme.text; font.pixelSize: 17 }
-                                    Label { anchors.horizontalCenter: parent.horizontalCenter; text: qsTr("%1° / %2°").arg(Math.round(maximum)).arg(Math.round(minimum)); color: ThemeModule.Theme.textDim; font.pixelSize: 10 }
+                                    Label { anchors.horizontalCenter: parent.horizontalCenter; text: root.formatDate(date); color: ThemeModule.Theme.textPrimary; font.pixelSize: 11 }
+                                    Label { anchors.horizontalCenter: parent.horizontalCenter; text: icon; color: ThemeModule.Theme.textPrimary; font.pixelSize: 17 }
+                                    Label { anchors.horizontalCenter: parent.horizontalCenter; text: qsTr("%1° / %2°").arg(Math.round(maximum)).arg(Math.round(minimum)); color: ThemeModule.Theme.textSecondary; font.pixelSize: ThemeModule.Theme.metadataFontSize }
                                 }
                             }
                         }

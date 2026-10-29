@@ -165,8 +165,8 @@ Item {
                 Label {
                     Layout.fillWidth: true
                     text: qsTr("Create, organize, and complete your tasks")
-                    color: ThemeModule.Theme.textDim
-                    font.family: ThemeModule.Theme.bodyFont
+                    color: ThemeModule.Theme.textSecondary
+                    font.family: ThemeModule.Theme.fontFamily
                     font.pixelSize: 13
                     wrapMode: Text.Wrap
                 }
@@ -286,13 +286,13 @@ Item {
                     model: root.sortModes
                     onActivated: root.sendFilters()
                 }
-                CheckBox {
+                ThemeModule.AppCheckBox {
                     id: ascendingCheck
                     text: qsTr("Ascending")
                     Accessible.name: qsTr("Sort ascending")
                     contentItem: Label {
                         text: ascendingCheck.text
-                        color: ThemeModule.Theme.textDim
+                        color: ThemeModule.Theme.textSecondary
                         leftPadding: ascendingCheck.indicator.width + ascendingCheck.spacing
                         verticalAlignment: Text.AlignVCenter
                     }
@@ -316,7 +316,7 @@ Item {
                 text: taskController.errorMessage
                 color: ThemeModule.Theme.error
                 wrapMode: Text.Wrap
-                font.family: ThemeModule.Theme.bodyFont
+                font.family: ThemeModule.Theme.fontFamily
                 Layout.fillWidth: true
                 Accessible.role: Accessible.AlertMessage
             }
@@ -381,7 +381,7 @@ Item {
                         Layout.fillWidth: true
                         spacing: 9
 
-                        CheckBox {
+                        ThemeModule.AppCheckBox {
                             checked: completed
                             enabled: !taskController.mutationBusy
                             Accessible.name: completed ? qsTr("Mark task incomplete") : qsTr("Mark task complete")
@@ -389,13 +389,14 @@ Item {
                             indicator: Rectangle {
                                 implicitWidth: 22
                                 implicitHeight: 22
-                                radius: 6
-                                color: parent.checked ? ThemeModule.Theme.accent : "#0d101a"
-                                border.color: parent.activeFocus ? ThemeModule.Theme.cyan : ThemeModule.Theme.border
+                                radius: ThemeModule.Theme.controlRadius
+                                color: parent.checked ? ThemeModule.Theme.selectionBlue : ThemeModule.Theme.insetSurface
+                                border.color: parent.activeFocus ? ThemeModule.Theme.focusHighlight : ThemeModule.Theme.borderColor
+                                border.width: parent.activeFocus ? ThemeModule.Theme.focusBorderWidth : ThemeModule.Theme.panelBorderWidth
                                 Text {
                                     anchors.centerIn: parent
                                     text: parent.parent.checked ? "✓" : ""
-                                    color: ThemeModule.Theme.text
+                                    color: ThemeModule.Theme.textPrimary
                                     font.pixelSize: 14
                                 }
                             }
@@ -407,8 +408,8 @@ Item {
                             Label {
                                 Layout.fillWidth: true
                                 text: title
-                                color: completed ? ThemeModule.Theme.textDim : ThemeModule.Theme.text
-                                font.family: ThemeModule.Theme.displayFont
+                                color: completed ? ThemeModule.Theme.textSecondary : ThemeModule.Theme.textPrimary
+                                font.family: ThemeModule.Theme.fontFamily
                                 font.pixelSize: 16
                                 font.weight: Font.DemiBold
                                 font.strikeout: completed
@@ -418,8 +419,8 @@ Item {
                                 visible: description.length > 0
                                 Layout.fillWidth: true
                                 text: description
-                                color: ThemeModule.Theme.textDim
-                                font.family: ThemeModule.Theme.bodyFont
+                                color: ThemeModule.Theme.textSecondary
+                                font.family: ThemeModule.Theme.fontFamily
                                 font.pixelSize: 12
                                 wrapMode: Text.Wrap
                                 maximumLineCount: 4
@@ -431,9 +432,9 @@ Item {
                             visible: difficulty.length > 0
                             text: difficulty.length > 0
                                   ? difficulty.charAt(0).toUpperCase() + difficulty.slice(1) : ""
-                            badgeColor: difficulty === "hard" ? ThemeModule.Theme.pink
+                            badgeColor: difficulty === "hard" ? ThemeModule.Theme.warning
                                         : difficulty === "easy" ? ThemeModule.Theme.success
-                                        : ThemeModule.Theme.cyan
+                                        : ThemeModule.Theme.accentCyan
                         }
                         Shared.AppButton {
                             text: qsTr("%1 priority").arg(priority)
@@ -464,17 +465,17 @@ Item {
                         spacing: 7
                         Shared.StatusBadge {
                             text: root.dateSummary(dueDate, overdue)
-                            badgeColor: overdue ? ThemeModule.Theme.error : ThemeModule.Theme.cyan
+                            badgeColor: overdue ? ThemeModule.Theme.error : ThemeModule.Theme.accentCyan
                         }
                         Shared.StatusBadge {
                             text: completed ? qsTr("Completed") : qsTr("Pending")
-                            badgeColor: completed ? ThemeModule.Theme.success : ThemeModule.Theme.accent
+                            badgeColor: completed ? ThemeModule.Theme.success : ThemeModule.Theme.accentCyan
                         }
                         Label {
                             Layout.fillWidth: true
                             text: qsTr("Created %1").arg(createdAt)
-                            color: ThemeModule.Theme.textDim
-                            font.family: ThemeModule.Theme.bodyFont
+                            color: ThemeModule.Theme.textSecondary
+                            font.family: ThemeModule.Theme.fontFamily
                             font.pixelSize: 11
                             elide: Text.ElideRight
                         }
@@ -489,7 +490,7 @@ Item {
                             delegate: Shared.StatusBadge {
                                 required property string modelData
                                 text: modelData
-                                badgeColor: ThemeModule.Theme.accent
+                                badgeColor: ThemeModule.Theme.accentCyan
                             }
                         }
                     }
@@ -501,13 +502,13 @@ Item {
                         Label {
                             text: qsTr("Subtasks · %1/%2 complete")
                                   .arg(completedSubtasks).arg(subtaskCount)
-                            color: ThemeModule.Theme.textDim
-                            font.family: ThemeModule.Theme.bodyFont
+                            color: ThemeModule.Theme.textSecondary
+                            font.family: ThemeModule.Theme.fontFamily
                             font.pixelSize: 11
                         }
                         Repeater {
                             model: subtasks
-                            delegate: CheckBox {
+                            delegate: ThemeModule.AppCheckBox {
                                 required property var modelData
                                 Layout.fillWidth: true
                                 checked: Boolean(modelData.completed)
@@ -516,7 +517,7 @@ Item {
                                 Accessible.name: qsTr("Subtask: %1").arg(text)
                                 contentItem: Label {
                                     text: parent.text
-                                    color: parent.checked ? ThemeModule.Theme.textDim : ThemeModule.Theme.text
+                                    color: parent.checked ? ThemeModule.Theme.textSecondary : ThemeModule.Theme.textPrimary
                                     leftPadding: parent.indicator.width + parent.spacing
                                     verticalAlignment: Text.AlignVCenter
                                     wrapMode: Text.Wrap
@@ -542,9 +543,9 @@ Item {
             Label {
                 Layout.fillWidth: true
                 text: qsTr("Page %1").arg(taskController.pageNumber)
-                color: ThemeModule.Theme.textDim
+                color: ThemeModule.Theme.textSecondary
                 horizontalAlignment: Text.AlignHCenter
-                font.family: ThemeModule.Theme.bodyFont
+                font.family: ThemeModule.Theme.fontFamily
             }
             Shared.AppButton {
                 text: qsTr("Next")

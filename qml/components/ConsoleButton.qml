@@ -15,7 +15,7 @@ Button {
     hoverEnabled: true
     opacity: enabled ? 1 : 0.45
     scale: down ? 0.98 : 1
-    font.family: ThemeModule.Theme.bodyFont
+    font.family: ThemeModule.Theme.fontFamily
     font.pixelSize: primary ? 16 : 14
     font.weight: Font.DemiBold
     Accessible.role: Accessible.Button

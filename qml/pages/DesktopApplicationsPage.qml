@@ -99,8 +99,8 @@ Item {
                     Rectangle {
                         Layout.preferredWidth: 48
                         Layout.preferredHeight: 48
-                        radius: 12
-                        color: ThemeModule.Theme.panelAlt
+                        radius: ThemeModule.Theme.panelRadius
+                        color: ThemeModule.Theme.raisedSurface
                         Image {
                             id: applicationIcon
                             anchors.fill: parent
@@ -123,7 +123,7 @@ Item {
                             visible: (applicationIcon.customIconFailed
                                       ? nativeIconDataUrl : iconSource).length === 0
                             text: displayName.length ? Array.from(displayName)[0].toUpperCase() : "?"
-                            color: ThemeModule.Theme.accentHover
+                            color: ThemeModule.Theme.focusHighlight
                             font.pixelSize: 23
                             font.weight: Font.Bold
                         }
@@ -135,8 +135,8 @@ Item {
                         Label {
                             Layout.fillWidth: true
                             text: displayName
-                            color: ThemeModule.Theme.text
-                            font.family: ThemeModule.Theme.displayFont
+                            color: ThemeModule.Theme.textPrimary
+                            font.family: ThemeModule.Theme.fontFamily
                             font.pixelSize: 16
                             font.weight: Font.DemiBold
                             textFormat: Text.PlainText
@@ -145,8 +145,8 @@ Item {
                         Label {
                             Layout.fillWidth: true
                             text: executablePath
-                            color: ThemeModule.Theme.textDim
-                            font.family: ThemeModule.Theme.bodyFont
+                            color: ThemeModule.Theme.textSecondary
+                            font.family: ThemeModule.Theme.fontFamily
                             font.pixelSize: 11
                             textFormat: Text.PlainText
                             elide: Text.ElideMiddle
@@ -223,13 +223,13 @@ Item {
         anchors.centerIn: Overlay.overlay
         width: Math.min(460, parent ? parent.width - 40 : 420)
         closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
-        background: Rectangle { color: ThemeModule.Theme.panelAlt; radius: 16; border.color: ThemeModule.Theme.accent }
+        background: Rectangle { color: ThemeModule.Theme.raisedSurface; radius: ThemeModule.Theme.panelRadius; border.color: ThemeModule.Theme.strongBorder }
         contentItem: ColumnLayout {
             spacing: 12
             Label {
                 Layout.fillWidth: true
                 text: qsTr("Choose a display name. It may contain up to 120 characters.")
-                color: ThemeModule.Theme.textDim
+                color: ThemeModule.Theme.textSecondary
                 wrapMode: Text.Wrap
             }
             Shared.AppTextField {
@@ -284,7 +284,7 @@ Item {
         anchors.centerIn: Overlay.overlay
         width: Math.min(450, parent ? parent.width - 40 : 420)
         padding: 18
-        background: Rectangle { color: ThemeModule.Theme.panelAlt; radius: 16; border.color: ThemeModule.Theme.accent }
+        background: Rectangle { color: ThemeModule.Theme.raisedSurface; radius: ThemeModule.Theme.panelRadius; border.color: ThemeModule.Theme.strongBorder }
         contentItem: ColumnLayout {
             spacing: 8
             Shared.AppButton {

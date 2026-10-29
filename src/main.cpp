@@ -1,4 +1,6 @@
 #include <QGuiApplication>
+#include <QFont>
+#include <QFontDatabase>
 #include <QIcon>
 #include <QCursor>
 #include <QQmlContext>
@@ -83,6 +85,16 @@ void showCenteredOnLaunch(QWindow &window)
 int main(int argc, char *argv[])
 {
     QGuiApplication app(argc, argv);
+    const int bundledFontId = QFontDatabase::addApplicationFont(
+        QStringLiteral(":/something/assets/fonts/CascadiaCode.ttf"));
+    if (bundledFontId >= 0) {
+        const QStringList bundledFontFamilies = QFontDatabase::applicationFontFamilies(bundledFontId);
+        if (!bundledFontFamilies.isEmpty()) {
+            QFont applicationFont(bundledFontFamilies.constFirst());
+            applicationFont.setPointSizeF(10.5);
+            QGuiApplication::setFont(applicationFont);
+        }
+    }
     QGuiApplication::setApplicationName(QStringLiteral("Something"));
     QGuiApplication::setOrganizationName(QStringLiteral("Something"));
     QGuiApplication::setWindowIcon(QIcon(QStringLiteral(":/something/assets/appicon.png")));
@@ -254,14 +266,34 @@ int main(int argc, char *argv[])
     }
     auto *mainWindow = qobject_cast<QWindow *>(engine.rootObjects().constFirst());
     if (!mainWindow) return 1;
+    auto *consoleWindow = mainWindow->findChild<QWindow *>(QStringLiteral("consoleWindow"));
+    if (!consoleWindow) return 1;
     cursorTrailController.attachToWindow(mainWindow);
+
+    QObject::connect(&commandService, &something::services::ApplicationCommandService::fullWindowRequested,
+                     &controller, &something::controllers::ApplicationController::requestFullWindow);
+    QObject::connect(&controller, &something::controllers::ApplicationController::fullWindowRequested,
+                     mainWindow, [mainWindow, firstShow = true]() mutable {
+        if (firstShow) {
+            firstShow = false;
+            mainWindow->setProperty("fullUiOpened", true);
+            showCenteredOnLaunch(*mainWindow);
+        } else if (mainWindow->windowState() == Qt::WindowMinimized) {
+            mainWindow->showNormal();
+        } else {
+            mainWindow->show();
+        }
+        mainWindow->raise();
+        mainWindow->requestActivate();
+    });
 
     QObject::connect(&app, &QGuiApplication::lastWindowClosed,
                      &controller, &something::controllers::ApplicationController::requestShutdown);
     QObject::connect(&controller, &something::controllers::ApplicationController::shutdownFinished,
                      &app, [&app] { app.quit(); });
 
-    showCenteredOnLaunch(*mainWindow);
+    // Start with Console only. The full window is fitted and shown on demand.
+    showCenteredOnLaunch(*consoleWindow);
     services.start();
 
     return app.exec();

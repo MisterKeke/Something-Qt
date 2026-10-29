@@ -54,6 +54,7 @@ Item {
         contentWidth: width
         contentHeight: pageColumn.implicitHeight
         boundsBehavior: Flickable.StopAtBounds
+        ScrollBar.vertical: ThemeModule.AppScrollBar { policy: ScrollBar.AsNeeded }
 
         ColumnLayout {
             id: pageColumn
@@ -71,17 +72,17 @@ Item {
                         Label {
                             Layout.fillWidth: true
                             text: qsTr("Currency exchange rates")
-                            color: ThemeModule.Theme.text
-                            font.family: ThemeModule.Theme.displayFont
-                            font.pixelSize: 20
+                            color: ThemeModule.Theme.textPrimary
+                            font.family: ThemeModule.Theme.fontFamily
+                            font.pixelSize: ThemeModule.Theme.headingFontSize
                             font.weight: Font.DemiBold
                         }
-                        Shared.StatusBadge { text: qsTr("ECB data"); badgeColor: ThemeModule.Theme.cyan }
+                        Shared.StatusBadge { text: qsTr("ECB data"); badgeColor: ThemeModule.Theme.accentCyan }
                     }
                     Label {
                         text: qsTr("Live rates from Frankfurter. Saved pairs are local; exchange rates are refreshed and are not stored.")
-                        color: ThemeModule.Theme.textDim
-                        font.family: ThemeModule.Theme.bodyFont
+                        color: ThemeModule.Theme.textSecondary
+                        font.family: ThemeModule.Theme.fontFamily
                         font.pixelSize: 12
                         wrapMode: Text.Wrap
                         Layout.fillWidth: true
@@ -173,8 +174,8 @@ Item {
                                     .arg(currencyController.singleResult.baseCode || "")
                                     .arg(Number(currencyController.singleResult.rate).toFixed(4))
                                     .arg(currencyController.singleResult.quoteCode || "")
-                                color: ThemeModule.Theme.text
-                                font.family: ThemeModule.Theme.displayFont
+                                color: ThemeModule.Theme.textPrimary
+                                font.family: ThemeModule.Theme.fontFamily
                                 font.pixelSize: 19
                                 font.weight: Font.DemiBold
                             }
@@ -184,7 +185,7 @@ Item {
                                     .arg(currencyController.singleResult.baseCode || "")
                                     .arg(currencyController.singleResult.quoteCode || "")
                                 color: ThemeModule.Theme.warning
-                                font.family: ThemeModule.Theme.displayFont
+                                font.family: ThemeModule.Theme.fontFamily
                                 font.pixelSize: 15
                             }
                             Label {
@@ -193,8 +194,8 @@ Item {
                                       : currencyController.singleResult.date
                                         ? qsTr("Rate date: %1").arg(currencyController.singleResult.date) : ""
                                 visible: text.length > 0
-                                color: ThemeModule.Theme.textDim
-                                font.family: ThemeModule.Theme.bodyFont
+                                color: ThemeModule.Theme.textSecondary
+                                font.family: ThemeModule.Theme.fontFamily
                                 font.pixelSize: 11
                             }
                         }
@@ -227,8 +228,8 @@ Item {
                                 .arg(currencyController.allRates.totalCount)
                                 .arg(currencyController.allBase)
                                 .arg(currencyController.allDate.length ? qsTr(" on %1").arg(currencyController.allDate) : "")
-                            color: ThemeModule.Theme.textDim
-                            font.family: ThemeModule.Theme.bodyFont
+                            color: ThemeModule.Theme.textSecondary
+                            font.family: ThemeModule.Theme.fontFamily
                             font.pixelSize: 11
                         }
                         Shared.AppTextField {
@@ -277,15 +278,15 @@ Item {
                                     required property double rate
                                     Layout.fillWidth: true
                                     Layout.preferredHeight: 44
-                                    radius: 10
-                                    color: ThemeModule.Theme.panelAlt
-                                    border.color: ThemeModule.Theme.border
+                                    radius: ThemeModule.Theme.panelRadius
+                                    color: ThemeModule.Theme.raisedSurface
+                                    border.color: ThemeModule.Theme.borderColor
                                     RowLayout {
                                         anchors.fill: parent
                                         anchors.leftMargin: 12
                                         anchors.rightMargin: 12
-                                        Label { text: code; color: ThemeModule.Theme.text; font.bold: true; Layout.fillWidth: true }
-                                        Label { text: Number(rate).toFixed(4); color: ThemeModule.Theme.cyan; font.family: ThemeModule.Theme.bodyFont }
+                                        Label { text: code; color: ThemeModule.Theme.textPrimary; font.bold: true; Layout.fillWidth: true }
+                                        Label { text: Number(rate).toFixed(4); color: ThemeModule.Theme.accentCyan; font.family: ThemeModule.Theme.fontFamily }
                                     }
                                 }
                             }
@@ -361,8 +362,8 @@ Item {
                                     .arg(currencyController.conversionResult.baseCode || "")
                                     .arg(Number(currencyController.conversionResult.converted).toFixed(4))
                                     .arg(currencyController.conversionResult.quoteCode || "")
-                                color: ThemeModule.Theme.text
-                                font.family: ThemeModule.Theme.displayFont
+                                color: ThemeModule.Theme.textPrimary
+                                font.family: ThemeModule.Theme.fontFamily
                                 font.pixelSize: 18
                                 font.weight: Font.DemiBold
                                 wrapMode: Text.Wrap
@@ -381,7 +382,7 @@ Item {
                                       : currencyController.conversionResult.date
                                         ? qsTr("Rate date: %1").arg(currencyController.conversionResult.date) : ""
                                 visible: text.length > 0
-                                color: ThemeModule.Theme.textDim
+                                color: ThemeModule.Theme.textSecondary
                                 font.pixelSize: 11
                             }
                         }
@@ -399,8 +400,8 @@ Item {
                         Layout.fillWidth: true
                         Label {
                             text: qsTr("Favorite pairs")
-                            color: ThemeModule.Theme.text
-                            font.family: ThemeModule.Theme.displayFont
+                            color: ThemeModule.Theme.textPrimary
+                            font.family: ThemeModule.Theme.fontFamily
                             font.pixelSize: 17
                             font.weight: Font.DemiBold
                             Layout.fillWidth: true
@@ -449,9 +450,9 @@ Item {
                             required property string rateError
                             Layout.fillWidth: true
                             Layout.preferredHeight: 62
-                            radius: 10
-                            color: ThemeModule.Theme.panelAlt
-                            border.color: ThemeModule.Theme.border
+                            radius: ThemeModule.Theme.panelRadius
+                            color: ThemeModule.Theme.raisedSurface
+                            border.color: ThemeModule.Theme.borderColor
                             RowLayout {
                                 anchors.fill: parent
                                 anchors.leftMargin: 12
@@ -475,7 +476,7 @@ Item {
                                               : rateStatus === "missing" ? qsTr("No rate found")
                                               : rateStatus === "error" ? rateError
                                               : qsTr("Rate not loaded")
-                                        color: rateStatus === "error" ? ThemeModule.Theme.warning : ThemeModule.Theme.textDim
+                                        color: rateStatus === "error" ? ThemeModule.Theme.warning : ThemeModule.Theme.textSecondary
                                         font.pixelSize: 11
                                         elide: Text.ElideRight
                                     }

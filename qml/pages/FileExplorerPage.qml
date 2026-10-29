@@ -71,9 +71,9 @@ Item {
         Rectangle {
             Layout.fillWidth: true
             implicitHeight: toolbar.implicitHeight + 28
-            radius: 14
-            color: "#e611131d"
-            border.color: ThemeModule.Theme.border
+            radius: ThemeModule.Theme.panelRadius
+            color: ThemeModule.Theme.panelSurface
+            border.color: ThemeModule.Theme.borderColor
             ColumnLayout {
                 id: toolbar
                 anchors.fill: parent
@@ -115,9 +115,9 @@ Item {
                         Layout.preferredHeight: 38
                         Layout.leftMargin: 6
                         Layout.rightMargin: 6
-                        color: "#121725"
-                        border.color: ThemeModule.Theme.border
-                        radius: 8
+                        color: ThemeModule.Theme.raisedSurface
+                        border.color: ThemeModule.Theme.borderColor
+                        radius: ThemeModule.Theme.controlRadius
                         Flickable {
                             anchors.fill: parent
                             anchors.leftMargin: 8
@@ -137,14 +137,21 @@ Item {
                                         required property int index
                                         height: crumbRow.height
                                         spacing: 3
-                                        Label { height: parent.height; verticalAlignment: Text.AlignVCenter; text: index > 0 ? "›" : ""; color: ThemeModule.Theme.textDim }
+                                        Label { height: parent.height; verticalAlignment: Text.AlignVCenter; text: index > 0 ? "›" : ""; color: ThemeModule.Theme.textSecondary }
                                         ToolButton {
                                             height: parent.height
                                             text: modelData.label
                                             enabled: !root.controller.loading
                                             Accessible.name: qsTr("Open folder %1").arg(modelData.label)
                                             onClicked: root.controller.navigateToPath(modelData.relativePath)
-                                            contentItem: Text { text: parent.text; color: ThemeModule.Theme.text; font.pixelSize: 12; verticalAlignment: Text.AlignVCenter }
+                                            contentItem: Text { text: parent.text; color: parent.enabled ? ThemeModule.Theme.textPrimary : ThemeModule.Theme.textDisabled; font.family: ThemeModule.Theme.fontFamily; font.pixelSize: 12; verticalAlignment: Text.AlignVCenter; elide: Text.ElideRight }
+                                            background: Rectangle {
+                                                radius: ThemeModule.Theme.controlRadius
+                                                color: parent.down ? ThemeModule.Theme.shadowBorder
+                                                       : parent.hovered ? ThemeModule.Theme.hoverSurface : "transparent"
+                                                border.color: parent.activeFocus ? ThemeModule.Theme.focusHighlight : "transparent"
+                                                border.width: parent.activeFocus ? ThemeModule.Theme.focusBorderWidth : 0
+                                            }
                                         }
                                     }
                                 }
@@ -175,7 +182,7 @@ Item {
                         onClicked: { searchField.text = ""; root.controller.setQuery("") }
                     }
                     BusyIndicator { visible: root.controller.loading; running: visible; implicitWidth: 28; implicitHeight: 28 }
-                    Label { text: qsTr("%1 items").arg(root.controller.entries.count); color: ThemeModule.Theme.textDim; font.pixelSize: 12 }
+                    Label { text: qsTr("%1 items").arg(root.controller.entries.count); color: ThemeModule.Theme.textSecondary; font.pixelSize: 12 }
                 }
                 Flow {
                     Layout.fillWidth: true
@@ -202,14 +209,14 @@ Item {
                 visible: root.showPlaces
                 Layout.preferredWidth: 210
                 Layout.fillHeight: true
-                radius: 14
-                color: "#e611131d"
-                border.color: ThemeModule.Theme.border
+                radius: ThemeModule.Theme.panelRadius
+                color: ThemeModule.Theme.panelSurface
+                border.color: ThemeModule.Theme.borderColor
                 ColumnLayout {
                     anchors.fill: parent
                     anchors.margins: 14
                     spacing: 12
-                    Label { text: qsTr("Places"); color: ThemeModule.Theme.text; font.pixelSize: 16; font.bold: true }
+                    Label { text: qsTr("Places"); color: ThemeModule.Theme.textPrimary; font.pixelSize: 16; font.bold: true }
                     ListView {
                         Layout.fillWidth: true
                         Layout.fillHeight: true
@@ -224,22 +231,27 @@ Item {
                             onClicked: root.controller.openPlace(modelData.rootId)
                             contentItem: RowLayout {
                                 spacing: 9
-                                Label { text: "▣"; color: ThemeModule.Theme.accentHover; font.pixelSize: 20 }
-                                Label { Layout.fillWidth: true; text: modelData.label; color: ThemeModule.Theme.text; font.pixelSize: 12; elide: Text.ElideRight }
+                                Label { text: "▣"; color: parent.parent.enabled ? ThemeModule.Theme.focusHighlight : ThemeModule.Theme.textDisabled; font.family: ThemeModule.Theme.fontFamily; font.pixelSize: 20 }
+                                Label { Layout.fillWidth: true; text: modelData.label; color: parent.parent.enabled ? ThemeModule.Theme.textPrimary : ThemeModule.Theme.textDisabled; font.family: ThemeModule.Theme.fontFamily; font.pixelSize: 12; elide: Text.ElideRight }
                             }
                             background: Rectangle {
-                                radius: 8
-                                color: modelData.rootId === root.controller.rootId ? "#283452" : parent.hovered ? "#202638" : "transparent"
-                                border.color: parent.activeFocus ? ThemeModule.Theme.cyan : "transparent"
+                                radius: ThemeModule.Theme.controlRadius
+                                color: !parent.enabled ? ThemeModule.Theme.disabledSurface
+                                       : modelData.rootId === root.controller.rootId ? ThemeModule.Theme.selectionBlue
+                                       : parent.down ? ThemeModule.Theme.shadowBorder
+                                       : parent.hovered ? ThemeModule.Theme.hoverSurface : "transparent"
+                                border.color: parent.activeFocus ? ThemeModule.Theme.focusHighlight
+                                              : modelData.rootId === root.controller.rootId ? ThemeModule.Theme.strongBorder : "transparent"
+                                border.width: parent.activeFocus ? ThemeModule.Theme.focusBorderWidth : ThemeModule.Theme.panelBorderWidth
                                 Behavior on color { ColorAnimation { duration: ThemeModule.Theme.controlMotion } }
                             }
                         }
-                        ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
+                        ScrollBar.vertical: ThemeModule.AppScrollBar { policy: ScrollBar.AsNeeded }
                     }
                     Label {
                         Layout.fillWidth: true
                         text: qsTr("Added folders stay available for this session.")
-                        color: ThemeModule.Theme.textDim
+                        color: ThemeModule.Theme.textSecondary
                         wrapMode: Text.Wrap
                         font.pixelSize: 11
                     }
@@ -249,9 +261,9 @@ Item {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
                 Layout.minimumWidth: 0
-                radius: 14
-                color: "#e611131d"
-                border.color: ThemeModule.Theme.border
+                radius: ThemeModule.Theme.panelRadius
+                color: ThemeModule.Theme.panelSurface
+                border.color: ThemeModule.Theme.borderColor
                 ColumnLayout {
                     anchors.fill: parent
                     anchors.margins: 12
@@ -262,12 +274,12 @@ Item {
                         Layout.leftMargin: 12
                         Layout.rightMargin: 24
                         spacing: 12
-                        Label { Layout.fillWidth: true; text: qsTr("Name"); color: ThemeModule.Theme.textDim; font.pixelSize: 11; font.bold: true }
-                        Label { visible: root.showType; Layout.preferredWidth: 100; text: qsTr("Type"); color: ThemeModule.Theme.textDim; font.pixelSize: 11; font.bold: true }
-                        Label { visible: root.showModified; Layout.preferredWidth: 160; text: qsTr("Date modified"); color: ThemeModule.Theme.textDim; font.pixelSize: 11; font.bold: true }
-                        Label { Layout.preferredWidth: 88; text: qsTr("Size"); color: ThemeModule.Theme.textDim; font.pixelSize: 11; font.bold: true; horizontalAlignment: Text.AlignRight }
+                        Label { Layout.fillWidth: true; text: qsTr("Name"); color: ThemeModule.Theme.textSecondary; font.pixelSize: 11; font.bold: true }
+                        Label { visible: root.showType; Layout.preferredWidth: 100; text: qsTr("Type"); color: ThemeModule.Theme.textSecondary; font.pixelSize: 11; font.bold: true }
+                        Label { visible: root.showModified; Layout.preferredWidth: 160; text: qsTr("Date modified"); color: ThemeModule.Theme.textSecondary; font.pixelSize: 11; font.bold: true }
+                        Label { Layout.preferredWidth: 88; text: qsTr("Size"); color: ThemeModule.Theme.textSecondary; font.pixelSize: 11; font.bold: true; horizontalAlignment: Text.AlignRight }
                     }
-                    Rectangle { Layout.fillWidth: true; implicitHeight: 1; color: ThemeModule.Theme.border }
+                    Rectangle { Layout.fillWidth: true; implicitHeight: 1; color: ThemeModule.Theme.borderColor }
                     Item {
                         Layout.fillWidth: true
                         Layout.fillHeight: true
@@ -320,9 +332,13 @@ Item {
                                 required property bool selected
                                 width: entryList.width - 12
                                 height: 45
-                                radius: 7
-                                color: selected ? "#2b3858" : rowMouse.containsMouse ? "#22293c" : index % 2 ? "#70171c2b" : "transparent"
-                                border.color: selected ? "#647ba9" : "transparent"
+                                opacity: entryList.enabled ? 1 : 0.62
+                                radius: ThemeModule.Theme.controlRadius
+                                color: selected ? ThemeModule.Theme.selectionBlue
+                                       : rowMouse.pressed ? ThemeModule.Theme.shadowBorder
+                                       : rowMouse.containsMouse ? ThemeModule.Theme.hoverSurface
+                                       : index % 2 ? Qt.alpha(ThemeModule.Theme.panelSurface, 0.44) : "transparent"
+                                border.color: selected ? ThemeModule.Theme.strongBorder : "transparent"
                                 Behavior on color { ColorAnimation { duration: ThemeModule.Theme.controlMotion } }
                                 Behavior on border.color { ColorAnimation { duration: ThemeModule.Theme.controlMotion } }
                                 Accessible.role: Accessible.ListItem
@@ -349,17 +365,17 @@ Item {
                                             source: entryType === "link" ? "qrc:/something/assets/icons/link.svg" : directory ? "qrc:/something/assets/icons/folder.svg" : "qrc:/something/assets/icons/file.svg"
                                             sourceSize: Qt.size(28, 28)
                                         }
-                                        Label { Layout.fillWidth: true; text: name; color: canNavigate || canOpen ? ThemeModule.Theme.text : ThemeModule.Theme.textDim; elide: Text.ElideMiddle; font.pixelSize: 13 }
+                                        Label { Layout.fillWidth: true; text: name; color: canNavigate || canOpen ? ThemeModule.Theme.textPrimary : ThemeModule.Theme.textSecondary; elide: Text.ElideMiddle; font.pixelSize: 13 }
                                     }
-                                    Label { visible: root.showType; Layout.preferredWidth: 100; text: entryType === "link" ? qsTr("Link") : directory ? qsTr("Folder") : qsTr("File"); color: ThemeModule.Theme.textDim; font.pixelSize: 12; elide: Text.ElideRight }
-                                    Label { visible: root.showModified; Layout.preferredWidth: 160; text: root.formatModified(modified); color: ThemeModule.Theme.textDim; font.pixelSize: 11; elide: Text.ElideRight }
-                                    Label { Layout.preferredWidth: 88; text: root.formatSize(size, directory); color: ThemeModule.Theme.textDim; font.pixelSize: 12; horizontalAlignment: Text.AlignRight }
+                                    Label { visible: root.showType; Layout.preferredWidth: 100; text: entryType === "link" ? qsTr("Link") : directory ? qsTr("Folder") : qsTr("File"); color: ThemeModule.Theme.textSecondary; font.pixelSize: 12; elide: Text.ElideRight }
+                                    Label { visible: root.showModified; Layout.preferredWidth: 160; text: root.formatModified(modified); color: ThemeModule.Theme.textSecondary; font.pixelSize: 11; elide: Text.ElideRight }
+                                    Label { Layout.preferredWidth: 88; text: root.formatSize(size, directory); color: ThemeModule.Theme.textSecondary; font.pixelSize: 12; horizontalAlignment: Text.AlignRight }
                                 }
                             }
-                            ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
+                            ScrollBar.vertical: ThemeModule.AppScrollBar { policy: ScrollBar.AsNeeded }
                         }
                     }
-                    Rectangle { Layout.fillWidth: true; implicitHeight: 1; color: ThemeModule.Theme.border }
+                    Rectangle { Layout.fillWidth: true; implicitHeight: 1; color: ThemeModule.Theme.borderColor }
                     RowLayout {
                         Layout.fillWidth: true
                         Layout.topMargin: 9
@@ -367,7 +383,7 @@ Item {
                         Label {
                             Layout.fillWidth: true
                             text: root.controller.entries.selectedName.length > 0 ? root.controller.entries.selectedName : qsTr("Double-click a folder or file to open it")
-                            color: ThemeModule.Theme.textDim
+                            color: ThemeModule.Theme.textSecondary
                             font.pixelSize: 11
                             elide: Text.ElideMiddle
                         }

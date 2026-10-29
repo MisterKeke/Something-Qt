@@ -47,16 +47,9 @@ Item {
             context.reset()
             const cx = width / 2
             const cy = height / 2
-            const glow = context.createRadialGradient(cx, cy, 12, cx, cy, root.orbitRadius * 1.35)
-            glow.addColorStop(0, "rgba(124, 140, 255, 0.21)")
-            glow.addColorStop(0.38, "rgba(34, 211, 238, 0.07)")
-            glow.addColorStop(1, "rgba(6, 7, 13, 0)")
-            context.fillStyle = glow
-            context.fillRect(0, 0, width, height)
-
             context.beginPath()
             context.arc(cx, cy, root.orbitRadius, 0, 2 * Math.PI)
-            context.strokeStyle = "rgba(124, 140, 255, 0.32)"
+            context.strokeStyle = ThemeModule.Theme.orbitRingColor
             context.lineWidth = 1
             context.stroke()
 
@@ -66,7 +59,7 @@ Item {
                 context.moveTo(cx + Math.cos(angle) * 58, cy + Math.sin(angle) * 58)
                 context.lineTo(cx + Math.cos(angle) * (root.orbitRadius - 42),
                                cy + Math.sin(angle) * (root.orbitRadius - 42))
-                context.strokeStyle = "rgba(34, 211, 238, 0.22)"
+                context.strokeStyle = ThemeModule.Theme.orbitSpokeColor
                 context.stroke()
             }
         }
@@ -110,10 +103,11 @@ Item {
                     Rectangle {
                         anchors.fill: parent
                         radius: width / 2
-                        color: "#16192a"
-                        border.color: orbitButton.activeFocus ? ThemeModule.Theme.cyan
+                        color: ThemeModule.Theme.raisedSurface
+                        border.color: orbitButton.activeFocus ? ThemeModule.Theme.focusHighlight
+                                     : orbitButton.hovered ? ThemeModule.Theme.accentCyanLight
                                      : root.currentId === orbitButton.route.id
-                                       ? ThemeModule.Theme.cyan : "#777c8cff"
+                                       ? ThemeModule.Theme.accentCyan : ThemeModule.Theme.textDisabled
                         border.width: orbitButton.activeFocus || root.currentId === orbitButton.route.id ? 2 : 1
                         Rectangle {
                             anchors.fill: parent
@@ -121,7 +115,7 @@ Item {
                             radius: width / 2
                             color: "transparent"
                             border.width: 2
-                            border.color: ThemeModule.Theme.accentHover
+                            border.color: ThemeModule.Theme.focusHighlight
                             visible: orbitButton.activeFocus
                         }
                     }
@@ -151,8 +145,8 @@ Item {
                         anchors.centerIn: parent
                         text: orbitButton.route.glyph
                         visible: !character.visible
-                        color: ThemeModule.Theme.accentHover
-                        font.family: ThemeModule.Theme.displayFont
+                        color: ThemeModule.Theme.focusHighlight
+                        font.family: ThemeModule.Theme.fontFamily
                         font.pixelSize: root.orbitItemSize * 0.45
                         font.weight: Font.DemiBold
                     }
@@ -162,8 +156,8 @@ Item {
                     width: parent.width
                     text: orbitButton.route.title
                     color: root.currentId === orbitButton.route.id
-                           ? ThemeModule.Theme.text : ThemeModule.Theme.textDim
-                    font.family: ThemeModule.Theme.displayFont
+                           ? ThemeModule.Theme.textPrimary : ThemeModule.Theme.textSecondary
+                    font.family: ThemeModule.Theme.fontFamily
                     font.pixelSize: 11
                     font.weight: Font.DemiBold
                     horizontalAlignment: Text.AlignHCenter
@@ -172,7 +166,7 @@ Item {
                     maximumLineCount: 2
                     elide: Text.ElideRight
                     style: Text.Outline
-                    styleColor: "#dd06070d"
+                    styleColor: Qt.alpha(ThemeModule.Theme.windowBackground, 0.86)
                 }
             }
 
@@ -202,10 +196,11 @@ Item {
                 height: width
                 anchors.horizontalCenter: parent.horizontalCenter
                 radius: width / 2
-                color: "#181c2c"
-                border.color: homeButton.activeFocus || root.currentId === "dashboard"
-                              ? ThemeModule.Theme.cyan : "#687c8cff"
-                border.width: homeButton.activeFocus ? 3 : 2
+                color: ThemeModule.Theme.raisedSurface
+                border.color: homeButton.activeFocus ? ThemeModule.Theme.focusHighlight
+                              : homeButton.hovered || root.currentId === "dashboard"
+                              ? ThemeModule.Theme.accentCyan : ThemeModule.Theme.textDisabled
+                border.width: homeButton.activeFocus ? ThemeModule.Theme.focusBorderWidth : 2
 
                 Image {
                     anchors.fill: parent
@@ -229,13 +224,13 @@ Item {
             Text {
                 width: parent.width
                 text: qsTr("Main Page")
-                color: ThemeModule.Theme.text
-                font.family: ThemeModule.Theme.displayFont
+                color: ThemeModule.Theme.textPrimary
+                font.family: ThemeModule.Theme.fontFamily
                 font.pixelSize: root.compact ? 12 : 14
                 font.weight: Font.Bold
                 horizontalAlignment: Text.AlignHCenter
                 style: Text.Outline
-                styleColor: "#dd06070d"
+                styleColor: Qt.alpha(ThemeModule.Theme.windowBackground, 0.86)
             }
         }
 
@@ -271,10 +266,11 @@ Item {
                     height: 48
                     anchors.horizontalCenter: parent.horizontalCenter
                     radius: width / 2
-                    color: "#16192a"
-                    border.color: compactNavButton.activeFocus ? ThemeModule.Theme.cyan
+                    color: ThemeModule.Theme.raisedSurface
+                    border.color: compactNavButton.activeFocus ? ThemeModule.Theme.focusHighlight
+                                  : compactNavButton.hovered ? ThemeModule.Theme.accentCyanLight
                                   : root.currentId === route.id
-                                  ? ThemeModule.Theme.cyan : ThemeModule.Theme.border
+                                  ? ThemeModule.Theme.accentCyan : ThemeModule.Theme.borderColor
                     border.width: compactNavButton.activeFocus || root.currentId === route.id ? 2 : 1
 
                     Image {
@@ -300,7 +296,7 @@ Item {
                         anchors.centerIn: parent
                         text: route.glyph
                         visible: !compactCharacter.visible
-                        color: ThemeModule.Theme.accentHover
+                        color: ThemeModule.Theme.focusHighlight
                         font.pixelSize: 20
                         font.weight: Font.Bold
                     }
@@ -308,9 +304,9 @@ Item {
                 Text {
                     width: parent.width
                     text: route.title
-                    color: ThemeModule.Theme.textDim
-                    font.family: ThemeModule.Theme.bodyFont
-                    font.pixelSize: 10
+                    color: ThemeModule.Theme.textSecondary
+                    font.family: ThemeModule.Theme.fontFamily
+                    font.pixelSize: ThemeModule.Theme.metadataFontSize
                     horizontalAlignment: Text.AlignHCenter
                     elide: Text.ElideRight
                 }

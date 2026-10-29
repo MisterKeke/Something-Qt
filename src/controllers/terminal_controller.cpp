@@ -175,6 +175,9 @@ void TerminalController::appendResultData(const services::ConsoleRequestResult &
 
 QString TerminalController::formatResultData(const services::ConsoleRequestResult &result) const
 {
+    if (result.command == QStringLiteral("run")
+        && result.data.value(QStringLiteral("openFullWindow")).toBool())
+        return QStringLiteral("Full application window requested.");
     if (result.command == QStringLiteral("help")) {
         const QVariantList commands = result.data.value(QStringLiteral("commands")).toList();
         if (!commands.isEmpty()) {

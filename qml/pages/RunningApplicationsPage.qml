@@ -22,8 +22,8 @@ Item {
             Label {
                 Layout.fillWidth: true
                 text: qsTr("Visible desktop windows")
-                color: ThemeModule.Theme.textDim
-                font.family: ThemeModule.Theme.bodyFont
+                color: ThemeModule.Theme.textSecondary
+                font.family: ThemeModule.Theme.fontFamily
                 font.pixelSize: 13
             }
             BusyIndicator { running: root.controller.loading || root.controller.activating; visible: running }
@@ -89,8 +89,8 @@ Item {
                     Rectangle {
                         Layout.preferredWidth: 46
                         Layout.preferredHeight: 46
-                        radius: 10
-                        color: ThemeModule.Theme.panelAlt
+                        radius: ThemeModule.Theme.panelRadius
+                        color: ThemeModule.Theme.raisedSurface
                         Image {
                             anchors.fill: parent
                             anchors.margins: 3
@@ -103,7 +103,7 @@ Item {
                             anchors.centerIn: parent
                             visible: iconDataUrl.length === 0
                             text: processName.length ? processName[0].toUpperCase() : "▣"
-                            color: ThemeModule.Theme.accentHover
+                            color: ThemeModule.Theme.focusHighlight
                             font.pixelSize: 22
                         }
                     }
@@ -113,8 +113,8 @@ Item {
                         Label {
                             Layout.fillWidth: true
                             text: title.length ? title : qsTr("Untitled window")
-                            color: ThemeModule.Theme.text
-                            font.family: ThemeModule.Theme.displayFont
+                            color: ThemeModule.Theme.textPrimary
+                            font.family: ThemeModule.Theme.fontFamily
                             font.pixelSize: 15
                             font.weight: Font.DemiBold
                             textFormat: Text.PlainText
@@ -123,8 +123,8 @@ Item {
                         Label {
                             Layout.fillWidth: true
                             text: processName
-                            color: ThemeModule.Theme.textDim
-                            font.family: ThemeModule.Theme.bodyFont
+                            color: ThemeModule.Theme.textSecondary
+                            font.family: ThemeModule.Theme.fontFamily
                             font.pixelSize: 12
                             textFormat: Text.PlainText
                             elide: Text.ElideRight
@@ -134,7 +134,7 @@ Item {
                             Shared.StatusBadge {
                                 visible: active
                                 text: qsTr("Active")
-                                badgeColor: ThemeModule.Theme.cyan
+                                badgeColor: ThemeModule.Theme.accentCyan
                             }
                             Shared.StatusBadge {
                                 visible: minimized

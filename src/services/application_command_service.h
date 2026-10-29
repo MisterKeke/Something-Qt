@@ -45,6 +45,7 @@ signals:
     void requestFinished(const something::services::ConsoleRequestResult &result);
     void requestCancelled(const something::services::ConsoleRequestResult &result);
     void routeRequested(const QString &routeId);
+    void fullWindowRequested();
 
 private:
     struct PendingRequest final {

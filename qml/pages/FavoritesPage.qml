@@ -94,8 +94,8 @@ Item {
                     Label {
                         Layout.fillWidth: true
                         text: root.telegram ? qsTr("Public Telegram channel") : qsTr("YouTube channel")
-                        color: ThemeModule.Theme.text
-                        font.family: ThemeModule.Theme.displayFont
+                        color: ThemeModule.Theme.textPrimary
+                        font.family: ThemeModule.Theme.fontFamily
                         font.pixelSize: 18
                         font.weight: Font.DemiBold
                     }
@@ -147,7 +147,7 @@ Item {
                     visible: activeReference().length > 0
                     Shared.StatusBadge {
                         text: root.telegram ? qsTr("Telegram") : qsTr("YouTube")
-                        badgeColor: root.telegram ? ThemeModule.Theme.cyan : ThemeModule.Theme.error
+                        badgeColor: root.telegram ? ThemeModule.Theme.accentCyan : ThemeModule.Theme.error
                     }
                     Label {
                         Layout.fillWidth: true
@@ -156,8 +156,8 @@ Item {
                                               ? favoritesController.youTubeChannelId
                                               : favoritesController.youTubeChannel)
                         textFormat: Text.PlainText
-                        color: ThemeModule.Theme.textDim
-                        font.family: ThemeModule.Theme.bodyFont
+                        color: ThemeModule.Theme.textSecondary
+                        font.family: ThemeModule.Theme.fontFamily
                         font.pixelSize: 12
                         elide: Text.ElideMiddle
                     }
@@ -201,8 +201,8 @@ Item {
                     Label {
                         Layout.fillWidth: true
                         text: qsTr("Favorites")
-                        color: ThemeModule.Theme.text
-                        font.family: ThemeModule.Theme.displayFont
+                        color: ThemeModule.Theme.textPrimary
+                        font.family: ThemeModule.Theme.fontFamily
                         font.pixelSize: 17
                         font.weight: Font.DemiBold
                     }
@@ -235,7 +235,7 @@ Item {
                             required property string color
                             required property var categoryId
                             text: name
-                            tint: color.length > 0 ? color : ThemeModule.Theme.accent
+                            tint: color.length > 0 ? color : ThemeModule.Theme.accentCyan
                             selected: favoriteModel.categoryFilter === String(categoryId)
                             onClicked: favoriteModel.categoryFilter = String(categoryId)
                         }
@@ -260,9 +260,9 @@ Item {
                         required property string categoryColor
                         Layout.fillWidth: true
                         implicitHeight: favoriteRow.implicitHeight + 16
-                        radius: 10
-                        color: ThemeModule.Theme.panelAlt
-                        border.color: ThemeModule.Theme.border
+                        radius: ThemeModule.Theme.panelRadius
+                        color: ThemeModule.Theme.raisedSurface
+                        border.color: ThemeModule.Theme.borderColor
 
                         RowLayout {
                             id: favoriteRow
@@ -276,8 +276,8 @@ Item {
                                     Layout.fillWidth: true
                                     text: root.telegram ? "@" + label : label
                                     textFormat: Text.PlainText
-                                    color: ThemeModule.Theme.text
-                                    font.family: ThemeModule.Theme.bodyFont
+                                    color: ThemeModule.Theme.textPrimary
+                                    font.family: ThemeModule.Theme.fontFamily
                                     font.pixelSize: 13
                                     font.weight: Font.DemiBold
                                     elide: Text.ElideRight
@@ -287,7 +287,7 @@ Item {
                                     Rectangle {
                                         width: 7
                                         height: 7
-                                        radius: 4
+                                        radius: ThemeModule.Theme.controlRadius
                                         visible: categoryColor.length > 0
                                         color: visible ? categoryColor : "transparent"
                                         Accessible.ignored: true
@@ -295,8 +295,8 @@ Item {
                                     Label {
                                         text: categoryName.length > 0 ? categoryName : qsTr("Uncategorized")
                                         textFormat: Text.PlainText
-                                        color: ThemeModule.Theme.textDim
-                                        font.pixelSize: 10
+                                        color: ThemeModule.Theme.textSecondary
+                                        font.pixelSize: ThemeModule.Theme.metadataFontSize
                                     }
                                 }
                             }
@@ -349,8 +349,8 @@ Item {
                     Label {
                         Layout.fillWidth: true
                         text: root.telegram ? qsTr("Recent posts") : qsTr("Recent videos")
-                        color: ThemeModule.Theme.text
-                        font.family: ThemeModule.Theme.displayFont
+                        color: ThemeModule.Theme.textPrimary
+                        font.family: ThemeModule.Theme.fontFamily
                         font.pixelSize: 17
                         font.weight: Font.DemiBold
                     }
@@ -416,25 +416,25 @@ Item {
                                                        : (itemCard.channelTitle.length > 0
                                                           ? itemCard.channelTitle : itemCard.title)
                                     textFormat: Text.PlainText
-                                    color: ThemeModule.Theme.cyan
-                                    font.family: ThemeModule.Theme.bodyFont
+                                    color: ThemeModule.Theme.accentCyan
+                                    font.family: ThemeModule.Theme.fontFamily
                                     font.pixelSize: 11
                                     elide: Text.ElideRight
                                 }
                                 Label {
                                     text: root.formatTimestamp(publishedAt)
                                     textFormat: Text.PlainText
-                                    color: ThemeModule.Theme.textDim
-                                    font.family: ThemeModule.Theme.bodyFont
-                                    font.pixelSize: 10
+                                    color: ThemeModule.Theme.textSecondary
+                                    font.family: ThemeModule.Theme.fontFamily
+                                    font.pixelSize: ThemeModule.Theme.metadataFontSize
                                 }
                                 Label {
                                     visible: views.length > 0
                                     text: views
                                     textFormat: Text.PlainText
-                                    color: ThemeModule.Theme.textDim
-                                    font.family: ThemeModule.Theme.bodyFont
-                                    font.pixelSize: 10
+                                    color: ThemeModule.Theme.textSecondary
+                                    font.family: ThemeModule.Theme.fontFamily
+                                    font.pixelSize: ThemeModule.Theme.metadataFontSize
                                 }
                             }
                             Label {
@@ -442,8 +442,8 @@ Item {
                                 visible: !root.telegram
                                 text: itemCard.title
                                 textFormat: Text.PlainText
-                                color: ThemeModule.Theme.text
-                                font.family: ThemeModule.Theme.displayFont
+                                color: ThemeModule.Theme.textPrimary
+                                font.family: ThemeModule.Theme.fontFamily
                                 font.pixelSize: 15
                                 font.weight: Font.DemiBold
                                 wrapMode: Text.Wrap
@@ -453,8 +453,8 @@ Item {
                                 visible: itemCard.text.length > 0
                                 text: itemCard.text
                                 textFormat: Text.PlainText
-                                color: ThemeModule.Theme.textDim
-                                font.family: ThemeModule.Theme.bodyFont
+                                color: ThemeModule.Theme.textSecondary
+                                font.family: ThemeModule.Theme.fontFamily
                                 font.pixelSize: 12
                                 wrapMode: Text.Wrap
                                 maximumLineCount: 10
@@ -500,8 +500,8 @@ Item {
                 Label {
                     visible: !root.telegram && contentModel.count > 0
                     text: qsTr("Showing the recent feed. YouTube does not provide paging here.")
-                    color: ThemeModule.Theme.textDim
-                    font.pixelSize: 10
+                    color: ThemeModule.Theme.textSecondary
+                    font.pixelSize: ThemeModule.Theme.metadataFontSize
                 }
             }
         }
@@ -530,10 +530,10 @@ Item {
                 Layout.fillWidth: true
                 text: root.telegram ? "@" + favoritesController.telegramChannel
                                     : favoritesController.youTubeChannelId
-                color: ThemeModule.Theme.textDim
+                color: ThemeModule.Theme.textSecondary
                 wrapMode: Text.Wrap
             }
-            CheckBox {
+            ThemeModule.AppCheckBox {
                 id: useCategory
                 text: qsTr("Assign to an existing category")
                 checked: categoriesModel.count > 0
@@ -552,7 +552,7 @@ Item {
             Label {
                 Layout.fillWidth: true
                 text: qsTr("Or create a category and save the channel to it.")
-                color: ThemeModule.Theme.textDim
+                color: ThemeModule.Theme.textSecondary
                 wrapMode: Text.Wrap
             }
             Shared.AppTextField {
@@ -565,7 +565,7 @@ Item {
                 id: newCategoryColor
                 Layout.fillWidth: true
                 accessibleLabel: qsTr("New category color")
-                placeholderText: qsTr("Optional color, for example #7c8cff")
+                placeholderText: qsTr("Optional color, for example #00D9FF")
             }
             Label {
                 visible: favoritesController.mutationError.length > 0
@@ -601,9 +601,9 @@ Item {
             }
         }
         background: Rectangle {
-            color: ThemeModule.Theme.panelAlt
-            border.color: ThemeModule.Theme.accent
-            radius: 14
+            color: ThemeModule.Theme.raisedSurface
+            border.color: ThemeModule.Theme.accentCyan
+            radius: ThemeModule.Theme.panelRadius
         }
     }
 
@@ -631,7 +631,7 @@ Item {
                     id: createCategoryColor
                     Layout.preferredWidth: 150
                     accessibleLabel: qsTr("New category color")
-                    placeholderText: qsTr("#7c8cff")
+                    placeholderText: qsTr("#00D9FF")
                 }
                 Shared.AppButton {
                     id: createCategoryButton
@@ -668,9 +668,9 @@ Item {
                     height: editorRow.implicitHeight + 14
                     Rectangle {
                         anchors.fill: parent
-                        radius: 9
-                        color: ThemeModule.Theme.panel
-                        border.color: ThemeModule.Theme.border
+                        radius: ThemeModule.Theme.controlRadius
+                        color: ThemeModule.Theme.panelSurface
+                        border.color: ThemeModule.Theme.borderColor
                     }
                     RowLayout {
                         id: editorRow
@@ -732,9 +732,9 @@ Item {
             }
         }
         background: Rectangle {
-            color: ThemeModule.Theme.panelAlt
-            border.color: ThemeModule.Theme.accent
-            radius: 14
+            color: ThemeModule.Theme.raisedSurface
+            border.color: ThemeModule.Theme.accentCyan
+            radius: ThemeModule.Theme.panelRadius
         }
     }
 
@@ -753,7 +753,7 @@ Item {
                 text: qsTr("Delete “%1”? Choose whether assigned favorites become uncategorized or move to another category.")
                     .arg(root.categoryToDeleteName)
                 textFormat: Text.PlainText
-                color: ThemeModule.Theme.textDim
+                color: ThemeModule.Theme.textSecondary
                 wrapMode: Text.Wrap
             }
             Shared.AppComboBox {
@@ -790,9 +790,9 @@ Item {
             }
         }
         background: Rectangle {
-            color: ThemeModule.Theme.panelAlt
-            border.color: ThemeModule.Theme.accent
-            radius: 14
+            color: ThemeModule.Theme.raisedSurface
+            border.color: ThemeModule.Theme.accentCyan
+            radius: ThemeModule.Theme.panelRadius
         }
     }
 

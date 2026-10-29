@@ -12,10 +12,12 @@ Button {
     padding: 16
     Accessible.name: qsTr("Weather. Open forecast and city search.")
     onClicked: weatherRequested()
+    Accessible.role: Accessible.Button
     background: Rectangle {
-        radius: 14
-        color: root.hovered ? "#ed1b1f2f" : "#e611131d"
-        border.color: root.activeFocus ? ThemeModule.Theme.cyan : ThemeModule.Theme.border
+        radius: ThemeModule.Theme.panelRadius
+        color: root.down ? ThemeModule.Theme.shadowBorder
+               : root.hovered ? ThemeModule.Theme.hoverSurface : ThemeModule.Theme.panelSurface
+        border.color: root.activeFocus ? ThemeModule.Theme.focusHighlight : ThemeModule.Theme.borderColor
         Behavior on color { ColorAnimation { duration: ThemeModule.Theme.controlMotion } }
         Behavior on border.color { ColorAnimation { duration: ThemeModule.Theme.controlMotion } }
     }
@@ -27,31 +29,31 @@ Button {
             Label {
                 Layout.fillWidth: true
                 text: qsTr("Weather")
-                color: ThemeModule.Theme.text
-                font.family: ThemeModule.Theme.displayFont
+                color: ThemeModule.Theme.textPrimary
+                font.family: ThemeModule.Theme.fontFamily
                 font.pixelSize: 18
                 font.bold: true
             }
             Label {
                 text: root.hasForecast ? String(root.controller.primaryToday.date || "") : "›"
-                color: ThemeModule.Theme.textDim
+                color: ThemeModule.Theme.textSecondary
                 font.pixelSize: 11
             }
         }
         Label {
             Layout.fillWidth: true
             text: root.hasForecast ? root.controller.primaryLocation : qsTr("Your local forecast")
-            color: ThemeModule.Theme.textDim
+            color: ThemeModule.Theme.textSecondary
             elide: Text.ElideRight
             font.pixelSize: 12
         }
         RowLayout {
             Layout.fillWidth: true
-            Label { text: root.hasForecast ? root.controller.primaryCurrent.icon || "☼" : "☼"; color: ThemeModule.Theme.text; font.pixelSize: 25 }
+            Label { text: root.hasForecast ? root.controller.primaryCurrent.icon || "☼" : "☼"; color: ThemeModule.Theme.textPrimary; font.pixelSize: 25 }
             Label {
                 text: root.hasForecast && root.controller.primaryCurrent.hasTemperature
                     ? Math.round(root.controller.primaryCurrent.temperature) + "°" : "—"
-                color: ThemeModule.Theme.text
+                color: ThemeModule.Theme.textPrimary
                 font.pixelSize: 26
                 font.bold: true
             }
@@ -59,7 +61,7 @@ Button {
                 Layout.fillWidth: true
                 text: root.hasForecast ? root.controller.primaryCurrent.condition || qsTr("Unavailable")
                                       : root.controller.primaryLoading ? qsTr("Loading…") : qsTr("Choose a city")
-                color: ThemeModule.Theme.text
+                color: ThemeModule.Theme.textPrimary
                 font.pixelSize: 12
                 wrapMode: Text.Wrap
             }
@@ -68,7 +70,7 @@ Button {
             Layout.fillWidth: true
             text: root.hasForecast ? qsTr("High %1° · Low %2°").arg(Math.round(root.controller.primaryToday.maximum)).arg(Math.round(root.controller.primaryToday.minimum))
                                   : qsTr("Open Weather to search for a city")
-            color: ThemeModule.Theme.textDim
+            color: ThemeModule.Theme.textSecondary
             font.pixelSize: 12
             wrapMode: Text.Wrap
         }

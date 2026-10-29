@@ -10,6 +10,7 @@ Item {
     required property var controller
     property string returnRoute: "dashboard"
     property string returnTitle: qsTr("Main Page")
+    property bool showReturnButton: true
     signal navigateRequested(string routeId)
 
     implicitHeight: 720
@@ -113,7 +114,7 @@ Item {
         }
     }
 
-    readonly property string monoFont: "Consolas"
+    readonly property string monoFont: ThemeModule.Theme.fontFamily
     readonly property bool compact: width < 1120
     property string readyTime: Qt.formatTime(new Date(), "HH:mm:ss")
 
@@ -201,14 +202,14 @@ Item {
                     Label {
                         text: qsTr("Console")
                         color: "#f1f5ff"
-                        font.family: ThemeModule.Theme.displayFont
+                        font.family: ThemeModule.Theme.fontFamily
                         font.pixelSize: 36
                         font.weight: Font.Bold
                         font.letterSpacing: 1.5
                     }
                     Label {
                         Layout.fillWidth: true
-                        text: qsTr("Type help to see the registered application commands.")
+                        text: qsTr("Type run full to open the full application window.")
                         color: "#8cc5ff"
                         font.family: root.monoFont
                         font.pixelSize: 13
@@ -269,7 +270,7 @@ Item {
                     Layout.fillWidth: true
                     text: qsTr("Only registered application commands are supported. This console does not run operating-system commands or scripts.")
                     color: "#a8d0fb"
-                    font.family: ThemeModule.Theme.bodyFont
+                    font.family: ThemeModule.Theme.fontFamily
                     font.pixelSize: 13
                     wrapMode: Text.Wrap
                     Accessible.name: text
@@ -371,7 +372,7 @@ Item {
                     spacing: 12
                     model: root.controller.output
                     boundsBehavior: Flickable.StopAtBounds
-                    ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
+                    ScrollBar.vertical: ThemeModule.AppScrollBar { policy: ScrollBar.AsNeeded }
                     onMovementEnded: root.followNewest = atYEnd
                     onContentYChanged: {
                         if (!root.adjustingTranscriptScroll)
@@ -586,6 +587,7 @@ Item {
                 }
             }
             Shared.ConsoleButton {
+                visible: root.showReturnButton
                 Layout.maximumWidth: root.compact ? 240 : 210
                 text: qsTr("Return to %1").arg(root.returnTitle)
                 symbol: "back"
@@ -647,7 +649,7 @@ Item {
             currentIndex: root.suggestionIndex
             clip: true
             boundsBehavior: Flickable.StopAtBounds
-            ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
+            ScrollBar.vertical: ThemeModule.AppScrollBar { policy: ScrollBar.AsNeeded }
             Accessible.name: qsTr("Command completion suggestions")
             delegate: ItemDelegate {
                 id: suggestionDelegate
