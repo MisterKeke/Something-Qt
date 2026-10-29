@@ -149,6 +149,9 @@ qt_add_qml_module(SomethingQt
     QML_FILES
         qml/shell/Main.qml
         qml/components/AppButton.qml
+        qml/components/ConsoleButton.qml
+        qml/components/ConsoleFrame.qml
+        qml/components/ConsoleIcon.qml
         qml/components/RemoveFavoriteButton.qml
         qml/components/AppTextField.qml
         qml/components/AppCard.qml

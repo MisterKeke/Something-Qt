@@ -13,7 +13,7 @@ class TerminalOutputModel final : public QAbstractListModel {
     Q_PROPERTY(int retainedBytes READ retainedBytes NOTIFY retainedBytesChanged)
 
 public:
-    enum Role { TextRole = Qt::UserRole + 1, KindRole, SequenceRole };
+    enum Role { TextRole = Qt::UserRole + 1, KindRole, SequenceRole, TimestampRole };
     Q_ENUM(Role)
 
     static constexpr int MaximumRows = 400;
@@ -41,6 +41,7 @@ private:
         QString kind;
         quint64 sequence{0};
         int byteSize{0};
+        QString timestamp;
     };
 
     QVector<Entry> m_entries;

@@ -1,6 +1,7 @@
 #include "terminal_output_model.h"
 
 #include <QByteArray>
+#include <QDateTime>
 #include <utility>
 
 namespace something::models {
@@ -24,13 +25,15 @@ QVariant TerminalOutputModel::data(const QModelIndex &index, int role) const
     case TextRole: return entry.text;
     case KindRole: return entry.kind;
     case SequenceRole: return QVariant::fromValue<qulonglong>(entry.sequence);
+    case TimestampRole: return entry.timestamp;
     default: return {};
     }
 }
 
 QHash<int, QByteArray> TerminalOutputModel::roleNames() const
 {
-    return {{TextRole, "text"}, {KindRole, "kind"}, {SequenceRole, "sequence"}};
+    return {{TextRole, "text"}, {KindRole, "kind"}, {SequenceRole, "sequence"},
+            {TimestampRole, "timestamp"}};
 }
 
 void TerminalOutputModel::clear()
@@ -71,7 +74,8 @@ void TerminalOutputModel::append(QString text, QString kind)
     beginInsertRows({}, row, row);
     const int byteSize = static_cast<int>(encoded.size());
     m_retainedBytes += byteSize;
-    m_entries.push_back({std::move(text), std::move(kind), m_nextSequence++, byteSize});
+    m_entries.push_back({std::move(text), std::move(kind), m_nextSequence++, byteSize,
+                         QDateTime::currentDateTime().toString(QStringLiteral("HH:mm:ss"))});
     endInsertRows();
     emit countChanged();
     emit retainedBytesChanged();

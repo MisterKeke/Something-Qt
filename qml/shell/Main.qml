@@ -14,7 +14,7 @@ ApplicationWindow {
     minimumHeight: 620
     // C++ fits and centers the native frame before its first show.
     visible: false
-    title: qsTr("Something")
+    title: workspaceTabs.currentIndex === 1 ? qsTr("Something — Console") : qsTr("Something")
     color: ThemeModule.Theme.background
 
     Dialog {
@@ -252,6 +252,7 @@ ApplicationWindow {
 
         TabBar {
             id: workspaceTabs
+            visible: currentIndex !== 1
             Layout.fillWidth: true
             Layout.leftMargin: 24
             Layout.rightMargin: 24
@@ -430,38 +431,17 @@ ApplicationWindow {
                 }
             }
 
-            ScrollView {
-                id: consoleScroll
+            Item {
+                id: consoleWorkspace
                 clip: true
-                contentWidth: availableWidth
-                ScrollBar.vertical.policy: ScrollBar.AsNeeded
 
-                ColumnLayout {
-                    width: consoleScroll.availableWidth
-                    spacing: 18
-                    Label {
-                        Layout.fillWidth: true
-                        Layout.leftMargin: 24
-                        Layout.rightMargin: 24
-                        Layout.topMargin: 18
-                        text: qsTr("Console")
-                        color: ThemeModule.Theme.text
-                        font.family: ThemeModule.Theme.displayFont
-                        font.pixelSize: 30
-                        font.bold: true
-                    }
-                    Pages.TerminalPage {
-                        id: terminalPage
-                        Layout.fillWidth: true
-                        Layout.preferredHeight: implicitHeight
-                        Layout.leftMargin: 24
-                        Layout.rightMargin: 24
-                        Layout.bottomMargin: 28
-                        controller: terminalController
-                        returnRoute: window.currentRoute
-                        returnTitle: window.routeTitles[window.currentRoute] || qsTr("Main Page")
-                        onNavigateRequested: function(routeId) { window.navigateTo(routeId) }
-                    }
+                Pages.TerminalPage {
+                    id: terminalPage
+                    anchors.fill: parent
+                    controller: terminalController
+                    returnRoute: window.currentRoute
+                    returnTitle: window.routeTitles[window.currentRoute] || qsTr("Main Page")
+                    onNavigateRequested: function(routeId) { window.navigateTo(routeId) }
                 }
             }
         }
