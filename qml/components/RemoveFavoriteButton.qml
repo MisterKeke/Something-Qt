@@ -25,11 +25,11 @@ Button {
         fillMode: Image.PreserveAspectFit
     }
     background: Rectangle {
-        radius: 9
-        color: root.down ? "#482436" : root.hovered ? "#342231" : "#151b2b"
-        border.color: root.activeFocus ? ThemeModule.Theme.cyan
-                     : root.hovered ? "#9b4a65" : ThemeModule.Theme.border
-        border.width: root.activeFocus ? 2 : 1
+        radius: ThemeModule.Theme.controlRadius
+        color: root.down ? ThemeModule.Theme.errorSurface
+               : root.hovered ? ThemeModule.Theme.destructiveHover : ThemeModule.Theme.destructiveSurface
+        border.color: root.activeFocus ? ThemeModule.Theme.focusHighlight : ThemeModule.Theme.error
+        border.width: root.activeFocus ? ThemeModule.Theme.focusBorderWidth : ThemeModule.Theme.panelBorderWidth
         Behavior on color { ColorAnimation { duration: ThemeModule.Theme.controlMotion } }
         Behavior on border.color { ColorAnimation { duration: ThemeModule.Theme.controlMotion } }
     }

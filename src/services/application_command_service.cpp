@@ -143,6 +143,20 @@ void ApplicationCommandService::registerBuiltins()
             return execution;
         }});
 
+    registerOne({QStringLiteral("run"), QStringLiteral("Open or activate the full application window."),
+        QStringLiteral("run full"),
+        [](const QStringList &args) {
+            return args == QStringList{QStringLiteral("full")}
+                ? QString() : QStringLiteral("Usage: run full");
+        },
+        [](const QStringList &) {
+            application::CommandExecution execution;
+            execution.data.insert(QStringLiteral("openFullWindow"), true);
+            return execution;
+        }, [](const QStringList &complete, const QString &) {
+            return complete.isEmpty() ? QStringList{QStringLiteral("full")} : QStringList{};
+        }});
+
     registerOne({QStringLiteral("task"), QStringLiteral("Read, add, or complete saved tasks."),
         QStringLiteral("task list [--query \"text\"] [--page n] | task show <id> | task add \"title\" [--due YYYY-MM-DD] [--priority low|medium|high] | task complete <id> --revision <revision>"),
         [](const QStringList &args) {
@@ -550,7 +564,8 @@ QString ApplicationCommandService::submit(const QString &input)
     if (!validationError.isEmpty()) return reject(commandName, validationError, QStringLiteral("validation"));
 
     const bool queryCommand = commandName != QStringLiteral("help")
-        && commandName != QStringLiteral("status") && commandName != QStringLiteral("page");
+        && commandName != QStringLiteral("status") && commandName != QStringLiteral("page")
+        && commandName != QStringLiteral("run");
     const bool mutationCommand = (commandName == QStringLiteral("task")
                                   && !arguments.isEmpty()
                                   && (arguments.first() == QStringLiteral("add")
@@ -617,11 +632,15 @@ QString ApplicationCommandService::submit(const QString &input)
         }
         return requestId;
     }
-    if (!execution.storageCommand && execution.data.contains(QStringLiteral("openRoute"))) {
+    if (!execution.storageCommand && (execution.data.contains(QStringLiteral("openRoute"))
+                                     || execution.data.value(QStringLiteral("openFullWindow")).toBool())) {
         ConsoleRequestResult accepted = makeResult(requestId, QStringLiteral("succeeded"), commandName);
         accepted.accepted = true;
         emit requestAccepted(accepted);
-        emit routeRequested(execution.data.value(QStringLiteral("openRoute")).toString());
+        if (execution.data.value(QStringLiteral("openFullWindow")).toBool())
+            emit fullWindowRequested();
+        else
+            emit routeRequested(execution.data.value(QStringLiteral("openRoute")).toString());
         accepted.data = execution.data;
         emit requestFinished(accepted);
         return requestId;

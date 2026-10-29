@@ -42,6 +42,12 @@ QStringList ApplicationController::unavailableCapabilities() const
     return m_graph ? m_graph->capabilities().unavailableCapabilities() : QStringList{};
 }
 
+void ApplicationController::requestFullWindow()
+{
+    if (!m_shutdownRequested)
+        emit fullWindowRequested();
+}
+
 void ApplicationController::requestShutdown()
 {
     if (m_shutdownRequested || !m_graph) {

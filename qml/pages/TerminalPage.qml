@@ -10,6 +10,7 @@ Item {
     required property var controller
     property string returnRoute: "dashboard"
     property string returnTitle: qsTr("Main Page")
+    property bool showReturnButton: true
     signal navigateRequested(string routeId)
 
     implicitHeight: pageContent.implicitHeight
@@ -123,8 +124,8 @@ Item {
             Label {
                 Layout.fillWidth: true
                 text: qsTr("Only registered application commands are supported. This console does not run operating-system commands or scripts.")
-                color: ThemeModule.Theme.textDim
-                font.family: ThemeModule.Theme.bodyFont
+                color: ThemeModule.Theme.textSecondary
+                font.family: ThemeModule.Theme.fontFamily
                 font.pixelSize: 13
                 wrapMode: Text.Wrap
                 Accessible.name: text
@@ -132,7 +133,7 @@ Item {
             Shared.StatusBadge {
                 visible: root.controller.pendingCount > 0
                 text: qsTr("%1 pending").arg(root.controller.pendingCount)
-                badgeColor: ThemeModule.Theme.cyan
+                badgeColor: ThemeModule.Theme.accentCyan
                 Accessible.name: qsTr("%1 commands pending").arg(root.controller.pendingCount)
             }
         }
@@ -140,9 +141,9 @@ Item {
         Rectangle {
             Layout.fillWidth: true
             Layout.preferredHeight: 420
-            radius: ThemeModule.Theme.cornerRadius
-            color: "#e611131d"
-            border.color: ThemeModule.Theme.border
+            radius: ThemeModule.Theme.panelRadius
+            color: ThemeModule.Theme.panelSurface
+            border.color: ThemeModule.Theme.borderColor
             border.width: 1
             clip: true
 
@@ -157,8 +158,8 @@ Item {
                     Label {
                         Layout.fillWidth: true
                         text: qsTr("Your application console is ready")
-                        color: ThemeModule.Theme.text
-                        font.family: ThemeModule.Theme.displayFont
+                        color: ThemeModule.Theme.textPrimary
+                        font.family: ThemeModule.Theme.fontFamily
                         font.pixelSize: 19
                         font.weight: Font.DemiBold
                         horizontalAlignment: Text.AlignHCenter
@@ -166,8 +167,8 @@ Item {
                     Label {
                         Layout.fillWidth: true
                         text: qsTr("Enter help to see the registered commands. Only commands provided by Something are accepted; no shell, operating-system command, script, or executable is run.")
-                        color: ThemeModule.Theme.textDim
-                        font.family: ThemeModule.Theme.bodyFont
+                        color: ThemeModule.Theme.textSecondary
+                        font.family: ThemeModule.Theme.fontFamily
                         font.pixelSize: 13
                         wrapMode: Text.Wrap
                         horizontalAlignment: Text.AlignHCenter
@@ -183,7 +184,7 @@ Item {
                     spacing: 5
                     model: root.controller.output
                     boundsBehavior: Flickable.StopAtBounds
-                    ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
+                    ScrollBar.vertical: ThemeModule.AppScrollBar { policy: ScrollBar.AsNeeded }
                     onMovementEnded: root.followNewest = atYEnd
                     onContentYChanged: {
                         if (!root.adjustingTranscriptScroll)
@@ -196,16 +197,16 @@ Item {
                         required property string kind
                         width: ListView.view.width - 10
                         implicitHeight: outputText.implicitHeight + 16
-                        radius: 7
-                        color: kind === "normal" ? "#171a2a"
-                             : kind === "pending" ? "#14252d"
-                             : kind === "error" ? "#2b1821"
-                             : kind === "warning" ? "#2b2416" : "#10131d"
+                        radius: ThemeModule.Theme.controlRadius
+                        color: kind === "normal" ? ThemeModule.Theme.raisedSurface
+                             : kind === "pending" ? ThemeModule.Theme.pendingSurface
+                             : kind === "error" ? ThemeModule.Theme.errorSurface
+                             : kind === "warning" ? ThemeModule.Theme.warningSurface : ThemeModule.Theme.insetSurface
                         border.width: 1
-                        border.color: kind === "normal" ? ThemeModule.Theme.border
-                                    : kind === "pending" ? "#345e69"
-                                    : kind === "error" ? "#704052"
-                                    : kind === "warning" ? "#705a31" : "#202638"
+                        border.color: kind === "normal" ? ThemeModule.Theme.borderColor
+                                    : kind === "pending" ? ThemeModule.Theme.accentCyan
+                                    : kind === "error" ? ThemeModule.Theme.error
+                                    : kind === "warning" ? ThemeModule.Theme.warning : ThemeModule.Theme.hoverSurface
 
                         TextEdit {
                             id: outputText
@@ -219,10 +220,10 @@ Item {
                             color: outputRow.kind === "success" ? ThemeModule.Theme.success
                                  : outputRow.kind === "warning" ? ThemeModule.Theme.warning
                                  : outputRow.kind === "error" ? ThemeModule.Theme.error
-                                 : outputRow.kind === "pending" ? ThemeModule.Theme.cyan
-                                 : outputRow.kind === "normal" ? ThemeModule.Theme.text
-                                 : ThemeModule.Theme.textDim
-                            font.family: ThemeModule.Theme.bodyFont
+                                 : outputRow.kind === "pending" ? ThemeModule.Theme.accentCyan
+                                 : outputRow.kind === "normal" ? ThemeModule.Theme.textPrimary
+                                 : ThemeModule.Theme.textSecondary
+                            font.family: ThemeModule.Theme.fontFamily
                             font.pixelSize: 13
                             wrapMode: TextEdit.Wrap
                             selectByMouse: true
@@ -320,12 +321,13 @@ Item {
             Label {
                 Layout.fillWidth: true
                 text: qsTr("Up/Down recalls command history; Down restores your unfinished input.")
-                color: ThemeModule.Theme.textDim
+                color: ThemeModule.Theme.textSecondary
                 font.pixelSize: 11
                 wrapMode: Text.Wrap
             }
             Shared.AppButton {
                 text: qsTr("Return to %1").arg(root.returnTitle)
+                visible: root.showReturnButton
                 quiet: true
                 Accessible.name: text
                 onClicked: root.navigateRequested(root.returnRoute || "dashboard")

@@ -22,8 +22,8 @@ ColumnLayout {
                 Label {
                     Layout.fillWidth: true
                     text: qsTr("Favorites")
-                    color: ThemeModule.Theme.text
-                    font.family: ThemeModule.Theme.displayFont
+                    color: ThemeModule.Theme.textPrimary
+                    font.family: ThemeModule.Theme.fontFamily
                     font.pixelSize: 18
                     font.weight: Font.Bold
                 }
@@ -52,7 +52,7 @@ ColumnLayout {
                 visible: root.rates.favorites.count === 0
                 text: root.rates.favoritesLoading ? qsTr("Loading currency pairs…")
                                                 : qsTr("Keep your favorite currency pairs here.")
-                color: ThemeModule.Theme.textDim
+                color: ThemeModule.Theme.textSecondary
                 wrapMode: Text.Wrap
                 font.pixelSize: 12
             }
@@ -66,9 +66,9 @@ ColumnLayout {
                     required property string rateStatus
                     Layout.fillWidth: true
                     implicitHeight: 60
-                    radius: 9
-                    color: pairMouse.containsMouse ? "#252a40" : "#1b2031"
-                    border.color: ThemeModule.Theme.border
+                    radius: ThemeModule.Theme.controlRadius
+                    color: pairMouse.containsMouse ? ThemeModule.Theme.hoverSurface : ThemeModule.Theme.raisedSurface
+                    border.color: ThemeModule.Theme.borderColor
                     MouseArea {
                         id: pairMouse
                         anchors.fill: parent
@@ -87,7 +87,7 @@ ColumnLayout {
                             Label {
                                 Layout.fillWidth: true
                                 text: qsTr("%1 to %2").arg(baseCode).arg(quoteCode)
-                                color: ThemeModule.Theme.text
+                                color: ThemeModule.Theme.textPrimary
                                 font.bold: true
                                 font.pixelSize: 13
                                 elide: Text.ElideRight
@@ -96,7 +96,7 @@ ColumnLayout {
                                 Layout.fillWidth: true
                                 text: found ? qsTr("1 %1 = %2 %3").arg(baseCode).arg(Number(rate).toFixed(4)).arg(quoteCode)
                                             : rateStatus === "loading" ? qsTr("Updating…") : qsTr("Rate unavailable")
-                                color: ThemeModule.Theme.textDim
+                                color: ThemeModule.Theme.textSecondary
                                 font.pixelSize: 11
                                 elide: Text.ElideRight
                             }
@@ -134,8 +134,8 @@ ColumnLayout {
                 Label {
                     Layout.fillWidth: true
                     text: qsTr("Running apps")
-                    color: ThemeModule.Theme.text
-                    font.family: ThemeModule.Theme.displayFont
+                    color: ThemeModule.Theme.textPrimary
+                    font.family: ThemeModule.Theme.fontFamily
                     font.pixelSize: 17
                     font.weight: Font.DemiBold
                 }
@@ -225,7 +225,7 @@ ColumnLayout {
                             Layout.fillWidth: true
                             text: title.length ? title : qsTr("Untitled window")
                             font.pixelSize: 12
-                            color: ThemeModule.Theme.text
+                            color: ThemeModule.Theme.textPrimary
                             textFormat: Text.PlainText
                             elide: Text.ElideRight
                             Accessible.name: qsTr("Window title: %1").arg(title)
@@ -234,7 +234,7 @@ ColumnLayout {
                             Layout.fillWidth: true
                             text: processName + (active ? " · " + qsTr("Active")
                                                       : minimized ? " · " + qsTr("Minimized") : "")
-                            color: ThemeModule.Theme.textDim
+                            color: ThemeModule.Theme.textSecondary
                             font.pixelSize: 11
                             textFormat: Text.PlainText
                             elide: Text.ElideRight

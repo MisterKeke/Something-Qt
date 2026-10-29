@@ -28,8 +28,8 @@ Item {
             width: parent.width
             text: root.title
             visible: text.length > 0
-            color: root.state === "error" ? ThemeModule.Theme.error : ThemeModule.Theme.text
-            font.family: ThemeModule.Theme.displayFont
+            color: root.state === "error" ? ThemeModule.Theme.error : ThemeModule.Theme.textPrimary
+            font.family: ThemeModule.Theme.fontFamily
             font.pixelSize: 15
             font.weight: Font.DemiBold
             horizontalAlignment: Text.AlignHCenter
@@ -40,8 +40,8 @@ Item {
             width: parent.width
             text: root.message
             visible: text.length > 0
-            color: ThemeModule.Theme.textDim
-            font.family: ThemeModule.Theme.bodyFont
+            color: ThemeModule.Theme.textSecondary
+            font.family: ThemeModule.Theme.fontFamily
             font.pixelSize: 13
             horizontalAlignment: Text.AlignHCenter
             wrapMode: Text.Wrap

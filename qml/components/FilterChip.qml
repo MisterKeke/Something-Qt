@@ -6,21 +6,22 @@ Button {
     id: root
 
     property bool selected: false
-    property color tint: ThemeModule.Theme.accent
+    property color tint: ThemeModule.Theme.accentCyan
     hoverEnabled: true
 
     implicitHeight: 34
-    leftPadding: 13
-    rightPadding: 13
-    font.family: ThemeModule.Theme.displayFont
-    font.pixelSize: 12
+    leftPadding: ThemeModule.Theme.controlPadding
+    rightPadding: ThemeModule.Theme.controlPadding
+    font.family: ThemeModule.Theme.fontFamily
+    font.pixelSize: ThemeModule.Theme.labelFontSize
     Accessible.role: Accessible.Button
     Accessible.name: text
 
     contentItem: Text {
         text: root.text
         textFormat: Text.PlainText
-        color: root.selected ? ThemeModule.Theme.text : ThemeModule.Theme.textDim
+        color: root.enabled ? (root.selected ? ThemeModule.Theme.textPrimary : ThemeModule.Theme.textSecondary)
+                            : ThemeModule.Theme.textDisabled
         Behavior on color { ColorAnimation { duration: ThemeModule.Theme.controlMotion } }
         font: root.font
         horizontalAlignment: Text.AlignHCenter
@@ -28,11 +29,15 @@ Button {
     }
 
     background: Rectangle {
-        radius: height / 2
-        color: root.selected ? Qt.darker(root.tint, 1.8) : "#171a2a"
-        border.color: root.activeFocus ? ThemeModule.Theme.cyan
-                      : root.selected ? root.tint : Qt.darker(root.tint, 1.45)
-        border.width: root.activeFocus ? 2 : 1
+        radius: ThemeModule.Theme.controlRadius
+        color: !root.enabled ? ThemeModule.Theme.disabledSurface
+               : root.selected ? Qt.alpha(root.tint, root.down ? 0.36 : 0.24)
+               : root.down ? ThemeModule.Theme.shadowBorder
+               : root.hovered ? ThemeModule.Theme.hoverSurface : ThemeModule.Theme.raisedSurface
+        border.color: !root.enabled ? ThemeModule.Theme.borderColor
+                      : root.activeFocus ? ThemeModule.Theme.focusHighlight
+                      : root.selected ? root.tint : ThemeModule.Theme.borderColor
+        border.width: root.activeFocus ? ThemeModule.Theme.focusBorderWidth : ThemeModule.Theme.panelBorderWidth
         Behavior on color { ColorAnimation { duration: ThemeModule.Theme.controlMotion } }
         Behavior on border.color { ColorAnimation { duration: ThemeModule.Theme.controlMotion } }
     }

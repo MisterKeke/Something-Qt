@@ -148,7 +148,10 @@ qt_add_qml_module(SomethingQt
     VERSION 1.0
     QML_FILES
         qml/shell/Main.qml
+        qml/shell/ConsoleWindow.qml
         qml/components/AppButton.qml
+        qml/components/AppCheckBox.qml
+        qml/components/AppScrollBar.qml
         qml/components/RemoveFavoriteButton.qml
         qml/components/AppTextField.qml
         qml/components/AppCard.qml
@@ -186,6 +189,8 @@ qt_add_resources(SomethingQt something_assets
     PREFIX "/something"
     FILES
         assets/appicon.png
+        assets/fonts/CascadiaCode.ttf
+        assets/fonts/LICENSE-CASCADIA-CODE.txt
         assets/icons/folder.svg
         assets/icons/file.svg
         assets/icons/link.svg

@@ -7,15 +7,16 @@ ComboBox {
 
     property string accessibleLabel: ""
     implicitHeight: 42
-    font.family: ThemeModule.Theme.bodyFont
-    font.pixelSize: 13
+    hoverEnabled: true
+    font.family: ThemeModule.Theme.fontFamily
+    font.pixelSize: ThemeModule.Theme.labelFontSize
     Accessible.name: accessibleLabel.length > 0 ? accessibleLabel : currentText
 
     contentItem: Text {
-        leftPadding: 11
+        leftPadding: ThemeModule.Theme.controlPadding - 1
         rightPadding: 30
         text: root.displayText
-        color: ThemeModule.Theme.text
+        color: root.enabled ? ThemeModule.Theme.textPrimary : ThemeModule.Theme.textDisabled
         font: root.font
         verticalAlignment: Text.AlignVCenter
         elide: Text.ElideRight
@@ -25,15 +26,19 @@ ComboBox {
         x: root.width - width - 12
         y: root.topPadding + (root.availableHeight - height) / 2
         text: "⌄"
-        color: ThemeModule.Theme.textDim
+        color: root.enabled ? ThemeModule.Theme.textSecondary : ThemeModule.Theme.textDisabled
         font.pixelSize: 16
     }
 
     background: Rectangle {
-        radius: 9
-        color: "#0d101a"
-        border.width: root.activeFocus ? 2 : 1
-        border.color: root.activeFocus ? ThemeModule.Theme.cyan : ThemeModule.Theme.border
+        radius: ThemeModule.Theme.controlRadius
+        color: !root.enabled ? ThemeModule.Theme.disabledSurface
+               : root.popup.visible ? ThemeModule.Theme.raisedSurface
+               : root.hovered && !root.activeFocus ? ThemeModule.Theme.raisedSurface
+               : ThemeModule.Theme.insetSurface
+        border.width: root.activeFocus ? ThemeModule.Theme.focusBorderWidth : ThemeModule.Theme.panelBorderWidth
+        border.color: root.activeFocus ? ThemeModule.Theme.focusHighlight
+                     : root.popup.visible ? ThemeModule.Theme.strongBorder : ThemeModule.Theme.borderColor
         Behavior on border.color { ColorAnimation { duration: ThemeModule.Theme.controlMotion } }
     }
 
@@ -49,12 +54,12 @@ ComboBox {
             implicitHeight: contentHeight
             model: root.popup.visible ? root.delegateModel : null
             currentIndex: root.highlightedIndex
-            ScrollIndicator.vertical: ScrollIndicator { }
+            ScrollBar.vertical: ThemeModule.AppScrollBar { }
         }
         background: Rectangle {
-            color: ThemeModule.Theme.panelAlt
-            border.color: ThemeModule.Theme.accent
-            radius: 9
+            color: ThemeModule.Theme.raisedSurface
+            border.color: ThemeModule.Theme.strongBorder
+            radius: ThemeModule.Theme.panelRadius
         }
     }
 
@@ -69,15 +74,17 @@ ComboBox {
                 return model[root.textRole]
             }
             textFormat: Text.PlainText
-            color: highlighted ? ThemeModule.Theme.text : ThemeModule.Theme.textDim
+            color: !root.enabled ? ThemeModule.Theme.textDisabled
+                   : highlighted ? ThemeModule.Theme.textPrimary : ThemeModule.Theme.textSecondary
             font: root.font
             verticalAlignment: Text.AlignVCenter
             elide: Text.ElideRight
         }
         highlighted: root.highlightedIndex === index
         background: Rectangle {
-            radius: 6
-            color: parent.highlighted ? "#383d67" : "transparent"
+            radius: ThemeModule.Theme.controlRadius
+            color: parent.down ? ThemeModule.Theme.shadowBorder
+                   : parent.highlighted ? ThemeModule.Theme.hoverSurface : "transparent"
             Behavior on color { ColorAnimation { duration: ThemeModule.Theme.controlMotion } }
         }
     }

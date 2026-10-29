@@ -25,8 +25,8 @@ ColumnLayout {
                     Layout.fillWidth: true
                     text: qsTr("Today's Tasks")
                     wrapMode: Text.Wrap
-                    color: ThemeModule.Theme.text
-                    font.family: ThemeModule.Theme.displayFont
+                    color: ThemeModule.Theme.textPrimary
+                    font.family: ThemeModule.Theme.fontFamily
                     font.pixelSize: 17
                     font.weight: Font.DemiBold
                 }
@@ -62,7 +62,7 @@ ColumnLayout {
                 text: root.controller.todayError.length > 0 ? qsTr("Try reopening Tasks.")
                     : root.controller.todayLoading || !root.controller.ready ? qsTr("Loading today's tasks…")
                     : qsTr("No incomplete tasks due today.")
-                color: ThemeModule.Theme.textDim
+                color: ThemeModule.Theme.textSecondary
                 font.pixelSize: 13
                 wrapMode: Text.Wrap
                 Layout.topMargin: 8
@@ -72,7 +72,7 @@ ColumnLayout {
                 visible: root.controller.overdueTasks.count > 0
                 text: qsTr("Overdue")
                 color: ThemeModule.Theme.error
-                font.family: ThemeModule.Theme.bodyFont
+                font.family: ThemeModule.Theme.fontFamily
                 font.pixelSize: 12
                 font.weight: Font.DemiBold
             }
@@ -97,8 +97,8 @@ ColumnLayout {
             Label {
                 visible: root.controller.todayTasks.count > 0
                 text: qsTr("Due today")
-                color: ThemeModule.Theme.cyan
-                font.family: ThemeModule.Theme.bodyFont
+                color: ThemeModule.Theme.accentCyan
+                font.family: ThemeModule.Theme.fontFamily
                 font.pixelSize: 12
                 font.weight: Font.DemiBold
             }
@@ -136,8 +136,8 @@ ColumnLayout {
                 Label {
                     Layout.fillWidth: true
                     text: qsTr("This Week's Tasks")
-                    color: ThemeModule.Theme.text
-                    font.family: ThemeModule.Theme.displayFont
+                    color: ThemeModule.Theme.textPrimary
+                    font.family: ThemeModule.Theme.fontFamily
                     font.pixelSize: 17
                     font.weight: Font.DemiBold
                     wrapMode: Text.Wrap
@@ -164,8 +164,8 @@ ColumnLayout {
                 Layout.fillWidth: true
                 text: root.controller.weekRangeLabel
                 visible: text.length > 0
-                color: ThemeModule.Theme.textDim
-                font.family: ThemeModule.Theme.bodyFont
+                color: ThemeModule.Theme.textSecondary
+                font.family: ThemeModule.Theme.fontFamily
                 font.pixelSize: 11
             }
             Label {
@@ -182,7 +182,7 @@ ColumnLayout {
                 text: root.controller.weekError.length > 0 ? qsTr("Try reopening Calendar.")
                     : root.controller.weekLoading || !root.controller.ready ? qsTr("Loading this week's tasks…")
                     : qsTr("No more incomplete tasks due this week.")
-                color: ThemeModule.Theme.textDim
+                color: ThemeModule.Theme.textSecondary
                 font.pixelSize: 13
                 wrapMode: Text.Wrap
                 Layout.topMargin: 8
@@ -221,8 +221,8 @@ ColumnLayout {
                 Label {
                     Layout.fillWidth: true
                     text: qsTr("Setups")
-                    color: ThemeModule.Theme.text
-                    font.family: ThemeModule.Theme.displayFont
+                    color: ThemeModule.Theme.textPrimary
+                    font.family: ThemeModule.Theme.fontFamily
                     font.pixelSize: 17
                     font.weight: Font.DemiBold
                 }
@@ -243,7 +243,7 @@ ColumnLayout {
                 text: setupsController.loading ? qsTr("Loading saved setups…")
                     : setupsController.errorMessage.length > 0 ? setupsController.errorMessage
                     : qsTr("Launch your saved application groups. Create your first setup with Manage.")
-                color: setupsController.errorMessage.length > 0 ? ThemeModule.Theme.error : ThemeModule.Theme.textDim
+                color: setupsController.errorMessage.length > 0 ? ThemeModule.Theme.error : ThemeModule.Theme.textSecondary
                 font.pixelSize: 13
                 wrapMode: Text.Wrap
                 Layout.topMargin: 8
@@ -271,8 +271,8 @@ ColumnLayout {
                     Label {
                         Layout.fillWidth: true
                         text: model.name + " · " + model.applicationSummary
-                        color: ThemeModule.Theme.textDim
-                        font.family: ThemeModule.Theme.bodyFont
+                        color: ThemeModule.Theme.textSecondary
+                        font.family: ThemeModule.Theme.fontFamily
                         font.pixelSize: 12
                         elide: Text.ElideRight
                     }

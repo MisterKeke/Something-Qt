@@ -24,8 +24,8 @@ Shared.AppCard {
             Label {
                 Layout.fillWidth: true
                 text: qsTr("New From Favorites")
-                color: ThemeModule.Theme.text
-                font.family: ThemeModule.Theme.displayFont
+                color: ThemeModule.Theme.textPrimary
+                font.family: ThemeModule.Theme.fontFamily
                 font.pixelSize: 17
                 font.weight: Font.DemiBold
             }
@@ -87,9 +87,9 @@ Shared.AppCard {
                 required property string views
                 Layout.fillWidth: true
                 implicitHeight: newsColumn.implicitHeight + 20
-                radius: 10
-                color: ThemeModule.Theme.panelAlt
-                border.color: ThemeModule.Theme.border
+                radius: ThemeModule.Theme.panelRadius
+                color: ThemeModule.Theme.raisedSurface
+                border.color: ThemeModule.Theme.borderColor
                 ColumnLayout {
                     id: newsColumn
                     anchors.fill: parent
@@ -100,15 +100,15 @@ Shared.AppCard {
                         Shared.StatusBadge {
                             text: source === "youtube" ? qsTr("YouTube") : qsTr("Telegram")
                             badgeColor: source === "youtube" ? ThemeModule.Theme.error
-                                                                 : ThemeModule.Theme.cyan
+                                                                 : ThemeModule.Theme.accentCyan
                         }
                         Label {
                             Layout.fillWidth: true
                             text: root.formatTimestamp(publishedAt)
                             textFormat: Text.PlainText
-                            color: ThemeModule.Theme.textDim
-                            font.family: ThemeModule.Theme.bodyFont
-                            font.pixelSize: 10
+                            color: ThemeModule.Theme.textSecondary
+                            font.family: ThemeModule.Theme.fontFamily
+                            font.pixelSize: ThemeModule.Theme.metadataFontSize
                             horizontalAlignment: Text.AlignRight
                         }
                     }
@@ -116,8 +116,8 @@ Shared.AppCard {
                         Layout.fillWidth: true
                         text: title
                         textFormat: Text.PlainText
-                        color: ThemeModule.Theme.text
-                        font.family: ThemeModule.Theme.displayFont
+                        color: ThemeModule.Theme.textPrimary
+                        font.family: ThemeModule.Theme.fontFamily
                         font.pixelSize: 13
                         font.weight: Font.DemiBold
                         wrapMode: Text.Wrap
@@ -127,8 +127,8 @@ Shared.AppCard {
                         Layout.fillWidth: true
                         text: preview
                         textFormat: Text.PlainText
-                        color: ThemeModule.Theme.textDim
-                        font.family: ThemeModule.Theme.bodyFont
+                        color: ThemeModule.Theme.textSecondary
+                        font.family: ThemeModule.Theme.fontFamily
                         font.pixelSize: 11
                         wrapMode: Text.Wrap
                         maximumLineCount: 4
@@ -161,9 +161,9 @@ Shared.AppCard {
                             visible: views.length > 0
                             text: views
                             textFormat: Text.PlainText
-                            color: ThemeModule.Theme.textDim
-                            font.family: ThemeModule.Theme.bodyFont
-                            font.pixelSize: 10
+                            color: ThemeModule.Theme.textSecondary
+                            font.family: ThemeModule.Theme.fontFamily
+                            font.pixelSize: ThemeModule.Theme.metadataFontSize
                         }
                         Shared.AppButton {
                             visible: externalUrl.length > 0
