@@ -184,15 +184,15 @@ storage::StorageCommand SteamGameUpdatesService::recordNewsCheck(
 }
 
 storage::StorageCommand SteamGameUpdatesService::loadNewsPage(
-    std::optional<quint32> appId, bool unreadOnly, int pageSize,
+    std::optional<quint32> appId, bool unreadOnly, QString titleQuery, int pageSize,
     storage::SteamGameUpdateNewsCursor before)
 {
-    return [appId, unreadOnly, pageSize, before](
+    return [appId, unreadOnly, titleQuery = std::move(titleQuery), pageSize, before](
                storage::StorageRepositories &repositories,
                const std::function<bool()> &cancelled) {
         if (cancelled()) return failed(domain::AppError::cancelled());
         const auto page = repositories.gameUpdates.newsPage(
-            appId, unreadOnly, pageSize, before, cancelled);
+            appId, unreadOnly, titleQuery, pageSize, before, cancelled);
         if (!page.succeeded()) return failed(page.error);
         QVariantList items;
         items.reserve(page.value.items.size());
@@ -228,6 +228,20 @@ storage::StorageCommand SteamGameUpdatesService::loadNewsPage(
                 {QStringLiteral("newsId"), page.value.nextCursor.newsId},
             });
         }
+        return reply;
+    };
+}
+
+storage::StorageCommand SteamGameUpdatesService::oldestNewsPublishedAt(quint32 appId)
+{
+    return [appId](storage::StorageRepositories &repositories,
+                   const std::function<bool()> &cancelled) {
+        if (cancelled()) return failed(domain::AppError::cancelled());
+        const auto oldest = repositories.gameUpdates.oldestNewsPublishedAt(appId);
+        if (!oldest.succeeded()) return failed(oldest.error);
+        storage::StorageReply reply;
+        reply.values.insert(QStringLiteral("publishedAtUnixSeconds"),
+                            oldest.value.value_or(0));
         return reply;
     };
 }

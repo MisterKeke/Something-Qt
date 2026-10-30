@@ -20,8 +20,9 @@ public:
         QString profileDirectory, quint32 appId, QString attemptedAtUtc,
         bool succeeded, QString safeError = {});
     static storage::StorageCommand loadNewsPage(
-        std::optional<quint32> appId, bool unreadOnly, int pageSize,
+        std::optional<quint32> appId, bool unreadOnly, QString titleQuery, int pageSize,
         storage::SteamGameUpdateNewsCursor before = {});
+    static storage::StorageCommand oldestNewsPublishedAt(quint32 appId);
     static storage::StorageCommand saveNewsPage(
         quint32 appId, QVector<domain::SteamNewsArticle> articles,
         QString discoveredAtUtc);

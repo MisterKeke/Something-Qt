@@ -306,9 +306,10 @@ public:
         const domain::SteamGameUpdateArtworkMetadata &artwork);
     RepositoryResult<bool> hasArtworkFilename(const QString &filename) const;
     RepositoryResult<SteamGameUpdateNewsPage> newsPage(
-        std::optional<quint32> appId, bool unreadOnly, int pageSize,
+        std::optional<quint32> appId, bool unreadOnly, QString titleQuery, int pageSize,
         const SteamGameUpdateNewsCursor &before = {},
         const std::function<bool()> &cancellationRequested = {}) const;
+    RepositoryResult<std::optional<qint64>> oldestNewsPublishedAt(quint32 appId) const;
     RepositoryResult<QHash<quint32, int>> unreadNewsCounts() const;
     RepositoryResult<SteamGameUpdateNewsUpsertResult> upsertNewsPage(
         quint32 appId, const QVector<domain::SteamNewsArticle> &articles,

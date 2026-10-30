@@ -245,6 +245,11 @@ ApplicationWindow {
         }
     }
 
+    Component {
+        id: gameUpdatesPageComponent
+        Pages.GameUpdatesPage { controller: steamGameUpdatesController }
+    }
+
     background: Item {
         clip: true
 
@@ -369,6 +374,7 @@ ApplicationWindow {
                             : window.currentRoute === "currencies" ? qsTr("Rates, conversions, and favorite pairs")
                             : window.currentRoute === "setups" ? qsTr("Launch your saved application groups")
                             : window.currentRoute === "applications" ? qsTr("Your favorite desktop applications")
+                            : window.currentRoute === "gameUpdates" ? qsTr("Follow Steam game news independently from price tracking")
                             : ""
                         visible: text.length > 0
                         color: ThemeModule.Theme.textSecondary
@@ -409,6 +415,7 @@ ApplicationWindow {
                         : window.currentRoute === "runningApplications" ? runningApplicationsPageComponent
                         : window.currentRoute === "setups" ? setupsPageComponent
                         : window.currentRoute === "fileExplorer" ? fileExplorerPageComponent
+                        : window.currentRoute === "gameUpdates" ? gameUpdatesPageComponent
                         : window.currentRoute === "steam" ? steamPageComponent
                         : (window.currentRoute === "telegram" || window.currentRoute === "youtube") ? favoritesPageComponent
                         : dashboardPageComponent

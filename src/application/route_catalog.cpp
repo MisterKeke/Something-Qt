@@ -31,6 +31,7 @@ const QVariantList &routeTable()
         makeRoute(QStringLiteral("runningApplications"), "Running applications", QStringLiteral("↗"), {}, true, "Running apps"),
         makeRoute(QStringLiteral("setups"), "Setups", QStringLiteral("▱"), QStringLiteral("qrc:/something/assets/navigation/setups-layers.svg"), true),
         makeRoute(QStringLiteral("fileExplorer"), "File Explorer", QStringLiteral("▰"), QStringLiteral("qrc:/something/assets/navigation/file-explorer-aino.png"), true),
+        makeRoute(QStringLiteral("gameUpdates"), "Game Updates", QStringLiteral("◉"), QStringLiteral("qrc:/something/assets/navigation/games-controller.svg"), true),
         makeRoute(QStringLiteral("steam"), "Steam tracking", QStringLiteral("◉"), QStringLiteral("qrc:/something/assets/navigation/games-controller.svg"), true),
         makeRoute(QStringLiteral("terminal"), "Console", QStringLiteral(">_"), {}, false),
         makeRoute(QStringLiteral("settings"), "Settings", QStringLiteral("⚙"), QStringLiteral("qrc:/something/assets/navigation/settings-sandrone.png"), true),

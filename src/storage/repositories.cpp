@@ -4548,7 +4548,7 @@ RepositoryResult<bool> SteamGameUpdatesRepository::hasArtworkFilename(
 }
 
 RepositoryResult<SteamGameUpdateNewsPage> SteamGameUpdatesRepository::newsPage(
-    std::optional<quint32> appId, bool unreadOnly, int pageSize,
+    std::optional<quint32> appId, bool unreadOnly, QString titleQuery, int pageSize,
     const SteamGameUpdateNewsCursor &before,
     const std::function<bool()> &cancellationRequested) const
 {
@@ -4556,6 +4556,7 @@ RepositoryResult<SteamGameUpdateNewsPage> SteamGameUpdatesRepository::newsPage(
     const bool hasCursor = before.publishedAtUnixSeconds != 0 || before.appId != 0
         || !before.newsId.isEmpty();
     if ((appId && *appId == 0) || pageSize <= 0 || pageSize > maximumNewsPageSize
+        || titleQuery.size() > 120
         || (hasCursor && (!before.isValid() || !validSteamNewsId(before.newsId)))
         || (appId && hasCursor && before.appId != *appId)) {
         return failure<SteamGameUpdateNewsPage>(domain::ErrorCategory::Validation);
@@ -4571,6 +4572,8 @@ RepositoryResult<SteamGameUpdateNewsPage> SteamGameUpdatesRepository::newsPage(
         "JOIN steam_game_update_follows f ON f.steam_app_id=n.steam_app_id WHERE 1=1");
     if (appId) sql += QStringLiteral(" AND n.steam_app_id=?");
     if (unreadOnly) sql += QStringLiteral(" AND n.is_read=0");
+    if (!titleQuery.trimmed().isEmpty())
+        sql += QStringLiteral(" AND n.title COLLATE NOCASE LIKE ? ESCAPE '\\'");
     if (hasCursor) {
         sql += QStringLiteral(
             " AND (n.published_at_unix_seconds<? OR "
@@ -4583,6 +4586,8 @@ RepositoryResult<SteamGameUpdateNewsPage> SteamGameUpdatesRepository::newsPage(
     QSqlQuery query(m_database);
     query.prepare(sql);
     if (appId) query.addBindValue(*appId);
+    if (!titleQuery.trimmed().isEmpty())
+        query.addBindValue(taskHistoryTitleLikePattern(titleQuery.trimmed()));
     if (hasCursor) {
         query.addBindValue(before.publishedAtUnixSeconds);
         query.addBindValue(before.publishedAtUnixSeconds);
@@ -4627,6 +4632,27 @@ RepositoryResult<SteamGameUpdateNewsPage> SteamGameUpdatesRepository::newsPage(
         result.value.nextCursor = {last.article.publishedAtUnixSeconds,
                                    last.article.appId, last.article.newsId};
     }
+    return result;
+}
+
+RepositoryResult<std::optional<qint64>>
+SteamGameUpdatesRepository::oldestNewsPublishedAt(quint32 appId) const
+{
+    Q_ASSERT(QThread::currentThread() == m_database.driver()->thread());
+    if (appId == 0)
+        return failure<std::optional<qint64>>(domain::ErrorCategory::Validation);
+
+    QSqlQuery query(m_database);
+    query.prepare(QStringLiteral(
+        "SELECT MIN(published_at_unix_seconds) FROM steam_game_update_news_items "
+        "WHERE steam_app_id=?"));
+    query.addBindValue(appId);
+    if (!query.exec())
+        return failure<std::optional<qint64>>(queryFailure(query));
+
+    RepositoryResult<std::optional<qint64>> result;
+    if (query.next() && !query.value(0).isNull())
+        result.value = query.value(0).toLongLong();
     return result;
 }
 
