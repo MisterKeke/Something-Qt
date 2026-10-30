@@ -32,6 +32,12 @@ class SteamGamesController final : public QObject {
     Q_PROPERTY(bool deleteBusy READ deleteBusy NOTIFY stateChanged)
     Q_PROPERTY(QString errorMessage READ errorMessage NOTIFY stateChanged)
     Q_PROPERTY(QString notification READ notification NOTIFY stateChanged)
+    Q_PROPERTY(bool historyLoading READ historyLoading NOTIFY stateChanged)
+    Q_PROPERTY(QString historyError READ historyError NOTIFY stateChanged)
+    Q_PROPERTY(QVariantMap historyGame READ historyGame NOTIFY stateChanged)
+    Q_PROPERTY(QVariantMap historyStatistics READ historyStatistics NOTIFY stateChanged)
+    Q_PROPERTY(QVariantList historyPoints READ historyPoints NOTIFY stateChanged)
+    Q_PROPERTY(QString historyRange READ historyRange NOTIFY stateChanged)
 
 public:
     explicit SteamGamesController(application::ApplicationServiceGraph *graph,
@@ -52,6 +58,12 @@ public:
     bool deleteBusy() const noexcept { return m_deleteBusy; }
     QString errorMessage() const { return m_errorMessage; }
     QString notification() const { return m_notification; }
+    bool historyLoading() const noexcept { return m_historyLoading; }
+    QString historyError() const { return m_historyError; }
+    QVariantMap historyGame() const { return m_historyGame; }
+    QVariantMap historyStatistics() const { return m_historyStatistics; }
+    QVariantList historyPoints() const { return m_historyPoints; }
+    QString historyRange() const { return m_historyRange; }
 
     Q_INVOKABLE void setSelectedCountry(QString countryCode);
     Q_INVOKABLE void saveCountry();
@@ -61,6 +73,11 @@ public:
     Q_INVOKABLE void openStore(qint64 gameId);
     Q_INVOKABLE void retryLoad();
     Q_INVOKABLE void clearNotification();
+    Q_INVOKABLE void openPriceHistory(qint64 gameId);
+    Q_INVOKABLE void setPriceHistoryRange(QString range);
+    Q_INVOKABLE void reloadPriceHistory();
+    Q_INVOKABLE void closePriceHistory();
+    Q_INVOKABLE QString formatPrice(qint64 amountMinor, QString currencyCode) const;
 
 signals:
     void stateChanged();
@@ -70,7 +87,7 @@ signals:
 private:
     enum class Kind { Snapshot, CountrySave, AddNetwork, AddParse, AddInsert,
                       Delete, RefreshNetwork, RefreshParse, RefreshCommit,
-                      ArtworkNetwork, ArtworkStage, ArtworkSave };
+                      ArtworkNetwork, ArtworkStage, ArtworkSave, PriceHistory };
     struct RefreshWork final {
         QVariantMap game;
         QString attemptedAt;
@@ -85,6 +102,7 @@ private:
         int refreshIndex{-1};
         quint64 refreshGeneration{0};
         quint64 artworkGeneration{0};
+        quint64 historyGeneration{0};
         QVariantMap game;
         bool autoRefreshAfterSnapshot{false};
         bool manualRefreshAfterSnapshot{false};
@@ -104,6 +122,7 @@ private:
     void completeRefreshItem(int index, const domain::SteamGameDetails *details,
                              QString safeError);
     void finishRefreshBatch();
+    void requestPriceHistory();
     void queueArtwork(qint64 gameId, quint32 appId, const QString &url);
     void cancelAll();
     void cancelPending(quint64 id);
@@ -132,7 +151,13 @@ private:
     QString m_refreshStatus;
     QString m_errorMessage;
     QString m_notification;
+    QVariantMap m_historyGame;
+    QVariantMap m_historyStatistics;
+    QVariantList m_historyPoints;
+    QString m_historyError;
+    QString m_historyRange{QStringLiteral("all")};
     quint64 m_refreshGeneration{0};
+    quint64 m_historyGeneration{0};
     int m_nextRefreshIndex{0};
     int m_activeRefreshRequests{0};
     int m_refreshFinishedCount{0};
@@ -148,6 +173,8 @@ private:
     bool m_refreshCommitPending{false};
     bool m_countryBusy{false};
     bool m_deleteBusy{false};
+    bool m_historyLoading{false};
+    qint64 m_historyGameId{0};
 };
 
 } // namespace something::controllers

@@ -111,7 +111,7 @@ storage::StorageCommand SteamService::loadSnapshot(QString profileDirectory)
     };
 }
 
-storage::StorageCommand SteamService::loadPriceHistoryStatistics(
+storage::StorageCommand SteamService::loadPriceHistory(
     qint64 gameId, QString countryCode, QString currencyCode,
     storage::SteamPriceHistoryRange range)
 {
@@ -149,12 +149,12 @@ storage::StorageCommand SteamService::loadPriceHistoryStatistics(
             return failed(domain::AppError(domain::ErrorCategory::Validation));
         }
 
-        const auto loaded = repositories.steam.priceHistoryStatistics(
-            gameId, countryCode, currencyCode, range);
+        const auto loaded = repositories.steam.priceHistory(
+            gameId, countryCode, currencyCode, range, cancelled);
         if (!loaded.succeeded()) return failed(loaded.error);
         if (cancelled()) return failed(domain::AppError::cancelled());
 
-        const storage::SteamPriceHistoryStatistics &statistics = loaded.value;
+        const storage::SteamPriceHistoryStatistics &statistics = loaded.value.statistics;
         QVariantMap value{
             {QStringLiteral("gameId"), gameId},
             {QStringLiteral("countryCode"), statistics.countryCode},
@@ -178,12 +178,33 @@ storage::StorageCommand SteamService::loadPriceHistoryStatistics(
             {QStringLiteral("hasIntervalPercentageChange"),
              statistics.intervalPercentageChange.has_value()},
         };
-        if (statistics.latestPriceMinor)
+        const auto formattedPrice = [](qint64 minor, const QString &state,
+                                       const QString &currency) {
+            if (state == QStringLiteral("free") || minor == 0)
+                return QStringLiteral("Free");
+            return domain::formatSteamPrice(minor, currency);
+        };
+        if (statistics.latestPriceMinor) {
             value.insert(QStringLiteral("latestPriceMinor"), *statistics.latestPriceMinor);
-        if (statistics.lowestPriceMinor)
+            value.insert(QStringLiteral("latestPriceDisplay"),
+                         formattedPrice(*statistics.latestPriceMinor,
+                                        statistics.latestPriceState,
+                                        statistics.currencyCode));
+        }
+        if (statistics.lowestPriceMinor) {
             value.insert(QStringLiteral("lowestPriceMinor"), *statistics.lowestPriceMinor);
-        if (statistics.highestPriceMinor)
+            value.insert(QStringLiteral("lowestPriceDisplay"),
+                         formattedPrice(*statistics.lowestPriceMinor,
+                                        QStringLiteral("priced"),
+                                        statistics.currencyCode));
+        }
+        if (statistics.highestPriceMinor) {
             value.insert(QStringLiteral("highestPriceMinor"), *statistics.highestPriceMinor);
+            value.insert(QStringLiteral("highestPriceDisplay"),
+                         formattedPrice(*statistics.highestPriceMinor,
+                                        QStringLiteral("priced"),
+                                        statistics.currencyCode));
+        }
         if (statistics.intervalStartPriceMinor)
             value.insert(QStringLiteral("intervalStartPriceMinor"),
                           *statistics.intervalStartPriceMinor);
@@ -193,12 +214,50 @@ storage::StorageCommand SteamService::loadPriceHistoryStatistics(
         if (statistics.intervalAbsoluteChangeMinor)
             value.insert(QStringLiteral("intervalAbsoluteChangeMinor"),
                           *statistics.intervalAbsoluteChangeMinor);
+        if (statistics.intervalAbsoluteChangeMinor) {
+            const qint64 change = *statistics.intervalAbsoluteChangeMinor;
+            const QString magnitude = statistics.currencyCode.isEmpty()
+                ? QString::number(qAbs(change))
+                : domain::formatSteamPrice(qAbs(change), statistics.currencyCode);
+            value.insert(QStringLiteral("intervalAbsoluteChangeDisplay"),
+                         (change > 0 ? QStringLiteral("+")
+                          : change < 0 ? QStringLiteral("−") : QString()) + magnitude);
+        }
         if (statistics.intervalPercentageChange)
             value.insert(QStringLiteral("intervalPercentageChange"),
                           *statistics.intervalPercentageChange);
+        if (statistics.intervalPercentageChange) {
+            const double change = *statistics.intervalPercentageChange;
+            value.insert(QStringLiteral("intervalPercentageChangeDisplay"),
+                         QStringLiteral("%1%2%")
+                             .arg(change > 0 ? QStringLiteral("+")
+                                  : change < 0 ? QStringLiteral("−") : QString(),
+                                  QString::number(qAbs(change), 'f', 2)));
+        }
+
+        QVariantList points;
+        points.reserve(loaded.value.points.size());
+        for (const storage::SteamPriceHistoryPoint &point : loaded.value.points) {
+            QVariantMap pointValue{
+                {QStringLiteral("id"), point.id},
+                {QStringLiteral("observedAtUtc"), point.observedAtUtc},
+                {QStringLiteral("observedAtUtcMs"), point.observedAtUtcMs},
+                {QStringLiteral("priceState"), point.priceState},
+                {QStringLiteral("currencyCode"), point.currencyCode},
+                {QStringLiteral("hasPrice"), point.priceMinor.has_value()},
+            };
+            if (point.priceMinor) {
+                pointValue.insert(QStringLiteral("priceMinor"), *point.priceMinor);
+                pointValue.insert(QStringLiteral("priceDisplay"),
+                    formattedPrice(*point.priceMinor, point.priceState,
+                                   point.currencyCode));
+            }
+            points.push_back(std::move(pointValue));
+        }
 
         storage::StorageReply reply;
         reply.values.insert(QStringLiteral("statistics"), value);
+        reply.values.insert(QStringLiteral("points"), points);
         return reply;
     };
 }

@@ -247,6 +247,20 @@ struct SteamPriceHistoryStatistics final {
     std::optional<double> intervalPercentageChange;
 };
 
+struct SteamPriceHistoryPoint final {
+    qint64 id{0};
+    QString observedAtUtc;
+    qint64 observedAtUtcMs{0};
+    QString priceState;
+    QString currencyCode;
+    std::optional<qint64> priceMinor;
+};
+
+struct SteamPriceHistorySnapshot final {
+    SteamPriceHistoryStatistics statistics;
+    QVector<SteamPriceHistoryPoint> points;
+};
+
 struct SteamRefreshUpdate final {
     qint64 gameId{0};
     QString attemptedAt;

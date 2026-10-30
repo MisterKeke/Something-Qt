@@ -3236,18 +3236,21 @@ RepositoryResult<SteamGame> SteamRepository::get(qint64 id) const
     return load(id);
 }
 
-RepositoryResult<SteamPriceHistoryStatistics> SteamRepository::priceHistoryStatistics(
+RepositoryResult<SteamPriceHistorySnapshot> SteamRepository::priceHistory(
     qint64 gameId, QString countryCode, QString currencyCode,
-    SteamPriceHistoryRange range) const
+    SteamPriceHistoryRange range,
+    const std::function<bool()> &cancellationRequested) const
 {
     Q_ASSERT(QThread::currentThread() == m_database.driver()->thread());
+    if (cancellationRequested && cancellationRequested())
+        return failure<SteamPriceHistorySnapshot>(domain::ErrorCategory::Cancelled);
     countryCode = countryCode.trimmed().toUpper();
     currencyCode = currencyCode.trimmed().toUpper();
     static const QRegularExpression countryPattern(QStringLiteral("^[A-Z]{2}$"));
     static const QRegularExpression currencyPattern(QStringLiteral("^[A-Z]{3}$"));
     if (gameId <= 0 || !countryPattern.match(countryCode).hasMatch()
         || (!currencyCode.isEmpty() && !currencyPattern.match(currencyCode).hasMatch())) {
-        return failure<SteamPriceHistoryStatistics>(domain::ErrorCategory::Validation);
+        return failure<SteamPriceHistorySnapshot>(domain::ErrorCategory::Validation);
     }
 
     QString intervalStartUtc;
@@ -3268,19 +3271,20 @@ RepositoryResult<SteamPriceHistoryStatistics> SteamRepository::priceHistoryStati
     case SteamPriceHistoryRange::All:
         break;
     default:
-        return failure<SteamPriceHistoryStatistics>(domain::ErrorCategory::Validation);
+        return failure<SteamPriceHistorySnapshot>(domain::ErrorCategory::Validation);
     }
 
     QSqlQuery exists(m_database);
     exists.prepare(QStringLiteral("SELECT 1 FROM steam_games WHERE id=?"));
     exists.addBindValue(gameId);
     if (!exists.exec())
-        return failure<SteamPriceHistoryStatistics>(queryFailure(exists));
+        return failure<SteamPriceHistorySnapshot>(queryFailure(exists));
     if (!exists.next())
-        return failure<SteamPriceHistoryStatistics>(domain::ErrorCategory::NotFound);
+        return failure<SteamPriceHistorySnapshot>(domain::ErrorCategory::NotFound);
     exists.finish();
 
-    SteamPriceHistoryStatistics statistics;
+    SteamPriceHistorySnapshot snapshot;
+    SteamPriceHistoryStatistics &statistics = snapshot.statistics;
     statistics.countryCode = countryCode;
     statistics.currencyCode = currencyCode;
 
@@ -3294,9 +3298,9 @@ RepositoryResult<SteamPriceHistoryStatistics> SteamRepository::priceHistoryStati
     aggregate.addBindValue(countryCode);
     aggregate.addBindValue(nullableString(currencyCode));
     if (!aggregate.exec())
-        return failure<SteamPriceHistoryStatistics>(queryFailure(aggregate));
+        return failure<SteamPriceHistorySnapshot>(queryFailure(aggregate));
     if (!aggregate.next())
-        return failure<SteamPriceHistoryStatistics>(domain::ErrorCategory::Storage);
+        return failure<SteamPriceHistorySnapshot>(domain::ErrorCategory::Storage);
     statistics.observationCount = aggregate.value(0).toLongLong();
     statistics.comparablePriceCount = aggregate.value(1).toLongLong();
     if (!aggregate.value(2).isNull())
@@ -3317,7 +3321,7 @@ RepositoryResult<SteamPriceHistoryStatistics> SteamRepository::priceHistoryStati
     latestObservation.addBindValue(countryCode);
     latestObservation.addBindValue(nullableString(currencyCode));
     if (!latestObservation.exec())
-        return failure<SteamPriceHistoryStatistics>(queryFailure(latestObservation));
+        return failure<SteamPriceHistorySnapshot>(queryFailure(latestObservation));
     if (latestObservation.next()) {
         statistics.latestObservationState = latestObservation.value(0).toString();
         statistics.latestObservationAtUtc = latestObservation.value(1).toString();
@@ -3334,7 +3338,7 @@ RepositoryResult<SteamPriceHistoryStatistics> SteamRepository::priceHistoryStati
     latestPrice.addBindValue(countryCode);
     latestPrice.addBindValue(nullableString(currencyCode));
     if (!latestPrice.exec())
-        return failure<SteamPriceHistoryStatistics>(queryFailure(latestPrice));
+        return failure<SteamPriceHistorySnapshot>(queryFailure(latestPrice));
     if (latestPrice.next()) {
         statistics.latestPriceMinor = latestPrice.value(0).toLongLong();
         statistics.latestPriceState = latestPrice.value(1).toString();
@@ -3382,7 +3386,7 @@ RepositoryResult<SteamPriceHistoryStatistics> SteamRepository::priceHistoryStati
     domain::ErrorCategory intervalError = domain::ErrorCategory::None;
     if (!loadIntervalPoint(true, &intervalFirst, &intervalError)
         || !loadIntervalPoint(false, &intervalLast, &intervalError)) {
-        return failure<SteamPriceHistoryStatistics>(intervalError);
+        return failure<SteamPriceHistorySnapshot>(intervalError);
     }
     if (intervalFirst && intervalLast && intervalFirst->id != intervalLast->id) {
         statistics.hasComparableInterval = true;
@@ -3400,8 +3404,72 @@ RepositoryResult<SteamPriceHistoryStatistics> SteamRepository::priceHistoryStati
         }
     }
 
-    RepositoryResult<SteamPriceHistoryStatistics> result;
-    result.value = std::move(statistics);
+    if (cancellationRequested && cancellationRequested())
+        return failure<SteamPriceHistorySnapshot>(domain::ErrorCategory::Cancelled);
+
+    constexpr int pageSize = 256;
+    QString cursorAtUtc;
+    qint64 cursorId = 0;
+    while (true) {
+        if (cancellationRequested && cancellationRequested())
+            return failure<SteamPriceHistorySnapshot>(domain::ErrorCategory::Cancelled);
+
+        QString sql = QStringLiteral(
+            "SELECT id,observed_at_utc,price_state,currency_code,current_price_minor "
+            "FROM steam_price_observations WHERE steam_game_id=? AND country_code=? "
+            "AND currency_code IS ?");
+        if (!intervalStartUtc.isEmpty())
+            sql += QStringLiteral(" AND observed_at_utc>=?");
+        if (!cursorAtUtc.isEmpty())
+            sql += QStringLiteral(" AND (observed_at_utc>? OR "
+                                  "(observed_at_utc=? AND id>?))");
+        sql += QStringLiteral(" ORDER BY observed_at_utc ASC,id ASC LIMIT %1").arg(pageSize);
+
+        QSqlQuery page(m_database);
+        page.prepare(sql);
+        page.addBindValue(gameId);
+        page.addBindValue(countryCode);
+        page.addBindValue(nullableString(currencyCode));
+        if (!intervalStartUtc.isEmpty()) page.addBindValue(intervalStartUtc);
+        if (!cursorAtUtc.isEmpty()) {
+            page.addBindValue(cursorAtUtc);
+            page.addBindValue(cursorAtUtc);
+            page.addBindValue(cursorId);
+        }
+        if (!page.exec())
+            return failure<SteamPriceHistorySnapshot>(queryFailure(page));
+
+        int pageCount = 0;
+        while (page.next()) {
+            SteamPriceHistoryPoint point;
+            point.id = page.value(0).toLongLong();
+            point.observedAtUtc = page.value(1).toString();
+            point.priceState = page.value(2).toString();
+            point.currencyCode = page.value(3).toString();
+            if (!page.value(4).isNull()) point.priceMinor = page.value(4).toLongLong();
+            QDateTime observedAt = QDateTime::fromString(
+                point.observedAtUtc, Qt::ISODateWithMs);
+            if (!observedAt.isValid())
+                observedAt = QDateTime::fromString(point.observedAtUtc, Qt::ISODate);
+            if (!observedAt.isValid())
+                return failure<SteamPriceHistorySnapshot>(domain::ErrorCategory::Storage);
+            point.observedAtUtcMs = observedAt.toUTC().toMSecsSinceEpoch();
+            cursorAtUtc = point.observedAtUtc;
+            cursorId = point.id;
+            snapshot.points.push_back(std::move(point));
+            ++pageCount;
+        }
+        if (page.lastError().isValid())
+            return failure<SteamPriceHistorySnapshot>(queryFailure(page));
+        page.finish();
+        if (pageCount < pageSize) break;
+    }
+
+    if (cancellationRequested && cancellationRequested())
+        return failure<SteamPriceHistorySnapshot>(domain::ErrorCategory::Cancelled);
+
+    RepositoryResult<SteamPriceHistorySnapshot> result;
+    result.value = std::move(snapshot);
     return result;
 }
 

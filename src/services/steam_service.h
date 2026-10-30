@@ -10,7 +10,7 @@ class SteamService final {
 public:
     static QVariantList countryValues();
     static storage::StorageCommand loadSnapshot(QString profileDirectory);
-    static storage::StorageCommand loadPriceHistoryStatistics(
+    static storage::StorageCommand loadPriceHistory(
         qint64 gameId, QString countryCode, QString currencyCode,
         storage::SteamPriceHistoryRange range);
     static storage::StorageCommand setCountry(QString countryCode);

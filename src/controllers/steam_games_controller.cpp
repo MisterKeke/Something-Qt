@@ -473,6 +473,109 @@ void SteamGamesController::clearNotification()
     emit stateChanged();
 }
 
+void SteamGamesController::openPriceHistory(qint64 gameId)
+{
+    if (!m_ready) return;
+    const int row = m_games.rowForId(gameId);
+    if (row < 0) return;
+
+    m_historyGameId = gameId;
+    m_historyGame = m_games.rowAt(row);
+    m_historyGame.insert(QStringLiteral("priceDisplay"),
+        m_games.data(m_games.index(row), models::SteamGamesModel::PriceDisplayRole).toString());
+    m_historyGame.insert(QStringLiteral("priceStateLabel"),
+        m_games.data(m_games.index(row), models::SteamGamesModel::PriceStateLabelRole).toString());
+    m_historyRange = QStringLiteral("all");
+    m_historyStatistics.clear();
+    m_historyPoints.clear();
+    m_historyError.clear();
+    requestPriceHistory();
+}
+
+void SteamGamesController::setPriceHistoryRange(QString range)
+{
+    range = range.trimmed().toLower();
+    if (range != QStringLiteral("7d") && range != QStringLiteral("30d")
+        && range != QStringLiteral("90d") && range != QStringLiteral("1y")
+        && range != QStringLiteral("all")) {
+        return;
+    }
+    if (m_historyGameId <= 0 || range == m_historyRange) return;
+    m_historyRange = std::move(range);
+    m_historyStatistics.clear();
+    m_historyPoints.clear();
+    requestPriceHistory();
+}
+
+void SteamGamesController::reloadPriceHistory()
+{
+    if (m_historyGameId <= 0 || m_historyLoading) return;
+    m_historyStatistics.clear();
+    m_historyPoints.clear();
+    requestPriceHistory();
+}
+
+void SteamGamesController::requestPriceHistory()
+{
+    if (!m_ready || m_historyGameId <= 0) return;
+    const auto pendingIds = m_pending.keys();
+    for (quint64 id : pendingIds) {
+        if (m_pending.value(id).kind == Kind::PriceHistory) cancelPending(id);
+    }
+    ++m_historyGeneration;
+    m_historyLoading = true;
+    m_historyError.clear();
+
+    storage::SteamPriceHistoryRange range = storage::SteamPriceHistoryRange::All;
+    if (m_historyRange == QStringLiteral("7d"))
+        range = storage::SteamPriceHistoryRange::Days7;
+    else if (m_historyRange == QStringLiteral("30d"))
+        range = storage::SteamPriceHistoryRange::Days30;
+    else if (m_historyRange == QStringLiteral("90d"))
+        range = storage::SteamPriceHistoryRange::Days90;
+    else if (m_historyRange == QStringLiteral("1y"))
+        range = storage::SteamPriceHistoryRange::Year1;
+
+    Pending pending;
+    pending.kind = Kind::PriceHistory;
+    pending.gameId = m_historyGameId;
+    pending.historyGeneration = m_historyGeneration;
+    const QString countryCode = m_historyGame.value(QStringLiteral("priceCountryCode"))
+        .toString().isEmpty()
+        ? m_countryCode
+        : m_historyGame.value(QStringLiteral("priceCountryCode")).toString();
+    const QString currencyCode = m_historyGame.value(QStringLiteral("currency")).toString();
+    if (!submitStorage(Kind::PriceHistory,
+            services::SteamService::loadPriceHistory(
+                m_historyGameId, countryCode, currencyCode, range), pending)) {
+        m_historyLoading = false;
+        m_historyError = QStringLiteral("Price history could not be loaded.");
+    }
+    emit stateChanged();
+}
+
+void SteamGamesController::closePriceHistory()
+{
+    const auto pendingIds = m_pending.keys();
+    for (quint64 id : pendingIds) {
+        if (m_pending.value(id).kind == Kind::PriceHistory) cancelPending(id);
+    }
+    ++m_historyGeneration;
+    m_historyGameId = 0;
+    m_historyLoading = false;
+    m_historyGame.clear();
+    m_historyStatistics.clear();
+    m_historyPoints.clear();
+    m_historyError.clear();
+    m_historyRange = QStringLiteral("all");
+    emit stateChanged();
+}
+
+QString SteamGamesController::formatPrice(qint64 amountMinor, QString currencyCode) const
+{
+    return domain::formatSteamPrice(amountMinor, std::move(currencyCode));
+}
+
 void SteamGamesController::onHttpsFinished(quint64 id, const QByteArray &body,
                                            domain::AppError error)
 {
@@ -723,6 +826,21 @@ void SteamGamesController::onStorageFinished(quint64 id, const QVariantMap &valu
         m_games.update(values.value(QStringLiteral("game")).toMap());
         emit stateChanged();
         return;
+    case Kind::PriceHistory:
+        if (pending.historyGeneration != m_historyGeneration
+            || pending.gameId != m_historyGameId) return;
+        m_historyLoading = false;
+        if (error.isError() || error.isCancelled()) {
+            m_historyError = QStringLiteral("Price history could not be loaded.");
+            m_historyStatistics.clear();
+            m_historyPoints.clear();
+        } else {
+            m_historyStatistics = values.value(QStringLiteral("statistics")).toMap();
+            m_historyPoints = values.value(QStringLiteral("points")).toList();
+            m_historyError.clear();
+        }
+        emit stateChanged();
+        return;
     default:
         return;
     }
@@ -776,6 +894,14 @@ void SteamGamesController::cancelAll()
     m_nextRefreshIndex = 0;
     m_refreshCommitPending = false;
     m_manualRefreshAfterLoad = false;
+    ++m_historyGeneration;
+    m_historyGameId = 0;
+    m_historyLoading = false;
+    m_historyGame.clear();
+    m_historyStatistics.clear();
+    m_historyPoints.clear();
+    m_historyError.clear();
+    m_historyRange = QStringLiteral("all");
 }
 
 void SteamGamesController::releaseAddReservation(quint32 appId)

@@ -410,6 +410,15 @@ Item {
                                 Layout.fillWidth: true
                                 spacing: 8
                                 Shared.AppButton {
+                                    text: qsTr("Price History")
+                                    quiet: true
+                                    Accessible.name: qsTr("Show price history for %1").arg(delegateRoot.name)
+                                    onClicked: {
+                                        root.controller.openPriceHistory(delegateRoot.gameId)
+                                        priceHistoryDialog.open()
+                                    }
+                                }
+                                Shared.AppButton {
                                     text: qsTr("Open Store")
                                     quiet: true
                                     Accessible.name: qsTr("Open %1 in Steam Store").arg(delegateRoot.name)
@@ -451,6 +460,11 @@ Item {
         confirmText: qsTr("Remove game")
         destructive: true
         onConfirmed: if (root.controller) root.controller.deleteGame(gameId)
+    }
+
+    Dialogs.SteamPriceHistoryDialog {
+        id: priceHistoryDialog
+        historyController: root.controller
     }
 
     Connections {
