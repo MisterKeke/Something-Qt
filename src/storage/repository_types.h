@@ -114,6 +114,17 @@ struct AssetMetadata {
     qint64 byteSize{0};
 };
 
+struct DesktopApplicationCategory {
+    qint64 id{0};
+    QString name;
+    std::optional<QString> description;
+    std::optional<QString> color;
+    std::optional<QString> iconIdentifier;
+    int displayOrder{0};
+    QString createdAt;
+    QString updatedAt;
+};
+
 struct DesktopApplication {
     qint64 id{0};
     QString displayName;
@@ -121,6 +132,7 @@ struct DesktopApplication {
     QString createdAt;
     QString updatedAt;
     std::optional<AssetMetadata> icon;
+    std::optional<qint64> categoryId;
 };
 
 struct Setup {

@@ -11,7 +11,8 @@ class DesktopApplicationsModel final : public QAbstractListModel {
 
 public:
     enum Role { IdRole = Qt::UserRole + 1, DisplayNameRole, ExecutablePathRole,
-                IconFilenameRole, IconSourceRole, NativeIconDataUrlRole, AvailableRole };
+                IconFilenameRole, IconSourceRole, NativeIconDataUrlRole, AvailableRole,
+                CategoryIdRole };
     explicit DesktopApplicationsModel(QObject *parent = nullptr);
     int rowCount(const QModelIndex &parent = {}) const override;
     int count() const noexcept { return m_rows.size(); }

@@ -135,6 +135,8 @@ QVariantMap DesktopApplicationsService::toVariantMap(const storage::DesktopAppli
                     {QStringLiteral("nativeIconDataUrl"), QString()},
                     {QStringLiteral("iconFilename"), application.icon
                         ? application.icon->filename : QString()}};
+    if (application.categoryId)
+        row.insert(QStringLiteral("categoryId"), *application.categoryId);
     return row;
 }
 
