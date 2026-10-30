@@ -527,6 +527,10 @@ Item {
                                         Shared.AppButton {
                                             text: qsTr("Open original")
                                             quiet: true
+                                            enabled: article.originalLinkAllowed === true
+                                            Accessible.description: article.originalLinkAllowed === true
+                                                ? qsTr("Opens the selected article in the native browser.")
+                                                : qsTr("This source link is unavailable for safety.")
                                             onClicked: root.controller.openArticle(
                                                 Number(article.appId), String(article.newsId))
                                         }

@@ -7,8 +7,10 @@
 #include "../services/steam_game_updates_service.h"
 #include "../services/steam_artwork_store.h"
 
+#include <QAbstractSocket>
 #include <QDateTime>
 #include <QDesktopServices>
+#include <QHostAddress>
 #include <QThread>
 #include <QUrl>
 
@@ -21,6 +23,7 @@ namespace {
 constexpr int kMaximumRefreshRequests = 3;
 constexpr int kMaximumArtworkRequests = 3;
 constexpr int kNewsPageSize = 60;
+constexpr qsizetype kMaximumNewsSourceUrlBytes = 4096;
 
 storage::StorageReply failed(domain::AppError error)
 {
@@ -29,8 +32,72 @@ storage::StorageReply failed(domain::AppError error)
     return reply;
 }
 
+bool isNonPublicIpv4(const QHostAddress &address)
+{
+    if (address.isLoopback() || address.isLinkLocal() || address.isMulticast()
+        || address.isBroadcast() || address.isNull()) {
+        return true;
+    }
+    const auto inSubnet = [&address](const QString &network, int prefix) {
+        return address.isInSubnet(QHostAddress(network), prefix);
+    };
+    return inSubnet(QStringLiteral("0.0.0.0"), 8)
+        || inSubnet(QStringLiteral("10.0.0.0"), 8)
+        || inSubnet(QStringLiteral("100.64.0.0"), 10)
+        || inSubnet(QStringLiteral("172.16.0.0"), 12)
+        || inSubnet(QStringLiteral("192.168.0.0"), 16);
+}
+
+bool isNonPublicAddressLiteral(const QString &host)
+{
+    bool numericAddressSyntax = false;
+    bool onlyAddressCharacters = true;
+    for (const QChar ch : host) {
+        const ushort code = ch.unicode();
+        if (code >= '0' && code <= '9') {
+            numericAddressSyntax = true;
+        } else if (ch == QLatin1Char('.') || ch == QLatin1Char('x')
+                   || ch == QLatin1Char('X')
+                   || (code >= 'a' && code <= 'f') || (code >= 'A' && code <= 'F')) {
+            continue;
+        } else {
+            onlyAddressCharacters = false;
+            break;
+        }
+    }
+    numericAddressSyntax = numericAddressSyntax && onlyAddressCharacters;
+
+    QHostAddress address;
+    const bool isAddress = address.setAddress(host);
+    if (numericAddressSyntax
+        && (!isAddress || address.protocol() != QAbstractSocket::IPv4Protocol
+            || address.toString() != host)) {
+        return true;
+    }
+    if (!isAddress) return host.contains(QLatin1Char(':'));
+    if (address.isLoopback() || address.isLinkLocal() || address.isMulticast()
+        || address.isBroadcast() || address.isNull()) {
+        return true;
+    }
+    if (address.protocol() == QAbstractSocket::IPv4Protocol)
+        return isNonPublicIpv4(address);
+    if (address.protocol() != QAbstractSocket::IPv6Protocol) return true;
+    if (address == QHostAddress::AnyIPv6
+        || address.isInSubnet(QHostAddress(QStringLiteral("fc00::")), 7)
+        || address.isInSubnet(QHostAddress(QStringLiteral("fec0::")), 10)) {
+        return true;
+    }
+    bool isMappedV4 = false;
+    const quint32 ipv4 = address.toIPv4Address(&isMappedV4);
+    return isMappedV4 && isNonPublicIpv4(QHostAddress(ipv4));
+}
+
 bool safeExternalNewsUrl(const QString &raw, QUrl *result)
 {
+    // The Steam response and cache are untrusted. Only ordinary HTTP(S)
+    // destinations are eligible for an explicit native-browser launch.
+    if (raw.isEmpty() || raw.size() > kMaximumNewsSourceUrlBytes
+        || raw.toUtf8().size() > kMaximumNewsSourceUrlBytes) return false;
     const QUrl url(raw, QUrl::StrictMode);
     const QString scheme = url.scheme().toLower();
     if (!url.isValid() || (scheme != QStringLiteral("http")
@@ -40,6 +107,18 @@ bool safeExternalNewsUrl(const QString &raw, QUrl *result)
             && url.port(-1) != (scheme == QStringLiteral("https") ? 443 : 80))) {
         return false;
     }
+
+    QString host = url.host().toLower();
+    if (host.startsWith(QLatin1Char('[')) && host.endsWith(QLatin1Char(']')))
+        host = host.mid(1, host.size() - 2);
+    while (host.endsWith(QLatin1Char('.'))) host.chop(1);
+    if (host == QStringLiteral("localhost") || host.endsWith(QStringLiteral(".localhost"))
+        || host.endsWith(QStringLiteral(".local"))
+        || host.endsWith(QStringLiteral(".internal"))
+        || (!host.contains(QLatin1Char('.')) && !host.contains(QLatin1Char(':')))) {
+        return false;
+    }
+    if (isNonPublicAddressLiteral(host)) return false;
     if (result) *result = url;
     return true;
 }
@@ -823,7 +902,18 @@ void SteamGameUpdatesController::onStorageFinished(
         {
             const QVariantList items = values.value(QStringLiteral("items")).toList();
             if (!pending.appendPage) m_newsItems.clear();
-            for (const QVariant &item : items) m_newsItems.push_back(item);
+            for (const QVariant &value : items) {
+                QVariantMap item = value.toMap();
+                QUrl safeUrl;
+                const bool canOpenOriginal = safeExternalNewsUrl(
+                    item.value(QStringLiteral("sourceUrl")).toString(), &safeUrl);
+                item.insert(QStringLiteral("originalLinkAllowed"), canOpenOriginal);
+                if (canOpenOriginal) {
+                    item.insert(QStringLiteral("sourceUrl"),
+                                safeUrl.toString(QUrl::FullyEncoded));
+                }
+                m_newsItems.push_back(item);
+            }
             m_newsHasMore = values.value(QStringLiteral("hasMore")).toBool();
             m_newsCursor = {};
             if (m_newsHasMore) {

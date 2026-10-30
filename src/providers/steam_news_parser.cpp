@@ -166,6 +166,8 @@ QString plainTextFromHtml(const QString &html, bool *valid)
     const QByteArray bytes = html.toUtf8();
     if (bytes.size() > kMaximumArticleHtmlBytes) return {};
 
+    // Extract DOM text nodes only. This drops markup, attributes, links, images,
+    // and active elements before the article reaches storage or the QML layer.
     lxb_html_parser_t *parser = lxb_html_parser_create();
     if (!parser || lxb_html_parser_init(parser) != LXB_STATUS_OK) {
         if (parser) lxb_html_parser_destroy(parser);
