@@ -449,6 +449,11 @@ Item {
                             font.pixelSize: 18
                             font.weight: Font.DemiBold
                         }
+                        Shared.AppButton {
+                            text: qsTr("Refresh all")
+                            quiet: true
+                            onClicked: controller.refreshAllComparisonCities()
+                        }
                     }
                     Label {
                         Layout.fillWidth: true
@@ -468,6 +473,7 @@ Item {
                             required property string administrativeArea
                             required property string country
                             required property string timezone
+                            required property string lastSuccessfulRefresh
                             required property bool loading
                             required property string error
                             required property bool hasForecast
@@ -515,10 +521,34 @@ Item {
                                         font.family: ThemeModule.Theme.fontFamily
                                         font.pixelSize: 10
                                     }
+                                    Label {
+                                        Layout.fillWidth: true
+                                        visible: lastSuccessfulRefresh.length > 0
+                                        text: qsTr("Last successful update %1")
+                                            .arg(new Date(lastSuccessfulRefresh).toLocaleString())
+                                        color: ThemeModule.Theme.textSecondary
+                                        font.family: ThemeModule.Theme.fontFamily
+                                        font.pixelSize: 10
+                                        wrapMode: Text.Wrap
+                                    }
+                                }
+                                Shared.AppButton {
+                                    text: loading ? qsTr("×") : qsTr("↻")
+                                    quiet: true
+                                    implicitWidth: 40
+                                    Layout.preferredWidth: 40
+                                    Accessible.name: loading
+                                        ? qsTr("Cancel refresh for %1").arg(name)
+                                        : qsTr("Refresh forecast for %1").arg(name)
+                                    onClicked: loading
+                                        ? controller.cancelComparisonCityRefresh(identity)
+                                        : controller.refreshComparisonCity(identity)
                                 }
                                 Shared.AppButton {
                                     text: qsTr("↑")
                                     quiet: true
+                                    implicitWidth: 40
+                                    Layout.preferredWidth: 40
                                     enabled: index > 0
                                     Accessible.name: qsTr("Move %1 earlier").arg(name)
                                     onClicked: controller.moveComparisonCity(identity, -1)
@@ -526,13 +556,17 @@ Item {
                                 Shared.AppButton {
                                     text: qsTr("↓")
                                     quiet: true
+                                    implicitWidth: 40
+                                    Layout.preferredWidth: 40
                                     enabled: index < controller.comparisonCityCount - 1
                                     Accessible.name: qsTr("Move %1 later").arg(name)
                                     onClicked: controller.moveComparisonCity(identity, 1)
                                 }
                                 Shared.AppButton {
-                                    text: qsTr("Remove")
+                                    text: qsTr("×")
                                     quiet: true
+                                    implicitWidth: 40
+                                    Layout.preferredWidth: 40
                                     Accessible.name: qsTr("Remove %1 from comparison").arg(name)
                                     onClicked: controller.removeComparisonCity(identity)
                                 }

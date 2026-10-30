@@ -203,6 +203,9 @@ QUrl forecastUrl(double latitude, double longitude)
     query.addQueryItem(QStringLiteral("daily"), QStringLiteral("weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max,sunrise,sunset,daylight_duration"));
     query.addQueryItem(QStringLiteral("timezone"), QStringLiteral("auto"));
     query.addQueryItem(QStringLiteral("timeformat"), QStringLiteral("unixtime"));
+    query.addQueryItem(QStringLiteral("temperature_unit"), QStringLiteral("celsius"));
+    query.addQueryItem(QStringLiteral("wind_speed_unit"), QStringLiteral("kmh"));
+    query.addQueryItem(QStringLiteral("precipitation_unit"), QStringLiteral("mm"));
     query.addQueryItem(QStringLiteral("forecast_days"), QStringLiteral("6"));
     url.setQuery(query);
     return url;
@@ -234,6 +237,11 @@ QString forecastLocation(const domain::WeatherForecast &forecast)
     return forecast.timezone.isEmpty()
         ? QStringLiteral("Your location")
         : QStringLiteral("Your location (%1)").arg(forecast.timezone);
+}
+
+QString comparisonFreshnessKey(const QString &identity)
+{
+    return QStringLiteral("weather-comparison:%1").arg(identity);
 }
 
 QVariantMap weatherDayMap(const domain::WeatherDay &day)
@@ -268,6 +276,24 @@ domain::WeatherDay weatherDayFromMap(const QVariantMap &row)
     if (row.contains(QStringLiteral("daylightDurationSeconds")))
         day.daylightDurationSeconds = row.value(QStringLiteral("daylightDurationSeconds")).toDouble();
     return day;
+}
+
+domain::WeatherForecast weatherForecastFromValues(const QVariantMap &values)
+{
+    domain::WeatherForecast forecast;
+    const QVariantMap current = values.value(QStringLiteral("current")).toMap();
+    if (current.contains(QStringLiteral("temperature")))
+        forecast.current.temperatureCelsius = current.value(QStringLiteral("temperature")).toDouble();
+    if (current.contains(QStringLiteral("feelsLike")))
+        forecast.current.apparentTemperatureCelsius = current.value(QStringLiteral("feelsLike")).toDouble();
+    if (current.contains(QStringLiteral("weatherCode")))
+        forecast.current.weatherCode = current.value(QStringLiteral("weatherCode")).toInt();
+    if (current.contains(QStringLiteral("wind")))
+        forecast.current.windKmh = current.value(QStringLiteral("wind")).toDouble();
+    forecast.timezone = values.value(QStringLiteral("timezone")).toString();
+    for (const QVariant &value : values.value(QStringLiteral("days")).toList())
+        forecast.days.push_back(weatherDayFromMap(value.toMap()));
+    return forecast;
 }
 
 } // namespace
@@ -327,6 +353,7 @@ void WeatherController::onLifecycleState(application::ApplicationLifecycle::Stat
         m_ready = false;
         cancelPrimaryOperations();
         cancelCityOperations();
+        cancelComparisonOperations();
         m_primaryLoading = false;
         m_primaryRefreshing = false;
         m_citySearching = false;
@@ -448,7 +475,9 @@ void WeatherController::cancelPrimaryOperations()
         const auto it = m_pending.constFind(id);
         if (it != m_pending.cend() && it->kind != Kind::CityGeocode
             && it->kind != Kind::CityGeocodeParse && it->kind != Kind::CityForecast
-            && it->kind != Kind::CityForecastParse) cancelPending(id);
+            && it->kind != Kind::CityForecastParse
+            && it->kind != Kind::ComparisonForecast
+            && it->kind != Kind::ComparisonForecastParse) cancelPending(id);
     }
 }
 
@@ -460,6 +489,44 @@ void WeatherController::cancelCityOperations()
         if (it != m_pending.cend() && (it->kind == Kind::CityGeocode
             || it->kind == Kind::CityGeocodeParse || it->kind == Kind::CityForecast
             || it->kind == Kind::CityForecastParse)) cancelPending(id);
+    }
+}
+
+void WeatherController::cancelComparisonCityOperations(const QString &identity)
+{
+    if (identity.isEmpty()) return;
+    m_comparisonGenerations.insert(identity, m_comparisonGenerations.value(identity) + 1);
+    const auto ids = m_pending.keys();
+    for (quint64 id : ids) {
+        const auto it = m_pending.constFind(id);
+        if (it == m_pending.cend()) continue;
+        const bool comparisonOperation = it->kind == Kind::ComparisonForecast
+            || it->kind == Kind::ComparisonForecastParse;
+        if (comparisonOperation
+            && domain::stableWeatherCityIdentity(it->city) == identity) cancelPending(id);
+    }
+}
+
+void WeatherController::cancelComparisonOperations()
+{
+    QStringList identities;
+    const auto ids = m_pending.keys();
+    for (quint64 id : ids) {
+        const auto it = m_pending.constFind(id);
+        if (it == m_pending.cend()) continue;
+        if (it->kind != Kind::ComparisonForecast
+            && it->kind != Kind::ComparisonForecastParse) continue;
+        const QString identity = domain::stableWeatherCityIdentity(it->city);
+        if (!identity.isEmpty() && !identities.contains(identity))
+            identities.push_back(identity);
+        cancelPending(id);
+    }
+    for (const QString &identity : identities)
+        m_comparisonGenerations.insert(identity, m_comparisonGenerations.value(identity) + 1);
+    for (int row = 0; row < m_comparisonCities.count(); ++row) {
+        const QString identity = m_comparisonCities.data(
+            m_comparisonCities.index(row), models::WeatherComparisonModel::IdentityRole).toString();
+        m_comparisonCities.setLoading(identity, false);
     }
 }
 
@@ -608,6 +675,8 @@ bool WeatherController::addSearchedCityToComparison()
 
 void WeatherController::removeComparisonCity(QString identity)
 {
+    if (m_comparisonCities.indexOfIdentity(identity) < 0) return;
+    cancelComparisonCityOperations(identity);
     m_comparisonCities.removeCity(identity);
 }
 
@@ -619,6 +688,38 @@ void WeatherController::moveComparisonCity(QString identity, int offset)
     const int destinationRow = sourceRow + offset;
     if (destinationRow < 0 || destinationRow >= m_comparisonCities.count()) return;
     m_comparisonCities.moveCity(identity, destinationRow);
+}
+
+void WeatherController::refreshComparisonCity(QString identity)
+{
+    if (!m_ready
+        || m_graph->lifecycle().state() != application::ApplicationLifecycle::State::Running) return;
+    const auto entry = m_comparisonCities.cityByIdentity(identity);
+    if (!entry || entry->loading) return;
+    const quint64 generation = m_comparisonGenerations.value(identity) + 1;
+    m_comparisonGenerations.insert(identity, generation);
+    m_comparisonCities.setLoading(identity, true);
+    beginComparisonForecast(entry->city, generation);
+}
+
+void WeatherController::refreshAllComparisonCities()
+{
+    if (!m_ready) return;
+    QStringList identities;
+    identities.reserve(m_comparisonCities.count());
+    for (int row = 0; row < m_comparisonCities.count(); ++row) {
+        const QString identity = m_comparisonCities.data(
+            m_comparisonCities.index(row), models::WeatherComparisonModel::IdentityRole).toString();
+        if (!identity.isEmpty()) identities.push_back(identity);
+    }
+    for (const QString &identity : identities) refreshComparisonCity(identity);
+}
+
+void WeatherController::cancelComparisonCityRefresh(QString identity)
+{
+    if (m_comparisonCities.indexOfIdentity(identity) < 0) return;
+    cancelComparisonCityOperations(identity);
+    m_comparisonCities.setLoading(identity, false);
 }
 
 void WeatherController::cancelCitySearch()
@@ -657,6 +758,26 @@ void WeatherController::beginCityForecast(const domain::WeatherCity &city, quint
         QStringLiteral("weather-city"), generation, city.latitude, city.longitude, false, city)) {
         setCityError(domain::AppError(domain::ErrorCategory::CapabilityUnavailable),
                      QStringLiteral("Weather for this city is unavailable right now."));
+    }
+}
+
+void WeatherController::beginComparisonForecast(const domain::WeatherCity &city,
+                                                quint64 generation)
+{
+    const QString identity = domain::stableWeatherCityIdentity(city);
+    if (identity.isEmpty() || !domain::isValidWeatherCoordinates(city.latitude, city.longitude)) {
+        m_comparisonCities.setError(identity,
+            QStringLiteral("The city coordinates are invalid."));
+        return;
+    }
+    providers::ProviderRequest request;
+    request.provider = providers::ProviderId::OpenMeteoForecast;
+    request.url = forecastUrl(city.latitude, city.longitude);
+    const QString freshnessKey = comparisonFreshnessKey(identity);
+    if (!submitNetwork(Kind::ComparisonForecast, std::move(request), freshnessKey,
+                       generation, city.latitude, city.longitude, false, city)) {
+        m_comparisonCities.setError(identity,
+            QStringLiteral("Weather for this city is unavailable right now."));
     }
 }
 
@@ -767,6 +888,22 @@ void WeatherController::onHttpsFinished(quint64 id, const QByteArray &body,
     if (pendingIt == m_pending.end()) return;
     const Pending pending = pendingIt.value();
     m_pending.erase(pendingIt);
+    if (pending.kind == Kind::ComparisonForecast) {
+        const QString identity = domain::stableWeatherCityIdentity(pending.city);
+        if (pending.generation != m_comparisonGenerations.value(identity)
+            || m_comparisonCities.indexOfIdentity(identity) < 0) return;
+        if (error.isError()) {
+            m_comparisonCities.setError(identity,
+                safeMessage(error, QStringLiteral("The city forecast could not be loaded.")));
+            return;
+        }
+        const quint64 parseId = submitParse(Kind::ComparisonForecastParse, body,
+            comparisonFreshnessKey(identity), pending.generation,
+            pending.latitude, pending.longitude, false, pending.city);
+        if (!parseId) m_comparisonCities.setError(identity,
+            QStringLiteral("The city forecast could not be processed."));
+        return;
+    }
     if (pending.kind == Kind::CityGeocode || pending.kind == Kind::CityGeocodeParse
         || pending.kind == Kind::CityForecast || pending.kind == Kind::CityForecastParse) {
         if (pending.generation != m_cityGeneration) return;
@@ -836,21 +973,25 @@ void WeatherController::onValueJobFinished(quint64 id, const QVariantMap &values
             setCityError(error, QStringLiteral("Weather for this city could not be loaded."));
             return;
         }
-        domain::WeatherForecast forecast;
-        const QVariantMap current = values.value(QStringLiteral("current")).toMap();
-        if (current.contains(QStringLiteral("temperature")))
-            forecast.current.temperatureCelsius = current.value(QStringLiteral("temperature")).toDouble();
-        if (current.contains(QStringLiteral("feelsLike")))
-            forecast.current.apparentTemperatureCelsius = current.value(QStringLiteral("feelsLike")).toDouble();
-        if (current.contains(QStringLiteral("weatherCode")))
-            forecast.current.weatherCode = current.value(QStringLiteral("weatherCode")).toInt();
-        if (current.contains(QStringLiteral("wind")))
-            forecast.current.windKmh = current.value(QStringLiteral("wind")).toDouble();
-        forecast.timezone = values.value(QStringLiteral("timezone")).toString();
-        for (const QVariant &value : values.value(QStringLiteral("days")).toList()) {
-            forecast.days.push_back(weatherDayFromMap(value.toMap()));
-        }
+        const domain::WeatherForecast forecast = weatherForecastFromValues(values);
         publishCity(pending.city, forecast);
+        return;
+    }
+    if (pending.kind == Kind::ComparisonForecastParse) {
+        const QString identity = domain::stableWeatherCityIdentity(pending.city);
+        if (pending.generation != m_comparisonGenerations.value(identity)
+            || m_comparisonCities.indexOfIdentity(identity) < 0) return;
+        if (error.isError()) {
+            m_comparisonCities.setError(identity,
+                safeMessage(error, QStringLiteral("The forecast could not be refreshed.")));
+            return;
+        }
+        const domain::WeatherForecast forecast = weatherForecastFromValues(values);
+        const QString updatedAt = m_clock->nowUtc().toUTC().toString(Qt::ISODateWithMs);
+        if (!m_comparisonCities.setForecast(identity, forecast, updatedAt)) {
+            m_comparisonCities.setError(identity,
+                QStringLiteral("The refreshed forecast could not be processed."));
+        }
         return;
     }
     if (pending.kind != Kind::PrimaryParse || pending.generation != m_primaryGeneration) return;
@@ -858,20 +999,7 @@ void WeatherController::onValueJobFinished(quint64 id, const QVariantMap &values
         setPrimaryError(error, QStringLiteral("The forecast could not be refreshed."));
         return;
     }
-    domain::WeatherForecast forecast;
-    const QVariantMap current = values.value(QStringLiteral("current")).toMap();
-    if (current.contains(QStringLiteral("temperature")))
-        forecast.current.temperatureCelsius = current.value(QStringLiteral("temperature")).toDouble();
-    if (current.contains(QStringLiteral("feelsLike")))
-        forecast.current.apparentTemperatureCelsius = current.value(QStringLiteral("feelsLike")).toDouble();
-    if (current.contains(QStringLiteral("weatherCode")))
-        forecast.current.weatherCode = current.value(QStringLiteral("weatherCode")).toInt();
-    if (current.contains(QStringLiteral("wind")))
-        forecast.current.windKmh = current.value(QStringLiteral("wind")).toDouble();
-    forecast.timezone = values.value(QStringLiteral("timezone")).toString();
-    for (const QVariant &value : values.value(QStringLiteral("days")).toList()) {
-        forecast.days.push_back(weatherDayFromMap(value.toMap()));
-    }
+    const domain::WeatherForecast forecast = weatherForecastFromValues(values);
     savePrimaryForecast(forecast, pending.latitude, pending.longitude,
                         pending.saveLocation, pending.generation);
 }

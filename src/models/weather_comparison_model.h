@@ -40,6 +40,8 @@ public:
     static constexpr int maximumCities() noexcept { return 4; }
 
     int indexOfIdentity(const QString &identity) const noexcept;
+    std::optional<domain::WeatherComparisonCity> cityByIdentity(
+        const QString &identity) const;
     bool containsCity(const domain::WeatherCity &city) const noexcept;
     bool addCity(domain::WeatherCity city,
                  domain::WeatherForecast forecast = {},

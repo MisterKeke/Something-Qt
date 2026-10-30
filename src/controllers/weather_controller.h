@@ -82,6 +82,9 @@ public:
     Q_INVOKABLE bool addSearchedCityToComparison();
     Q_INVOKABLE void removeComparisonCity(QString identity);
     Q_INVOKABLE void moveComparisonCity(QString identity, int offset);
+    Q_INVOKABLE void refreshComparisonCity(QString identity);
+    Q_INVOKABLE void refreshAllComparisonCities();
+    Q_INVOKABLE void cancelComparisonCityRefresh(QString identity);
     Q_INVOKABLE void updateSolarInfo();
     Q_INVOKABLE void selectPrimaryForecastDate(QString date);
     Q_INVOKABLE void selectCityForecastDate(QString date);
@@ -94,7 +97,8 @@ signals:
 private:
     enum class Kind { LoadPrimary, NativeLocation, PrimaryForecast, PrimaryParse,
                       PrimarySave, CityGeocode, CityGeocodeParse,
-                      CityForecast, CityForecastParse };
+                      CityForecast, CityForecastParse,
+                      ComparisonForecast, ComparisonForecastParse };
     struct Pending final {
         Kind kind{Kind::LoadPrimary};
         quint64 generation{0};
@@ -124,10 +128,13 @@ private:
     void cancelPending(quint64 id);
     void cancelPrimaryOperations();
     void cancelCityOperations();
+    void cancelComparisonCityOperations(const QString &identity);
+    void cancelComparisonOperations();
     void beginPrimaryLoad();
     void beginPrimaryForecast(double latitude, double longitude,
                               bool saveLocation, quint64 generation);
     void beginCityForecast(const domain::WeatherCity &city, quint64 generation);
+    void beginComparisonForecast(const domain::WeatherCity &city, quint64 generation);
     void savePrimaryForecast(const domain::WeatherForecast &forecast,
                              double latitude, double longitude,
                              bool saveLocation, quint64 generation);
@@ -148,6 +155,7 @@ private:
     QVector<domain::WeatherCity> m_cityCandidates;
     QHash<quint64, Pending> m_pending;
     QHash<quint64, domain::WeatherForecast> m_stagedPrimary;
+    QHash<QString, quint64> m_comparisonGenerations;
     QVariantMap m_primaryCurrent;
     QVariantMap m_primaryToday;
     QVariantMap m_primarySolar;

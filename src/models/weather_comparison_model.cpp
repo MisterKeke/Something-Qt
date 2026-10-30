@@ -66,6 +66,14 @@ int WeatherComparisonModel::indexOfIdentity(const QString &identity) const noexc
     return -1;
 }
 
+std::optional<domain::WeatherComparisonCity> WeatherComparisonModel::cityByIdentity(
+    const QString &identity) const
+{
+    const int row = indexOfIdentity(identity);
+    if (row < 0) return std::nullopt;
+    return m_cities.at(row);
+}
+
 bool WeatherComparisonModel::containsCity(const domain::WeatherCity &city) const noexcept
 {
     return std::any_of(m_cities.cbegin(), m_cities.cend(),
