@@ -254,7 +254,6 @@ bool WeatherComparisonModel::setLocalDateTime(const QString &identity,
     if (entry.localDateTime == localDateTime) return true;
     entry.localDateTime = std::move(localDateTime);
     notifyRowChanged(row, {LocalDateTimeRole});
-    emit contentsChanged();
     return true;
 }
 

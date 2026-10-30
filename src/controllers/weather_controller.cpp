@@ -10,6 +10,7 @@
 #include <QTimeZone>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <utility>
 
@@ -242,6 +243,12 @@ QString forecastLocation(const domain::WeatherForecast &forecast)
 QString comparisonFreshnessKey(const QString &identity)
 {
     return QStringLiteral("weather-comparison:%1").arg(identity);
+}
+
+QString comparisonNumber(std::optional<double> value, const QString &suffix)
+{
+    if (!value || !std::isfinite(*value)) return QStringLiteral("—");
+    return QLocale().toString(*value, 'f', 0) + suffix;
 }
 
 QVariantMap weatherDayMap(const domain::WeatherDay &day)
@@ -697,6 +704,85 @@ QVariantList WeatherController::cityCandidates() const
     for (const domain::WeatherCity &city : m_cityCandidates)
         result.push_back(weatherCityMap(city));
     return result;
+}
+
+QVariantList WeatherController::comparisonTableHeaders() const
+{
+    QVariantList headers;
+    headers.reserve(m_comparisonCities.count());
+    for (int row = 0; row < m_comparisonCities.count(); ++row) {
+        const QString identity = m_comparisonCities.data(
+            m_comparisonCities.index(row), models::WeatherComparisonModel::IdentityRole).toString();
+        const auto entry = m_comparisonCities.cityByIdentity(identity);
+        if (!entry) continue;
+        headers.push_back(QVariantMap{
+            {QStringLiteral("name"), cityLabel(entry->city)},
+            {QStringLiteral("date"), entry->selectedForecastDate},
+        });
+    }
+    return headers;
+}
+
+QVariantList WeatherController::comparisonTableRows() const
+{
+    QVector<domain::WeatherComparisonCity> cities;
+    cities.reserve(m_comparisonCities.count());
+    for (int row = 0; row < m_comparisonCities.count(); ++row) {
+        const QString identity = m_comparisonCities.data(
+            m_comparisonCities.index(row), models::WeatherComparisonModel::IdentityRole).toString();
+        const auto entry = m_comparisonCities.cityByIdentity(identity);
+        if (entry) cities.push_back(*entry);
+    }
+
+    const std::array<QString, 7> metricKeys{
+        QStringLiteral("temperature"), QStringLiteral("feelsLike"),
+        QStringLiteral("maximum"), QStringLiteral("minimum"),
+        QStringLiteral("wind"), QStringLiteral("precipitation"),
+        QStringLiteral("condition")};
+    QVariantList rows;
+    rows.reserve(metricKeys.size());
+    for (const QString &key : metricKeys) {
+        QVariantList values;
+        values.reserve(cities.size());
+        for (const domain::WeatherComparisonCity &entry : cities) {
+            const auto selectedDay = std::find_if(entry.forecast.days.cbegin(),
+                entry.forecast.days.cend(), [&entry](const domain::WeatherDay &day) {
+                    return day.date == entry.selectedForecastDate;
+                });
+            const bool hasSelectedDay = selectedDay != entry.forecast.days.cend();
+            QString text = QStringLiteral("—");
+            if (key == QStringLiteral("temperature")) {
+                text = comparisonNumber(entry.forecast.current.temperatureCelsius,
+                                        QStringLiteral("°C"));
+            } else if (key == QStringLiteral("feelsLike")) {
+                text = comparisonNumber(entry.forecast.current.apparentTemperatureCelsius,
+                                        QStringLiteral("°C"));
+            } else if (key == QStringLiteral("maximum") && hasSelectedDay) {
+                text = comparisonNumber(selectedDay->maximumCelsius, QStringLiteral("°C"));
+            } else if (key == QStringLiteral("minimum") && hasSelectedDay) {
+                text = comparisonNumber(selectedDay->minimumCelsius, QStringLiteral("°C"));
+            } else if (key == QStringLiteral("wind")) {
+                text = comparisonNumber(entry.forecast.current.windKmh,
+                                        QStringLiteral(" km/h"));
+            } else if (key == QStringLiteral("precipitation") && hasSelectedDay) {
+                text = comparisonNumber(selectedDay->precipitationProbability,
+                                        QStringLiteral("%"));
+            } else if (key == QStringLiteral("condition")
+                       && entry.forecast.current.weatherCode) {
+                text = models::WeatherForecastModel::conditionForCode(
+                    *entry.forecast.current.weatherCode);
+            }
+            values.push_back(QVariantMap{
+                {QStringLiteral("text"), text},
+                {QStringLiteral("city"), cityLabel(entry.city)},
+            });
+        }
+        rows.push_back(QVariantMap{
+            {QStringLiteral("key"), key},
+            {QStringLiteral("values"), values},
+        });
+    }
+    return rows;
 }
 
 bool WeatherController::addSearchedCityToComparison()

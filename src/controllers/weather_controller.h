@@ -35,6 +35,8 @@ class WeatherController final : public QObject {
     Q_PROPERTY(QString cityError READ cityError NOTIFY cityChanged)
     Q_PROPERTY(QVariantList cityCandidates READ cityCandidates NOTIFY cityChanged)
     Q_PROPERTY(int comparisonCityCount READ comparisonCityCount NOTIFY comparisonChanged)
+    Q_PROPERTY(QVariantList comparisonTableHeaders READ comparisonTableHeaders NOTIFY comparisonChanged)
+    Q_PROPERTY(QVariantList comparisonTableRows READ comparisonTableRows NOTIFY comparisonChanged)
     Q_PROPERTY(bool canAddSearchedCity READ canAddSearchedCity NOTIFY comparisonChanged)
     Q_PROPERTY(bool canReplaceSearchedCity READ canReplaceSearchedCity NOTIFY comparisonChanged)
     Q_PROPERTY(bool searchedCityAlreadyAdded READ searchedCityAlreadyAdded NOTIFY comparisonChanged)
@@ -71,6 +73,8 @@ public:
     QString cityError() const { return m_cityError; }
     QVariantList cityCandidates() const;
     int comparisonCityCount() const noexcept { return m_comparisonCities.count(); }
+    QVariantList comparisonTableHeaders() const;
+    QVariantList comparisonTableRows() const;
     bool canAddSearchedCity() const noexcept;
     bool canReplaceSearchedCity() const noexcept;
     bool searchedCityAlreadyAdded() const noexcept;
