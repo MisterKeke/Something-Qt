@@ -264,6 +264,38 @@ void SteamReleaseController::refreshReleases()
     dispatchRefreshQueue();
 }
 
+void SteamReleaseController::cancelRefresh()
+{
+    if (!m_refreshBusy || m_refreshCommitPending) return;
+
+    QVector<quint64> refreshOperations;
+    refreshOperations.reserve(m_pending.size());
+    for (auto it = m_pending.cbegin(); it != m_pending.cend(); ++it) {
+        const Pending &pending = it.value();
+        if (pending.refreshGeneration == m_refreshGeneration
+            && (pending.kind == Kind::RefreshNetwork || pending.kind == Kind::RefreshParse)) {
+            refreshOperations.push_back(it.key());
+        }
+    }
+    for (quint64 operationId : refreshOperations) cancelPending(operationId);
+
+    ++m_refreshGeneration;
+    m_refreshBusy = false;
+    m_refreshCommitPending = false;
+    m_refreshWork.clear();
+    m_refreshUpdates.clear();
+    m_refreshFinished.clear();
+    m_refreshInFlight.clear();
+    m_nextRefreshIndex = 0;
+    m_activeRefreshRequests = 0;
+    m_refreshFinishedCount = 0;
+    m_refreshUpdatedCount = 0;
+    m_refreshFailedCount = 0;
+    m_refreshStatus = QStringLiteral(
+        "Refresh canceled. Saved release information was kept.");
+    emit stateChanged();
+}
+
 void SteamReleaseController::dispatchRefreshQueue()
 {
     if (!m_refreshBusy) return;
@@ -333,6 +365,7 @@ void SteamReleaseController::finishRefreshBatch()
         || m_refreshFinishedCount != m_refreshWork.size() || m_activeRefreshRequests != 0)
         return;
     m_refreshCommitPending = true;
+    m_refreshStatus = QStringLiteral("Saving release updates…");
     Pending pending;
     pending.kind = Kind::RefreshCommit;
     pending.refreshGeneration = m_refreshGeneration;
@@ -534,7 +567,11 @@ void SteamReleaseController::onHttpsFinished(quint64 id, const QByteArray &body,
         return;
     case Kind::RefreshNetwork:
         if (!m_refreshBusy || pending.refreshGeneration != m_refreshGeneration) return;
-        if (error.isError() || error.isCancelled()) {
+        if (error.isCancelled()) {
+            cancelRefresh();
+            return;
+        }
+        if (error.isError()) {
             completeRefreshItem(pending.refreshIndex, nullptr, safeRefreshError(error));
             dispatchRefreshQueue();
             return;
@@ -567,8 +604,12 @@ void SteamReleaseController::onValueJobFinished(quint64 id, const QVariantMap &v
     m_pending.erase(it);
     if (pending.kind == Kind::AddParse) {
         if (error.isError() || error.isCancelled()) {
-            m_addError = safeProviderMessage(error,
-                QStringLiteral("Steam returned invalid release details."));
+            m_addError = error.category() == domain::ErrorCategory::CapabilityUnavailable
+                ? QStringLiteral("Release Radar supports Steam games only.")
+                : error.category() == domain::ErrorCategory::NotFound
+                    ? QStringLiteral("Steam could not find this game or its release information.")
+                    : safeProviderMessage(error,
+                        QStringLiteral("Steam returned invalid release details."));
             releaseAddReservation(pending.appId);
             m_addBusy = false;
             emit stateChanged();
@@ -596,8 +637,17 @@ void SteamReleaseController::onValueJobFinished(quint64 id, const QVariantMap &v
     }
     if (pending.kind == Kind::RefreshParse) {
         if (!m_refreshBusy || pending.refreshGeneration != m_refreshGeneration) return;
-        if (error.isError() || error.isCancelled()) {
-            completeRefreshItem(pending.refreshIndex, nullptr, safeRefreshError(error));
+        if (error.isCancelled()) {
+            cancelRefresh();
+            return;
+        }
+        if (error.isError()) {
+            const QString message = error.category() == domain::ErrorCategory::CapabilityUnavailable
+                ? QStringLiteral("Release Radar supports Steam games only.")
+                : error.category() == domain::ErrorCategory::NotFound
+                    ? QStringLiteral("Steam could not find this game's release information.")
+                    : safeRefreshError(error);
+            completeRefreshItem(pending.refreshIndex, nullptr, message);
         } else {
             const domain::SteamReleaseDetails details = detailsFromMap(values);
             if (details.appId != pending.appId || !domain::isValidSteamReleaseDetails(details))

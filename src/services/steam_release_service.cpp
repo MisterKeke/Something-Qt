@@ -174,7 +174,8 @@ storage::StorageCommand SteamReleaseService::applyRefresh(
                 }
             }
         }
-        if (cancelled()) return failed(domain::AppError::cancelled());
+        // Once the refresh transaction commits, return its snapshot so the UI
+        // reconciles with durable data even if cancellation arrives afterward.
         const auto records = repositories.steamReleases.list();
         if (!records.succeeded()) return failed(records.error);
         QVariantList releases;

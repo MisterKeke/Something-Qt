@@ -207,7 +207,9 @@ Item {
                 }
                 Shared.AppButton {
                     text: root.controller && root.controller.refreshBusy
-                          ? qsTr("Refreshing…") : qsTr("Refresh")
+                          ? (root.controller.refreshCancelable
+                             ? qsTr("Refreshing…") : qsTr("Saving…"))
+                          : qsTr("Refresh")
                     quiet: true
                     enabled: root.controller && root.controller.snapshotLoaded
                              && root.controller.releases.count > 0
@@ -215,6 +217,18 @@ Item {
                      && !root.controller.deleteBusy
                      && !root.controller.dateChangeAcknowledgeBusy
                     onClicked: root.controller.refreshReleases()
+                }
+            }
+
+            RowLayout {
+                width: parent.width
+                visible: root.controller && root.controller.refreshBusy
+                Item { Layout.fillWidth: true }
+                Shared.AppButton {
+                    text: qsTr("Cancel refresh")
+                    quiet: true
+                    enabled: root.controller.refreshCancelable
+                    onClicked: root.controller.cancelRefresh()
                 }
             }
 

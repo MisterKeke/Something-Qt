@@ -22,6 +22,7 @@ class SteamReleaseController final : public QObject {
     Q_PROPERTY(bool addBusy READ addBusy NOTIFY stateChanged)
     Q_PROPERTY(QString addError READ addError NOTIFY stateChanged)
     Q_PROPERTY(bool refreshBusy READ refreshBusy NOTIFY stateChanged)
+    Q_PROPERTY(bool refreshCancelable READ refreshCancelable NOTIFY stateChanged)
     Q_PROPERTY(QString refreshStatus READ refreshStatus NOTIFY stateChanged)
     Q_PROPERTY(bool deleteBusy READ deleteBusy NOTIFY stateChanged)
     Q_PROPERTY(bool dateChangeAcknowledgeBusy READ dateChangeAcknowledgeBusy NOTIFY stateChanged)
@@ -39,6 +40,7 @@ public:
     bool addBusy() const noexcept { return m_addBusy; }
     QString addError() const { return m_addError; }
     bool refreshBusy() const noexcept { return m_refreshBusy; }
+    bool refreshCancelable() const noexcept { return m_refreshBusy && !m_refreshCommitPending; }
     QString refreshStatus() const { return m_refreshStatus; }
     bool deleteBusy() const noexcept { return m_deleteBusy; }
     bool dateChangeAcknowledgeBusy() const noexcept { return m_dateChangeAcknowledgeBusy; }
@@ -48,6 +50,7 @@ public:
 
     Q_INVOKABLE void addRelease(QString storeUrl);
     Q_INVOKABLE void refreshReleases();
+    Q_INVOKABLE void cancelRefresh();
     Q_INVOKABLE void removeRelease(quint32 appId);
     Q_INVOKABLE void acknowledgeDateChange(quint32 appId);
     Q_INVOKABLE void openReleaseDetails(quint32 appId);
