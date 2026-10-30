@@ -366,7 +366,11 @@ Item {
                         Layout.fillWidth: true
                         visible: controller.cityForecast.count > 0
                         Shared.AppButton {
-                            text: controller.searchedCityAlreadyAdded
+                            text: controller.comparisonMutationPending
+                                  ? qsTr("Saving comparison…")
+                                  : controller.comparisonStorageLoading
+                                    ? qsTr("Loading saved cities…")
+                                  : controller.searchedCityAlreadyAdded
                                   ? qsTr("Already in comparison")
                                   : controller.comparisonCityCount >= 4
                                     ? qsTr("Comparison list full") : qsTr("Add to comparison")
@@ -435,6 +439,7 @@ Item {
             Shared.AppCard {
                 Layout.fillWidth: true
                 visible: controller.comparisonCityCount > 0
+                         || controller.comparisonStorageError.length > 0
                 padding: 18
                 ColumnLayout {
                     width: parent.width
@@ -452,6 +457,7 @@ Item {
                         Shared.AppButton {
                             text: qsTr("Refresh all")
                             quiet: true
+                            enabled: controller.comparisonCityCount > 0
                             onClicked: controller.refreshAllComparisonCities()
                         }
                     }
@@ -459,8 +465,33 @@ Item {
                         Layout.fillWidth: true
                         text: controller.comparisonCityCount < 2
                               ? qsTr("Add one more city to compare forecasts.")
-                              : qsTr("These selections are separate from your saved primary location.")
+                              : qsTr("Saved comparison cities stay separate from your primary location.")
                         color: ThemeModule.Theme.textSecondary
+                        font.family: ThemeModule.Theme.fontFamily
+                        font.pixelSize: 12
+                        wrapMode: Text.Wrap
+                    }
+                    Label {
+                        Layout.fillWidth: true
+                        visible: controller.comparisonStorageLoading
+                        text: qsTr("Restoring saved cities and cached forecasts…")
+                        color: ThemeModule.Theme.textSecondary
+                        font.family: ThemeModule.Theme.fontFamily
+                        font.pixelSize: 12
+                    }
+                    Label {
+                        Layout.fillWidth: true
+                        visible: controller.comparisonMutationPending
+                        text: qsTr("Saving comparison changes…")
+                        color: ThemeModule.Theme.textSecondary
+                        font.family: ThemeModule.Theme.fontFamily
+                        font.pixelSize: 12
+                    }
+                    Label {
+                        Layout.fillWidth: true
+                        visible: controller.comparisonStorageError.length > 0
+                        text: controller.comparisonStorageError
+                        color: ThemeModule.Theme.warning
                         font.family: ThemeModule.Theme.fontFamily
                         font.pixelSize: 12
                         wrapMode: Text.Wrap
@@ -504,7 +535,9 @@ Item {
                                     }
                                     Label {
                                         Layout.fillWidth: true
-                                        text: loading ? qsTr("Loading forecast…")
+                                        text: loading && hasForecast
+                                              ? qsTr("Refreshing · saved forecast available")
+                                              : loading ? qsTr("Loading forecast…")
                                               : error.length > 0 ? error
                                               : hasForecast ? qsTr("Forecast available")
                                               : qsTr("Waiting for forecast")
@@ -549,7 +582,7 @@ Item {
                                     quiet: true
                                     implicitWidth: 40
                                     Layout.preferredWidth: 40
-                                    enabled: index > 0
+                                    enabled: index > 0 && !controller.comparisonMutationPending
                                     Accessible.name: qsTr("Move %1 earlier").arg(name)
                                     onClicked: controller.moveComparisonCity(identity, -1)
                                 }
@@ -559,6 +592,7 @@ Item {
                                     implicitWidth: 40
                                     Layout.preferredWidth: 40
                                     enabled: index < controller.comparisonCityCount - 1
+                                             && !controller.comparisonMutationPending
                                     Accessible.name: qsTr("Move %1 later").arg(name)
                                     onClicked: controller.moveComparisonCity(identity, 1)
                                 }
@@ -568,6 +602,7 @@ Item {
                                     implicitWidth: 40
                                     Layout.preferredWidth: 40
                                     Accessible.name: qsTr("Remove %1 from comparison").arg(name)
+                                    enabled: !controller.comparisonMutationPending
                                     onClicked: controller.removeComparisonCity(identity)
                                 }
                             }

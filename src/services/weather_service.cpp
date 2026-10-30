@@ -3,6 +3,8 @@
 #include "../providers/feature_parsers.h"
 
 #include <QDate>
+#include <QVariantList>
+#include <QVariantMap>
 
 #include <cmath>
 #include <utility>
@@ -87,6 +89,105 @@ storage::StorageCommand WeatherService::saveRefreshedForecast(
         }
         const auto saved = repositories.weather.saveForecast(
             QString::fromUtf8(providers::serializeWeatherForecast(forecast)), updatedAt);
+        if (!saved.succeeded()) return failed(saved.error);
+        storage::StorageReply reply;
+        reply.values.insert(QStringLiteral("saved"), true);
+        return reply;
+    };
+}
+
+storage::StorageCommand WeatherService::loadComparisonCities()
+{
+    return [](storage::StorageRepositories &repositories,
+              const std::function<bool()> &cancelled) {
+        if (cancelled()) return failed(domain::AppError::cancelled());
+        const auto loaded = repositories.weatherComparison.load();
+        if (!loaded.succeeded()) return failed(loaded.error);
+        QVariantList cities;
+        cities.reserve(loaded.value.size());
+        for (const storage::WeatherComparisonLocation &entry : loaded.value) {
+            QVariantMap city{
+                {QStringLiteral("identity"), domain::stableWeatherCityIdentity(entry.city)},
+                {QStringLiteral("geocodingId"), entry.city.geocodingId},
+                {QStringLiteral("name"), entry.city.name},
+                {QStringLiteral("administrativeArea"), entry.city.administrativeArea},
+                {QStringLiteral("country"), entry.city.country},
+                {QStringLiteral("timezone"), entry.city.timezone},
+                {QStringLiteral("latitude"), entry.city.latitude},
+                {QStringLiteral("longitude"), entry.city.longitude},
+                {QStringLiteral("displayOrder"), entry.displayOrder},
+                {QStringLiteral("forecastJson"), entry.forecastJson},
+                {QStringLiteral("updatedAt"), entry.forecastUpdatedAt},
+            };
+            cities.push_back(std::move(city));
+        }
+        storage::StorageReply reply;
+        reply.values.insert(QStringLiteral("cities"), cities);
+        return reply;
+    };
+}
+
+storage::StorageCommand WeatherService::addComparisonCity(
+    domain::WeatherCity city, domain::WeatherForecast forecast, QString updatedAt)
+{
+    return [city = std::move(city), forecast = std::move(forecast),
+            updatedAt = std::move(updatedAt)](
+               storage::StorageRepositories &repositories,
+               const std::function<bool()> &cancelled) {
+        if (cancelled()) return failed(domain::AppError::cancelled());
+        if (updatedAt.isEmpty() || !validForecast(forecast)
+            || domain::stableWeatherCityIdentity(city).isEmpty()) {
+            return failed(domain::AppError(domain::ErrorCategory::Validation));
+        }
+        const auto saved = repositories.weatherComparison.add(
+            city, QString::fromUtf8(providers::serializeWeatherForecast(forecast)), updatedAt);
+        if (!saved.succeeded()) return failed(saved.error);
+        storage::StorageReply reply;
+        reply.values.insert(QStringLiteral("saved"), true);
+        return reply;
+    };
+}
+
+storage::StorageCommand WeatherService::removeComparisonCity(QString identity)
+{
+    return [identity = std::move(identity)](
+               storage::StorageRepositories &repositories,
+               const std::function<bool()> &cancelled) {
+        if (cancelled()) return failed(domain::AppError::cancelled());
+        const auto removed = repositories.weatherComparison.remove(identity);
+        if (!removed.succeeded()) return failed(removed.error);
+        storage::StorageReply reply;
+        reply.values.insert(QStringLiteral("saved"), true);
+        return reply;
+    };
+}
+
+storage::StorageCommand WeatherService::reorderComparisonCities(QVector<QString> identities)
+{
+    return [identities = std::move(identities)](
+               storage::StorageRepositories &repositories,
+               const std::function<bool()> &cancelled) {
+        if (cancelled()) return failed(domain::AppError::cancelled());
+        const auto reordered = repositories.weatherComparison.reorder(identities);
+        if (!reordered.succeeded()) return failed(reordered.error);
+        storage::StorageReply reply;
+        reply.values.insert(QStringLiteral("saved"), true);
+        return reply;
+    };
+}
+
+storage::StorageCommand WeatherService::saveComparisonForecast(
+    QString identity, domain::WeatherForecast forecast, QString updatedAt)
+{
+    return [identity = std::move(identity), forecast = std::move(forecast),
+            updatedAt = std::move(updatedAt)](
+               storage::StorageRepositories &repositories,
+               const std::function<bool()> &cancelled) {
+        if (cancelled()) return failed(domain::AppError::cancelled());
+        if (identity.isEmpty() || updatedAt.isEmpty() || !validForecast(forecast))
+            return failed(domain::AppError(domain::ErrorCategory::Validation));
+        const auto saved = repositories.weatherComparison.saveForecast(
+            identity, QString::fromUtf8(providers::serializeWeatherForecast(forecast)), updatedAt);
         if (!saved.succeeded()) return failed(saved.error);
         storage::StorageReply reply;
         reply.values.insert(QStringLiteral("saved"), true);

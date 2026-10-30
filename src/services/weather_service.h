@@ -13,6 +13,13 @@ public:
         QString updatedAt);
     static storage::StorageCommand saveRefreshedForecast(
         domain::WeatherForecast forecast, QString updatedAt);
+    static storage::StorageCommand loadComparisonCities();
+    static storage::StorageCommand addComparisonCity(
+        domain::WeatherCity city, domain::WeatherForecast forecast, QString updatedAt);
+    static storage::StorageCommand removeComparisonCity(QString identity);
+    static storage::StorageCommand reorderComparisonCities(QVector<QString> identities);
+    static storage::StorageCommand saveComparisonForecast(
+        QString identity, domain::WeatherForecast forecast, QString updatedAt);
 };
 
 } // namespace something::services

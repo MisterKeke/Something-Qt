@@ -4,6 +4,7 @@
 #include "../domain/task.h"
 #include "../domain/task_history.h"
 #include "../domain/task_scheduling.h"
+#include "../domain/weather_currency.h"
 
 #include <QString>
 #include <QStringList>
@@ -129,6 +130,13 @@ struct WeatherLocation {
     double longitude{0.0};
     QString createdAt;
     QString updatedAt;
+    QString forecastJson;
+    QString forecastUpdatedAt;
+};
+
+struct WeatherComparisonLocation final {
+    domain::WeatherCity city;
+    int displayOrder{0};
     QString forecastJson;
     QString forecastUpdatedAt;
 };

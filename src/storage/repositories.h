@@ -132,6 +132,20 @@ private:
     QSqlDatabase &m_database;
 };
 
+class WeatherComparisonRepository final {
+public:
+    explicit WeatherComparisonRepository(QSqlDatabase &database);
+    RepositoryResult<QVector<WeatherComparisonLocation>> load() const;
+    RepositoryResult<void> add(const domain::WeatherCity &city,
+                               QString forecastJson, QString forecastUpdatedAt);
+    RepositoryResult<void> remove(const QString &identity);
+    RepositoryResult<void> reorder(const QVector<QString> &orderedIdentities);
+    RepositoryResult<void> saveForecast(const QString &identity,
+                                        QString forecastJson, QString forecastUpdatedAt);
+private:
+    QSqlDatabase &m_database;
+};
+
 class PreferencesRepository final {
 public:
     explicit PreferencesRepository(QSqlDatabase &database);
@@ -237,6 +251,7 @@ public:
     FavoritesRepository favorites;
     FavoriteNewsRepository news;
     WeatherRepository weather;
+    WeatherComparisonRepository weatherComparison;
     PreferencesRepository preferences;
     DesktopApplicationsRepository applications;
     SetupsRepository setups;

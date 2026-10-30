@@ -41,6 +41,9 @@ class WeatherController final : public QObject {
     Q_PROPERTY(bool primaryRefreshing READ primaryRefreshing NOTIFY primaryChanged)
     Q_PROPERTY(bool citySearching READ citySearching NOTIFY cityChanged)
     Q_PROPERTY(bool locationAvailable READ locationAvailable NOTIFY primaryChanged)
+    Q_PROPERTY(bool comparisonStorageLoading READ comparisonStorageLoading NOTIFY comparisonChanged)
+    Q_PROPERTY(bool comparisonMutationPending READ comparisonMutationPending NOTIFY comparisonChanged)
+    Q_PROPERTY(QString comparisonStorageError READ comparisonStorageError NOTIFY comparisonChanged)
 
 public:
     WeatherController(application::ApplicationServiceGraph *graph,
@@ -73,6 +76,9 @@ public:
     bool primaryRefreshing() const noexcept { return m_primaryRefreshing; }
     bool citySearching() const noexcept { return m_citySearching; }
     bool locationAvailable() const noexcept { return m_locationAvailable; }
+    bool comparisonStorageLoading() const noexcept { return !m_comparisonLoaded; }
+    bool comparisonMutationPending() const noexcept { return m_comparisonMutationPending; }
+    QString comparisonStorageError() const { return m_comparisonStorageError; }
 
     Q_INVOKABLE void refreshPrimary();
     Q_INVOKABLE void requestDeviceLocation();
@@ -98,6 +104,8 @@ private:
     enum class Kind { LoadPrimary, NativeLocation, PrimaryForecast, PrimaryParse,
                       PrimarySave, CityGeocode, CityGeocodeParse,
                       CityForecast, CityForecastParse,
+                      LoadComparison, AddComparisonCity, RemoveComparisonCity,
+                      ReorderComparisonCities, SaveComparisonForecast,
                       ComparisonForecast, ComparisonForecastParse };
     struct Pending final {
         Kind kind{Kind::LoadPrimary};
@@ -107,6 +115,9 @@ private:
         bool saveLocation{false};
         domain::WeatherCity city;
         QString updatedAt;
+        domain::WeatherForecast forecast;
+        QString identity;
+        int destinationRow{-1};
     };
 
     void onLifecycleState(application::ApplicationLifecycle::State state);
@@ -131,6 +142,7 @@ private:
     void cancelComparisonCityOperations(const QString &identity);
     void cancelComparisonOperations();
     void beginPrimaryLoad();
+    void beginComparisonLoad();
     void beginPrimaryForecast(double latitude, double longitude,
                               bool saveLocation, quint64 generation);
     void beginCityForecast(const domain::WeatherCity &city, quint64 generation);
@@ -186,6 +198,9 @@ private:
     bool m_primaryRefreshing{false};
     bool m_citySearching{false};
     bool m_hasSearchedCity{false};
+    bool m_comparisonLoaded{false};
+    bool m_comparisonMutationPending{false};
+    QString m_comparisonStorageError;
 };
 
 } // namespace something::controllers

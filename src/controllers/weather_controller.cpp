@@ -344,6 +344,7 @@ void WeatherController::onLifecycleState(application::ApplicationLifecycle::Stat
         if (!m_ready) {
             m_ready = true;
             beginPrimaryLoad();
+            beginComparisonLoad();
         }
         return;
     }
@@ -514,11 +515,19 @@ void WeatherController::cancelComparisonOperations()
     for (quint64 id : ids) {
         const auto it = m_pending.constFind(id);
         if (it == m_pending.cend()) continue;
-        if (it->kind != Kind::ComparisonForecast
-            && it->kind != Kind::ComparisonForecastParse) continue;
-        const QString identity = domain::stableWeatherCityIdentity(it->city);
-        if (!identity.isEmpty() && !identities.contains(identity))
-            identities.push_back(identity);
+        const bool forecastOperation = it->kind == Kind::ComparisonForecast
+            || it->kind == Kind::ComparisonForecastParse;
+        const bool storageOperation = it->kind == Kind::LoadComparison
+            || it->kind == Kind::AddComparisonCity
+            || it->kind == Kind::RemoveComparisonCity
+            || it->kind == Kind::ReorderComparisonCities
+            || it->kind == Kind::SaveComparisonForecast;
+        if (!forecastOperation && !storageOperation) continue;
+        if (forecastOperation) {
+            const QString identity = domain::stableWeatherCityIdentity(it->city);
+            if (!identity.isEmpty() && !identities.contains(identity))
+                identities.push_back(identity);
+        }
         cancelPending(id);
     }
     for (const QString &identity : identities)
@@ -528,6 +537,7 @@ void WeatherController::cancelComparisonOperations()
             m_comparisonCities.index(row), models::WeatherComparisonModel::IdentityRole).toString();
         m_comparisonCities.setLoading(identity, false);
     }
+    m_comparisonMutationPending = false;
 }
 
 void WeatherController::beginPrimaryLoad()
@@ -549,6 +559,24 @@ void WeatherController::beginPrimaryLoad()
         m_primaryRefreshing = false;
         m_primaryError = QStringLiteral("Saved weather location could not be loaded.");
         emit primaryChanged();
+    }
+}
+
+void WeatherController::beginComparisonLoad()
+{
+    if (!m_ready || m_graph->lifecycle().state() != application::ApplicationLifecycle::State::Running)
+        return;
+    m_comparisonLoaded = false;
+    m_comparisonStorageError.clear();
+    emit comparisonChanged();
+    const quint64 id = submitStorage(Kind::LoadComparison,
+        services::WeatherService::loadComparisonCities(),
+        QStringLiteral("weather-comparison-list"), 0);
+    if (!id) {
+        m_comparisonLoaded = true;
+        m_comparisonStorageError = QStringLiteral("Saved comparison cities could not be loaded.");
+        emit comparisonChanged();
+        refreshAllComparisonCities();
     }
 }
 
@@ -642,7 +670,8 @@ void WeatherController::selectCityCandidate(int candidateIndex)
 
 bool WeatherController::canAddSearchedCity() const noexcept
 {
-    return m_hasSearchedCity && !m_citySolarForecast.days.isEmpty()
+    return m_comparisonLoaded && !m_comparisonMutationPending
+        && m_hasSearchedCity && !m_citySolarForecast.days.isEmpty()
         && m_comparisonCities.count() < models::WeatherComparisonModel::maximumCities()
         && !m_comparisonCities.containsCity(m_searchedCity);
 }
@@ -664,30 +693,73 @@ QVariantList WeatherController::cityCandidates() const
 bool WeatherController::addSearchedCityToComparison()
 {
     if (!canAddSearchedCity()) return false;
-    const bool added = m_comparisonCities.addCity(
-        m_searchedCity, m_citySolarForecast, m_cityUpdatedAtUtc);
-    if (added) {
+    const quint64 id = submitStorage(Kind::AddComparisonCity,
+        services::WeatherService::addComparisonCity(
+            m_searchedCity, m_citySolarForecast, m_cityUpdatedAtUtc),
+        QStringLiteral("weather-comparison-list"), 0);
+    if (!id) {
+        m_comparisonStorageError = QStringLiteral("The city could not be saved to comparison.");
         emit comparisonChanged();
-        emit cityChanged();
+        return false;
     }
-    return added;
+    Pending &pending = m_pending[id];
+    pending.city = m_searchedCity;
+    pending.forecast = m_citySolarForecast;
+    pending.updatedAt = m_cityUpdatedAtUtc;
+    m_comparisonMutationPending = true;
+    m_comparisonStorageError.clear();
+    emit comparisonChanged();
+    return true;
 }
 
 void WeatherController::removeComparisonCity(QString identity)
 {
-    if (m_comparisonCities.indexOfIdentity(identity) < 0) return;
+    if (!m_comparisonLoaded || m_comparisonMutationPending
+        || m_comparisonCities.indexOfIdentity(identity) < 0) return;
     cancelComparisonCityOperations(identity);
-    m_comparisonCities.removeCity(identity);
+    m_comparisonCities.setLoading(identity, false);
+    const quint64 id = submitStorage(Kind::RemoveComparisonCity,
+        services::WeatherService::removeComparisonCity(identity),
+        QStringLiteral("weather-comparison-list"), 0);
+    if (!id) {
+        m_comparisonStorageError = QStringLiteral("The city could not be removed from saved comparison.");
+        emit comparisonChanged();
+        return;
+    }
+    m_pending[id].identity = std::move(identity);
+    m_comparisonMutationPending = true;
+    m_comparisonStorageError.clear();
+    emit comparisonChanged();
 }
 
 void WeatherController::moveComparisonCity(QString identity, int offset)
 {
-    if (offset != -1 && offset != 1) return;
+    if (!m_comparisonLoaded || m_comparisonMutationPending
+        || (offset != -1 && offset != 1)) return;
     const int sourceRow = m_comparisonCities.indexOfIdentity(identity);
     if (sourceRow < 0) return;
     const int destinationRow = sourceRow + offset;
     if (destinationRow < 0 || destinationRow >= m_comparisonCities.count()) return;
-    m_comparisonCities.moveCity(identity, destinationRow);
+    QVector<QString> identities;
+    identities.reserve(m_comparisonCities.count());
+    for (int row = 0; row < m_comparisonCities.count(); ++row) {
+        identities.push_back(m_comparisonCities.data(
+            m_comparisonCities.index(row), models::WeatherComparisonModel::IdentityRole).toString());
+    }
+    identities.move(sourceRow, destinationRow);
+    const quint64 id = submitStorage(Kind::ReorderComparisonCities,
+        services::WeatherService::reorderComparisonCities(identities),
+        QStringLiteral("weather-comparison-list"), 0);
+    if (!id) {
+        m_comparisonStorageError = QStringLiteral("The comparison order could not be saved.");
+        emit comparisonChanged();
+        return;
+    }
+    m_pending[id].identity = std::move(identity);
+    m_pending[id].destinationRow = destinationRow;
+    m_comparisonMutationPending = true;
+    m_comparisonStorageError.clear();
+    emit comparisonChanged();
 }
 
 void WeatherController::refreshComparisonCity(QString identity)
@@ -810,6 +882,80 @@ void WeatherController::onStorageFinished(quint64 id, const QVariantMap &values,
     if (pendingIt == m_pending.end()) return;
     const Pending pending = pendingIt.value();
     m_pending.erase(pendingIt);
+    if (pending.kind == Kind::LoadComparison) {
+        m_comparisonLoaded = true;
+        if (error.isError()) {
+            m_comparisonStorageError = safeMessage(
+                error, QStringLiteral("Saved comparison cities could not be loaded."));
+            emit comparisonChanged();
+            refreshAllComparisonCities();
+            return;
+        }
+        m_comparisonCities.clear();
+        for (const QVariant &value : values.value(QStringLiteral("cities")).toList()) {
+            const QVariantMap saved = value.toMap();
+            domain::WeatherCity city = weatherCityFromMap(saved);
+            if (!domain::isValidWeatherCoordinates(city.latitude, city.longitude)
+                || saved.value(QStringLiteral("identity")).toString()
+                    != domain::stableWeatherCityIdentity(city)) {
+                continue;
+            }
+            domain::WeatherForecast forecast;
+            QString lastSuccessfulRefresh;
+            const QString forecastJson = saved.value(QStringLiteral("forecastJson")).toString();
+            const QString updatedAt = saved.value(QStringLiteral("updatedAt")).toString();
+            if (!forecastJson.isEmpty()) {
+                const auto cached = providers::parseWeatherForecast(forecastJson.toUtf8());
+                if (cached.succeeded()) {
+                    forecast = cached.value;
+                    QDateTime cacheTime = QDateTime::fromString(updatedAt, Qt::ISODateWithMs);
+                    if (!cacheTime.isValid())
+                        cacheTime = QDateTime::fromString(updatedAt, Qt::ISODate);
+                    if (cacheTime.isValid()) lastSuccessfulRefresh = updatedAt;
+                }
+            }
+            m_comparisonCities.addCity(std::move(city), std::move(forecast),
+                                       std::move(lastSuccessfulRefresh));
+        }
+        m_comparisonStorageError.clear();
+        emit comparisonChanged();
+        refreshAllComparisonCities();
+        return;
+    }
+    if (pending.kind == Kind::SaveComparisonForecast) {
+        if (m_comparisonCities.indexOfIdentity(pending.identity) < 0) return;
+        if (error.isError()) {
+            m_comparisonStorageError = safeMessage(
+                error, QStringLiteral("A comparison forecast could not be cached."));
+        } else {
+            m_comparisonStorageError.clear();
+        }
+        emit comparisonChanged();
+        return;
+    }
+    if (pending.kind == Kind::AddComparisonCity
+        || pending.kind == Kind::RemoveComparisonCity
+        || pending.kind == Kind::ReorderComparisonCities) {
+        m_comparisonMutationPending = false;
+        if (error.isError()) {
+            m_comparisonStorageError = safeMessage(
+                error, QStringLiteral("Saved comparison changes could not be completed."));
+            emit comparisonChanged();
+            return;
+        }
+        m_comparisonStorageError.clear();
+        if (pending.kind == Kind::AddComparisonCity) {
+            if (!m_comparisonCities.addCity(pending.city, pending.forecast, pending.updatedAt))
+                m_comparisonStorageError = QStringLiteral("The saved city could not be restored into comparison.");
+            emit cityChanged();
+        } else if (pending.kind == Kind::RemoveComparisonCity) {
+            m_comparisonCities.removeCity(pending.identity);
+        } else {
+            m_comparisonCities.moveCity(pending.identity, pending.destinationRow);
+        }
+        emit comparisonChanged();
+        return;
+    }
     if (pending.kind == Kind::LoadPrimary) {
         if (pending.generation != m_primaryGeneration) return;
         if (error.isError()) {
@@ -991,6 +1137,17 @@ void WeatherController::onValueJobFinished(quint64 id, const QVariantMap &values
         if (!m_comparisonCities.setForecast(identity, forecast, updatedAt)) {
             m_comparisonCities.setError(identity,
                 QStringLiteral("The refreshed forecast could not be processed."));
+            return;
+        }
+        const quint64 cacheId = submitStorage(Kind::SaveComparisonForecast,
+            services::WeatherService::saveComparisonForecast(identity, forecast, updatedAt),
+            QStringLiteral("weather-comparison-cache:%1").arg(identity), pending.generation);
+        if (!cacheId) {
+            m_comparisonStorageError = QStringLiteral("A comparison forecast could not be cached.");
+            emit comparisonChanged();
+        } else {
+            m_pending[cacheId].identity = identity;
+            m_pending[cacheId].updatedAt = updatedAt;
         }
         return;
     }
