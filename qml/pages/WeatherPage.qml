@@ -28,6 +28,7 @@ Item {
     function temperature(value, available) {
         return available ? Math.round(Number(value)) + "°" : "—"
     }
+    Component.onCompleted: controller.updateSolarInfo()
 
     Flickable {
         id: pageScroll
@@ -174,6 +175,14 @@ Item {
                         }
                     }
 
+                    Shared.WeatherSolarSection {
+                        Layout.fillWidth: true
+                        visible: controller.primaryForecast.count > 0
+                        solarInfo: controller.primarySolar
+                        dayLabel: controller.primarySolar.date
+                                   ? root.formatDate(controller.primarySolar.date) : ""
+                    }
+
                     GridLayout {
                         Layout.fillWidth: true
                         visible: controller.primaryForecast.count > 0
@@ -282,6 +291,13 @@ Item {
                         }
                         Label { text: controller.cityCurrent.condition || qsTr("Weather unavailable"); color: ThemeModule.Theme.textSecondary; font.pixelSize: 12 }
                     }
+                    Shared.WeatherSolarSection {
+                        Layout.fillWidth: true
+                        visible: controller.cityForecast.count > 0
+                        solarInfo: controller.citySolar
+                        dayLabel: controller.citySolar.date
+                                   ? root.formatDate(controller.citySolar.date) : ""
+                    }
                     GridLayout {
                         Layout.fillWidth: true
                         visible: controller.cityForecast.count > 0
@@ -315,5 +331,13 @@ Item {
                 }
             }
         }
+    }
+
+    Timer {
+        interval: 60 * 1000
+        repeat: true
+        running: root.visible
+                 && (controller.primaryForecast.count > 0 || controller.cityForecast.count > 0)
+        onTriggered: controller.updateSolarInfo()
     }
 }

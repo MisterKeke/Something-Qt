@@ -18,7 +18,9 @@ class WeatherController final : public QObject {
     Q_PROPERTY(something::models::WeatherForecastModel *cityForecast READ cityForecast CONSTANT)
     Q_PROPERTY(QVariantMap primaryCurrent READ primaryCurrent NOTIFY primaryChanged)
     Q_PROPERTY(QVariantMap primaryToday READ primaryToday NOTIFY primaryChanged)
+    Q_PROPERTY(QVariantMap primarySolar READ primarySolar NOTIFY primaryChanged)
     Q_PROPERTY(QVariantMap cityCurrent READ cityCurrent NOTIFY cityChanged)
+    Q_PROPERTY(QVariantMap citySolar READ citySolar NOTIFY cityChanged)
     Q_PROPERTY(QString primaryLocation READ primaryLocation NOTIFY primaryChanged)
     Q_PROPERTY(QString primaryUpdatedAt READ primaryUpdatedAt NOTIFY primaryChanged)
     Q_PROPERTY(QString primaryStatus READ primaryStatus NOTIFY primaryChanged)
@@ -40,7 +42,9 @@ public:
     models::WeatherForecastModel *cityForecast() noexcept { return &m_cityForecast; }
     QVariantMap primaryCurrent() const { return m_primaryCurrent; }
     QVariantMap primaryToday() const { return m_primaryToday; }
+    QVariantMap primarySolar() const { return m_primarySolar; }
     QVariantMap cityCurrent() const { return m_cityCurrent; }
+    QVariantMap citySolar() const { return m_citySolar; }
     QString primaryLocation() const { return m_primaryLocation; }
     QString primaryUpdatedAt() const { return m_primaryUpdatedAt; }
     QString primaryStatus() const { return m_primaryStatus; }
@@ -56,6 +60,7 @@ public:
     Q_INVOKABLE void requestDeviceLocation();
     Q_INVOKABLE void searchCity(QString city);
     Q_INVOKABLE void cancelCitySearch();
+    Q_INVOKABLE void updateSolarInfo();
 
 signals:
     void primaryChanged();
@@ -118,7 +123,11 @@ private:
     QHash<quint64, domain::WeatherForecast> m_stagedPrimary;
     QVariantMap m_primaryCurrent;
     QVariantMap m_primaryToday;
+    QVariantMap m_primarySolar;
     QVariantMap m_cityCurrent;
+    QVariantMap m_citySolar;
+    domain::WeatherForecast m_primarySolarForecast;
+    domain::WeatherForecast m_citySolarForecast;
     QString m_primaryLocation{QStringLiteral("Your location")};
     QString m_primaryUpdatedAt;
     QString m_primaryStatus;

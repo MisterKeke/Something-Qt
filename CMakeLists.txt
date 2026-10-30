@@ -178,6 +178,7 @@ qt_add_qml_module(SomethingQt
         qml/components/StatePanel.qml
         qml/components/NotificationToast.qml
         qml/components/WeatherSummaryCard.qml
+        qml/components/WeatherSolarSection.qml
         qml/components/OrbitNavigation.qml
         qml/dialogs/ConfirmationDialog.qml
         qml/dialogs/TaskEditorDialog.qml

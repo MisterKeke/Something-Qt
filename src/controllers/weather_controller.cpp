@@ -7,7 +7,9 @@
 #include <QLocale>
 #include <QThread>
 #include <QUrlQuery>
+#include <QTimeZone>
 
+#include <cmath>
 #include <utility>
 
 namespace something::controllers {
@@ -27,6 +29,104 @@ QString updatedAtText(const QString &value)
     if (!date.isValid()) date = QDateTime::fromString(value, Qt::ISODate);
     if (!date.isValid()) return {};
     return QLocale().toString(date.toLocalTime(), QLocale::ShortFormat);
+}
+
+QString solarTimeText(const std::optional<QDateTime> &timestamp,
+                      const QTimeZone &timeZone)
+{
+    if (!timestamp || !timestamp->isValid() || !timeZone.isValid()) return {};
+    return QLocale().toString(timestamp->toUTC().toTimeZone(timeZone).time(),
+                              QLocale::ShortFormat);
+}
+
+QString daylightDurationText(double seconds)
+{
+    if (!std::isfinite(seconds) || seconds < 0.0) return {};
+    const qint64 minutes = static_cast<qint64>(std::llround(seconds / 60.0));
+    const qint64 hoursPart = minutes / 60;
+    const qint64 minutesPart = minutes % 60;
+    if (hoursPart > 0 && minutesPart > 0)
+        return QStringLiteral("%1h %2m").arg(hoursPart).arg(minutesPart);
+    if (hoursPart > 0) return QStringLiteral("%1h").arg(hoursPart);
+    return QStringLiteral("%1m").arg(minutesPart);
+}
+
+QVariantMap solarInfoForForecast(const domain::WeatherForecast &forecast,
+                                 const QDateTime &nowUtc)
+{
+    if (forecast.days.isEmpty()) return {};
+    const QTimeZone timeZone(forecast.timezone.toUtf8());
+    const domain::WeatherDay &displayedDay = forecast.days.first();
+    const bool hasSunrise = displayedDay.sunriseUtc && displayedDay.sunriseUtc->isValid()
+        && timeZone.isValid();
+    const bool hasSunset = displayedDay.sunsetUtc && displayedDay.sunsetUtc->isValid()
+        && timeZone.isValid();
+    const bool hasDaylightDuration = displayedDay.daylightDurationSeconds
+        && std::isfinite(*displayedDay.daylightDurationSeconds)
+        && *displayedDay.daylightDurationSeconds >= 0.0;
+
+    QVariantMap result{
+        {QStringLiteral("date"), displayedDay.date},
+        {QStringLiteral("sunrise"), hasSunrise
+             ? solarTimeText(displayedDay.sunriseUtc, timeZone) : QString{}},
+        {QStringLiteral("sunset"), hasSunset
+             ? solarTimeText(displayedDay.sunsetUtc, timeZone) : QString{}},
+        {QStringLiteral("hasSunrise"), hasSunrise},
+        {QStringLiteral("hasSunset"), hasSunset},
+        {QStringLiteral("daylightDuration"), hasDaylightDuration
+             ? daylightDurationText(*displayedDay.daylightDurationSeconds) : QString{}},
+        {QStringLiteral("hasDaylightDuration"), hasDaylightDuration},
+        {QStringLiteral("hasSolarState"), false},
+        {QStringLiteral("solarState"), QString{}},
+        {QStringLiteral("hasNextEvent"), false},
+        {QStringLiteral("nextEvent"), QString{}},
+        {QStringLiteral("secondsUntilNextEvent"), 0},
+    };
+
+    if (!timeZone.isValid()) return result;
+    const QDateTime now = nowUtc.toUTC();
+    const QString localToday = now.toTimeZone(timeZone).date().toString(Qt::ISODate);
+    if (displayedDay.date != localToday) return result;
+
+    const bool hasOrderedPair = hasSunrise && hasSunset
+        && *displayedDay.sunriseUtc < *displayedDay.sunsetUtc;
+    QString state;
+    if (hasOrderedPair) {
+        if (now < *displayedDay.sunriseUtc) state = QStringLiteral("beforeSunrise");
+        else if (now < *displayedDay.sunsetUtc) state = QStringLiteral("daylight");
+        else state = QStringLiteral("afterSunset");
+    } else if (hasDaylightDuration
+               && *displayedDay.daylightDurationSeconds >= 86400.0 - 60.0) {
+        state = QStringLiteral("polarDay");
+    } else if (hasDaylightDuration && *displayedDay.daylightDurationSeconds <= 60.0) {
+        state = QStringLiteral("polarNight");
+    }
+    if (!state.isEmpty()) {
+        result.insert(QStringLiteral("hasSolarState"), true);
+        result.insert(QStringLiteral("solarState"), state);
+    }
+
+    QDateTime nextEvent;
+    QString nextEventName;
+    const auto considerEvent = [&now, &nextEvent, &nextEventName](
+                                   const std::optional<QDateTime> &event,
+                                   const QString &name) {
+        if (!event || !event->isValid()) return;
+        const QDateTime utcEvent = event->toUTC();
+        if (utcEvent <= now || (nextEvent.isValid() && utcEvent >= nextEvent)) return;
+        nextEvent = utcEvent;
+        nextEventName = name;
+    };
+    for (const domain::WeatherDay &day : forecast.days) {
+        considerEvent(day.sunriseUtc, QStringLiteral("sunrise"));
+        considerEvent(day.sunsetUtc, QStringLiteral("sunset"));
+    }
+    if (nextEvent.isValid()) {
+        result.insert(QStringLiteral("hasNextEvent"), true);
+        result.insert(QStringLiteral("nextEvent"), nextEventName);
+        result.insert(QStringLiteral("secondsUntilNextEvent"), now.secsTo(nextEvent));
+    }
+    return result;
 }
 
 QVariantMap currentMap(const domain::WeatherCurrent &current)
@@ -380,7 +480,9 @@ void WeatherController::searchCity(QString city)
     cancelCityOperations();
     const quint64 generation = ++m_cityGeneration;
     m_cityForecast.clear();
+    m_citySolarForecast = {};
     m_cityCurrent.clear();
+    m_citySolar.clear();
     m_cityLocation.clear();
     m_cityError.clear();
     m_citySearching = false;
@@ -508,6 +610,8 @@ void WeatherController::onStorageFinished(quint64 id, const QVariantMap &values,
             m_primaryUpdatedAt.clear();
             m_primaryStatus = QStringLiteral("Saved location found; forecast cache is unavailable.");
             m_primaryForecast.clear();
+            m_primarySolarForecast = {};
+            m_primarySolar.clear();
             m_primaryCurrent.clear();
             m_primaryToday.clear();
         }
@@ -685,6 +789,8 @@ void WeatherController::onNativeLocationReady(quint64 id, double latitude, doubl
 void WeatherController::publishPrimary(const domain::WeatherForecast &forecast,
                                        QString updatedAt, bool fromCache)
 {
+    m_primarySolarForecast = forecast;
+    m_primarySolar = solarInfoForForecast(forecast, m_clock->nowUtc());
     m_primaryForecast.replace(forecast.days, forecast.timezone);
     m_primaryCurrent = currentMap(forecast.current);
     m_primaryToday.clear();
@@ -714,12 +820,33 @@ void WeatherController::publishPrimary(const domain::WeatherForecast &forecast,
 void WeatherController::publishCity(const domain::WeatherCity &city,
                                     const domain::WeatherForecast &forecast)
 {
+    m_citySolarForecast = forecast;
+    m_citySolar = solarInfoForForecast(forecast, m_clock->nowUtc());
     m_cityForecast.replace(forecast.days, forecast.timezone);
     m_cityCurrent = currentMap(forecast.current);
     m_cityLocation = cityLabel(city);
     m_cityError.clear();
     m_citySearching = false;
     emit cityChanged();
+}
+
+void WeatherController::updateSolarInfo()
+{
+    const QDateTime nowUtc = m_clock->nowUtc();
+    const QVariantMap primary = solarInfoForForecast(m_primarySolarForecast, nowUtc);
+    const QVariantMap city = solarInfoForForecast(m_citySolarForecast, nowUtc);
+    bool primaryChangedValue = false;
+    bool cityChangedValue = false;
+    if (primary != m_primarySolar) {
+        m_primarySolar = primary;
+        primaryChangedValue = true;
+    }
+    if (city != m_citySolar) {
+        m_citySolar = city;
+        cityChangedValue = true;
+    }
+    if (primaryChangedValue) emit primaryChanged();
+    if (cityChangedValue) emit cityChanged();
 }
 
 void WeatherController::setPrimaryError(domain::AppError error, const QString &fallback)
@@ -739,7 +866,9 @@ void WeatherController::setCityError(domain::AppError error, const QString &fall
     m_citySearching = false;
     m_cityError = safeMessage(error, fallback);
     m_cityForecast.clear();
+    m_citySolarForecast = {};
     m_cityCurrent.clear();
+    m_citySolar.clear();
     m_cityLocation.clear();
     emit cityChanged();
 }
