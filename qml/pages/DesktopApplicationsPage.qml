@@ -16,10 +16,63 @@ Item {
     property bool selectedHasCustomIcon: false
     property int relocateId: 0
     property int iconId: 0
+    property string selectedFilter: "all"
+    property var categoryOptions: []
 
-    Component.onCompleted: controller.setPageVisible(visible)
+    function rebuildCategoryOptions() {
+        const options = [{ id: 0, label: qsTr("Uncategorized") }]
+        for (let i = 0; i < controller.categories.count; ++i) {
+            const category = controller.categories.rowAt(i)
+            options.push({ id: category.id, label: category.name,
+                           applicationCount: category.applicationCount })
+        }
+        categoryOptions = options
+    }
+
+    function categoryIndexFor(id) {
+        const wanted = id === null || typeof id === "undefined" ? "0" : String(id)
+        for (let i = 0; i < categoryOptions.length; ++i)
+            if (String(categoryOptions[i].id) === wanted) return i
+        return 0
+    }
+
+    function currentCategoryTitle() {
+        for (let i = 1; i < categoryOptions.length; ++i)
+            if (String(categoryOptions[i].id) === selectedFilter)
+                return categoryOptions[i].label + " · " + categoryOptions[i].applicationCount
+        return qsTr("Application category")
+    }
+
+    function selectAllApplications() {
+        selectedFilter = "all"
+        controller.loadAllApplications()
+    }
+
+    function selectUncategorized() {
+        selectedFilter = "uncategorized"
+        controller.loadUncategorizedApplications()
+    }
+
+    function selectCategory(id) {
+        selectedFilter = String(id)
+        controller.loadApplicationsByCategory(Number(id))
+    }
+
+    function assignCategory(applicationId, index) {
+        if (index <= 0) controller.removeApplicationCategory(applicationId)
+        else controller.assignApplicationCategory(applicationId, Number(categoryOptions[index].id))
+    }
+
+    function filterMatches(text) {
+        return String(text).toLocaleLowerCase().includes(categorySearch.text.trim().toLocaleLowerCase())
+    }
+
     onVisibleChanged: if (controller) controller.setPageVisible(visible)
     Component.onDestruction: controller.setPageVisible(false)
+    Component.onCompleted: {
+        rebuildCategoryOptions()
+        controller.setPageVisible(visible)
+    }
 
     ColumnLayout {
         anchors.fill: parent
@@ -36,7 +89,10 @@ Item {
                 text: qsTr("Refresh")
                 quiet: true
                 enabled: !root.controller.busy
-                onClicked: root.controller.reload()
+                onClicked: {
+                    root.controller.reload()
+                    root.controller.loadCategories()
+                }
             }
             Item { Layout.fillWidth: true }
             BusyIndicator { running: root.controller.loading || root.controller.busy; visible: running }
@@ -56,30 +112,173 @@ Item {
                      : root.controller.errorMessage
         }
 
-        Shared.AppCard {
+        Shared.AppTextField {
+            id: categorySearch
             Layout.fillWidth: true
-            Layout.fillHeight: true
-            visible: root.controller.applications.count === 0 && !root.controller.loading
-                     && root.controller.supported && root.controller.errorMessage.length === 0
-            Shared.StatePanel {
-                anchors.fill: parent
-                state: "empty"
-                title: qsTr("No saved applications")
-                message: qsTr("Add a Windows executable to keep a launch shortcut here.")
+            visible: root.controller.supported && root.controller.categories.count > 4
+            accessibleLabel: qsTr("Filter categories")
+            placeholderText: qsTr("Filter categories")
+            maximumLength: 120
+        }
+
+        Flow {
+            id: compactCategoryFilters
+            Layout.fillWidth: true
+            visible: root.width < 760 && root.controller.supported
+            spacing: 6
+
+            Shared.FilterChip {
+                width: Math.min(230, compactCategoryFilters.width)
+                text: qsTr("All applications · %1").arg(root.controller.totalApplicationsCount)
+                selected: root.selectedFilter === "all"
+                onClicked: root.selectAllApplications()
+            }
+            Shared.FilterChip {
+                width: Math.min(230, compactCategoryFilters.width)
+                text: qsTr("Uncategorized · %1").arg(root.controller.uncategorizedCount)
+                selected: root.selectedFilter === "uncategorized"
+                onClicked: root.selectUncategorized()
+            }
+            Repeater {
+                model: root.controller.categories
+                delegate: Shared.FilterChip {
+                    required property int categoryId
+                    required property string name
+                    required property string color
+                    required property int applicationCount
+                    width: Math.min(230, compactCategoryFilters.width)
+                    visible: root.filterMatches(name)
+                    text: name + " · " + applicationCount
+                    tint: color.length > 0 ? color : ThemeModule.Theme.accentCyan
+                    selected: root.selectedFilter === String(categoryId)
+                    onClicked: root.selectCategory(categoryId)
+                }
             }
         }
 
-        ListView {
-            id: applicationList
+        RowLayout {
+            id: applicationsContent
             Layout.fillWidth: true
             Layout.fillHeight: true
-            visible: root.controller.applications.count > 0
-            clip: true
-            spacing: 9
-            model: root.controller.applications
-            boundsBehavior: Flickable.StopAtBounds
+            visible: root.controller.supported && root.controller.errorMessage.length === 0
+                     && !(root.controller.loading && root.controller.applications.count === 0)
+            spacing: 12
 
-            delegate: Shared.AppCard {
+            Shared.AppCard {
+                id: categorySidebar
+                Layout.preferredWidth: 226
+                Layout.minimumWidth: 190
+                Layout.fillHeight: true
+                visible: root.width >= 760
+                padding: 12
+
+                ColumnLayout {
+                    anchors.fill: parent
+                    spacing: 7
+                    Label {
+                        Layout.fillWidth: true
+                        text: qsTr("Categories")
+                        color: ThemeModule.Theme.textPrimary
+                        font.family: ThemeModule.Theme.fontFamily
+                        font.pixelSize: 16
+                        font.weight: Font.DemiBold
+                    }
+                    Shared.FilterChip {
+                        Layout.fillWidth: true
+                        text: qsTr("All applications")
+                        selected: root.selectedFilter === "all"
+                        onClicked: root.selectAllApplications()
+                    }
+                    Shared.FilterChip {
+                        Layout.fillWidth: true
+                        text: qsTr("Uncategorized") + " · " + root.controller.uncategorizedCount
+                        selected: root.selectedFilter === "uncategorized"
+                        onClicked: root.selectUncategorized()
+                    }
+                    Rectangle {
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: 1
+                        color: ThemeModule.Theme.borderColor
+                    }
+                    ScrollView {
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        clip: true
+                        contentWidth: availableWidth
+                        ColumnLayout {
+                            width: parent.width
+                            spacing: 6
+                            Repeater {
+                                model: root.controller.categories
+                                delegate: Shared.FilterChip {
+                                    required property int categoryId
+                                    required property string name
+                                    required property string color
+                                    required property int applicationCount
+                                    Layout.fillWidth: true
+                                    visible: root.filterMatches(name)
+                                    text: name + " · " + applicationCount
+                                    tint: color.length > 0 ? color : ThemeModule.Theme.accentCyan
+                                    selected: root.selectedFilter === String(categoryId)
+                                    onClicked: root.selectCategory(categoryId)
+                                }
+                            }
+                            Label {
+                                Layout.fillWidth: true
+                                visible: root.controller.categories.count === 0
+                                text: qsTr("Create a category to organize saved applications.")
+                                color: ThemeModule.Theme.textSecondary
+                                wrapMode: Text.Wrap
+                                textFormat: Text.PlainText
+                            }
+                        }
+                    }
+                }
+            }
+
+            ColumnLayout {
+                id: applicationPane
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                Layout.minimumWidth: 0
+                spacing: 9
+
+                Label {
+                    Layout.fillWidth: true
+                    text: root.selectedFilter === "all" ? qsTr("All applications · %1").arg(root.controller.totalApplicationsCount)
+                          : root.selectedFilter === "uncategorized" ? qsTr("Uncategorized · %1").arg(root.controller.uncategorizedCount)
+                          : root.currentCategoryTitle()
+                    color: ThemeModule.Theme.textPrimary
+                    font.family: ThemeModule.Theme.fontFamily
+                    font.pixelSize: 17
+                    font.weight: Font.DemiBold
+                    elide: Text.ElideRight
+                }
+
+                Shared.StatePanel {
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    visible: root.controller.applications.count === 0 && !root.controller.loading
+                             && root.controller.errorMessage.length === 0
+                    state: "empty"
+                    title: root.selectedFilter === "all" && root.controller.totalApplicationsCount === 0
+                           ? qsTr("No saved applications") : qsTr("No applications in this category")
+                    message: root.selectedFilter === "all" && root.controller.totalApplicationsCount === 0
+                             ? qsTr("Add a Windows executable to keep a launch shortcut here.")
+                             : qsTr("Applications assigned to this category will appear here.")
+                }
+
+                ListView {
+                    id: applicationList
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    visible: root.controller.applications.count > 0
+                    clip: true
+                    spacing: 9
+                    model: root.controller.applications
+                    boundsBehavior: Flickable.StopAtBounds
+
+                    delegate: Shared.AppCard {
                 required property int applicationId
                 required property string displayName
                 required property string executablePath
@@ -87,6 +286,7 @@ Item {
                 required property string iconSource
                 required property string nativeIconDataUrl
                 required property bool available
+                required property var categoryId
 
                 width: applicationList.width
                 implicitHeight: row.implicitHeight + 28
@@ -156,6 +356,16 @@ Item {
                             text: available ? qsTr("Available") : qsTr("Location missing")
                             badgeColor: available ? ThemeModule.Theme.success : ThemeModule.Theme.warning
                         }
+                        Shared.AppComboBox {
+                            Layout.preferredWidth: Math.min(240, applicationPane.width * 0.55)
+                            Layout.minimumWidth: 150
+                            model: root.categoryOptions
+                            textRole: "label"
+                            currentIndex: root.categoryIndexFor(categoryId)
+                            enabled: !root.controller.busy
+                            accessibleLabel: qsTr("Category for %1").arg(displayName)
+                            onActivated: root.assignCategory(applicationId, currentIndex)
+                        }
                     }
 
                     Shared.AppButton {
@@ -177,6 +387,7 @@ Item {
                         }
                     }
                 }
+            }
             }
         }
 
@@ -333,6 +544,9 @@ Item {
 
     Connections {
         target: root.controller
+        function onStateChanged() {
+            root.rebuildCategoryOptions()
+        }
         function onMutationFinished(success) {
             if (success && renameDialog.visible) renameDialog.close()
         }

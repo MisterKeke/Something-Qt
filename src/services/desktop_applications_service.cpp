@@ -31,11 +31,12 @@ QVariantMap categoryMap(const storage::DesktopApplicationCategory &category)
                        {QStringLiteral("displayOrder"), category.displayOrder},
                        {QStringLiteral("createdAt"), category.createdAt},
                        {QStringLiteral("updatedAt"), category.updatedAt},
-                       {QStringLiteral("applicationCount"), category.applicationCount}};
-    if (category.description) result.insert(QStringLiteral("description"), *category.description);
-    if (category.color) result.insert(QStringLiteral("color"), *category.color);
-    if (category.iconIdentifier)
-        result.insert(QStringLiteral("iconIdentifier"), *category.iconIdentifier);
+                       {QStringLiteral("applicationCount"), category.applicationCount},
+                       {QStringLiteral("description"), category.description
+                            ? *category.description : QString()},
+                       {QStringLiteral("color"), category.color ? *category.color : QString()},
+                       {QStringLiteral("iconIdentifier"), category.iconIdentifier
+                            ? *category.iconIdentifier : QString()}};
     return result;
 }
 
@@ -92,8 +93,11 @@ storage::StorageCommand DesktopApplicationsService::listCategories()
         if (cancelled()) return failed(domain::AppError::cancelled());
         const auto result = repositories.applications.listCategories();
         if (!result.succeeded()) return failed(result.error);
+        const auto uncategorized = repositories.applications.uncategorizedApplicationCount();
+        if (!uncategorized.succeeded()) return failed(uncategorized.error);
         storage::StorageReply reply;
         reply.values.insert(QStringLiteral("categories"), categoryList(result.value));
+        reply.values.insert(QStringLiteral("uncategorizedCount"), uncategorized.value);
         return reply;
     };
 }

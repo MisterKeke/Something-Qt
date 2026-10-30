@@ -115,6 +115,7 @@ public:
     RepositoryResult<QVector<DesktopApplication>> listUncategorized() const;
     RepositoryResult<DesktopApplication> get(qint64 id) const;
     RepositoryResult<QVector<DesktopApplicationCategory>> listCategories() const;
+    RepositoryResult<int> uncategorizedApplicationCount() const;
     RepositoryResult<DesktopApplicationCategory> createCategory(
         QString name, QString description, QString color, QString iconIdentifier);
     RepositoryResult<DesktopApplicationCategory> updateCategory(

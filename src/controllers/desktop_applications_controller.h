@@ -21,6 +21,8 @@ class DesktopApplicationsController final : public QObject {
     Q_PROPERTY(bool supported READ supported CONSTANT)
     Q_PROPERTY(bool loading READ loading NOTIFY stateChanged)
     Q_PROPERTY(bool categoriesLoading READ categoriesLoading NOTIFY stateChanged)
+    Q_PROPERTY(int uncategorizedCount READ uncategorizedCount NOTIFY stateChanged)
+    Q_PROPERTY(int totalApplicationsCount READ totalApplicationsCount NOTIFY stateChanged)
     Q_PROPERTY(bool busy READ busy NOTIFY stateChanged)
     Q_PROPERTY(QString errorMessage READ errorMessage NOTIFY stateChanged)
     Q_PROPERTY(QString notification READ notification NOTIFY stateChanged)
@@ -36,12 +38,15 @@ public:
     bool supported() const noexcept { return m_platform && m_platform->supported(); }
     bool loading() const noexcept { return m_loading; }
     bool categoriesLoading() const noexcept { return m_categoriesLoading; }
+    int uncategorizedCount() const noexcept { return m_uncategorizedCount; }
+    int totalApplicationsCount() const;
     bool busy() const noexcept { return m_busy; }
     QString errorMessage() const { return m_errorMessage; }
     QString notification() const { return m_notification; }
 
     Q_INVOKABLE void setPageVisible(bool visible);
     Q_INVOKABLE void reload();
+    Q_INVOKABLE void loadAllApplications();
     Q_INVOKABLE void loadCategories();
     Q_INVOKABLE void loadApplicationsByCategory(qint64 categoryId);
     Q_INVOKABLE void loadUncategorizedApplications();
@@ -122,6 +127,7 @@ private:
     bool m_pageVisible{false};
     bool m_loading{false};
     bool m_categoriesLoading{false};
+    int m_uncategorizedCount{0};
     bool m_busy{false};
     QString m_errorMessage;
     QString m_notification;

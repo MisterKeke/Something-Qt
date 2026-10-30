@@ -15,7 +15,7 @@ Button {
     font.family: ThemeModule.Theme.fontFamily
     font.pixelSize: ThemeModule.Theme.labelFontSize
     Accessible.role: Accessible.Button
-    Accessible.name: text
+    Accessible.name: root.text + (root.selected ? qsTr(", selected") : "")
 
     contentItem: Text {
         text: root.text
@@ -26,6 +26,7 @@ Button {
         font: root.font
         horizontalAlignment: Text.AlignHCenter
         verticalAlignment: Text.AlignVCenter
+        elide: Text.ElideRight
     }
 
     background: Rectangle {

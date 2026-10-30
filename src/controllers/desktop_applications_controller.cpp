@@ -218,6 +218,13 @@ void DesktopApplicationsController::reload()
     submitStorage(operation.id.value, std::move(command));
 }
 
+void DesktopApplicationsController::loadAllApplications()
+{
+    m_applicationFilter = ApplicationFilter::All;
+    m_filterCategoryId = 0;
+    reload();
+}
+
 void DesktopApplicationsController::loadCategories()
 {
     if (!m_ready || !m_pageVisible) return;
@@ -244,6 +251,14 @@ void DesktopApplicationsController::loadApplicationsByCategory(qint64 categoryId
     m_applicationFilter = ApplicationFilter::Category;
     m_filterCategoryId = categoryId;
     reload();
+}
+
+int DesktopApplicationsController::totalApplicationsCount() const
+{
+    int count = m_uncategorizedCount;
+    for (int row = 0; row < m_categories.count(); ++row)
+        count += m_categories.rowAt(row).value(QStringLiteral("applicationCount")).toInt();
+    return count;
 }
 
 void DesktopApplicationsController::loadUncategorizedApplications()
@@ -468,6 +483,7 @@ void DesktopApplicationsController::onStorageFinished(quint64 id, const QVariant
     }
     if (it->kind == Kind::CategoriesList) {
         m_categories.replace(values.value(QStringLiteral("categories")).toList());
+        m_uncategorizedCount = values.value(QStringLiteral("uncategorizedCount")).toInt();
         m_categoriesLoading = false;
         m_categoriesOperation = 0;
         succeed(id);
@@ -557,7 +573,6 @@ void DesktopApplicationsController::onStorageFinished(quint64 id, const QVariant
     case Kind::CategoryReorder:
     case Kind::CategoryAssign:
     case Kind::CategoryClear:
-        loadCategories();
         succeed(id);
         return;
     case Kind::CategoryDelete:
@@ -566,7 +581,6 @@ void DesktopApplicationsController::onStorageFinished(quint64 id, const QVariant
             m_applicationFilter = ApplicationFilter::Uncategorized;
             m_filterCategoryId = 0;
         }
-        loadCategories();
         succeed(id, QStringLiteral("Category deleted. Its applications are now Uncategorized."));
         return;
     default:
@@ -732,6 +746,14 @@ void DesktopApplicationsController::succeed(quint64 id, QString notification)
     if (it == m_pending.end()) return;
     const bool mutation = it->mutation;
     const Kind completedKind = it->kind;
+    const bool refreshCategories = completedKind == Kind::AddCommit
+        || completedKind == Kind::DeleteCommit
+        || completedKind == Kind::CategoryCreate
+        || completedKind == Kind::CategoryUpdate
+        || completedKind == Kind::CategoryReorder
+        || completedKind == Kind::CategoryAssign
+        || completedKind == Kind::CategoryClear
+        || completedKind == Kind::CategoryDelete;
     m_pending.erase(it);
     if (m_listOperation == id) m_listOperation = 0;
     if (mutation) {
@@ -742,7 +764,10 @@ void DesktopApplicationsController::succeed(quint64 id, QString notification)
     }
     m_graph->completeOperation({id});
     emit stateChanged();
-    if (mutation && completedKind != Kind::LaunchRun && m_pageVisible) reload();
+    if (mutation && m_pageVisible) {
+        if (refreshCategories) loadCategories();
+        if (completedKind != Kind::LaunchRun) reload();
+    }
 }
 
 void DesktopApplicationsController::cancelAll()

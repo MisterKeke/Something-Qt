@@ -1381,6 +1381,15 @@ RepositoryResult<QVector<DesktopApplicationCategory>> DesktopApplicationsReposit
     return result;
 }
 
+RepositoryResult<int> DesktopApplicationsRepository::uncategorizedApplicationCount() const
+{
+    Q_ASSERT(QThread::currentThread() == m_database.driver()->thread());
+    QSqlQuery query(m_database);
+    if (!query.exec(QStringLiteral("SELECT COUNT(*) FROM desktop_apps WHERE category_id IS NULL"))
+        || !query.next()) return failure<int>(queryFailure(query));
+    return {query.value(0).toInt(), {}};
+}
+
 RepositoryResult<DesktopApplicationCategory> DesktopApplicationsRepository::loadCategory(qint64 id) const
 {
     QSqlQuery query(m_database);
