@@ -56,7 +56,7 @@ void StorageRepositoryTest::migrationsAreTransactionalIndependentAndRepeatable()
     QString connectionName;
     QSqlDatabase database;
     QVERIFY(openTestDatabase(&database, &connectionName));
-    QCOMPARE(storage::SchemaMigrator::latestVersion(), 16);
+    QCOMPARE(storage::SchemaMigrator::latestVersion(), 17);
     QVERIFY(storage::SchemaMigrator::apply(database));
 
     QSqlQuery history(database);
@@ -74,6 +74,8 @@ void StorageRepositoryTest::migrationsAreTransactionalIndependentAndRepeatable()
                                     QStringLiteral("desktop_apps"), QStringLiteral("setups"),
                                     QStringLiteral("steam_games"), QStringLiteral("wallpapers"),
                                     QStringLiteral("steam_price_observations"),
+                                    QStringLiteral("steam_game_update_follows"),
+                                    QStringLiteral("steam_game_update_news_items"),
                                     QStringLiteral("task_history"),
                                     QStringLiteral("task_schedules"),
                                     QStringLiteral("scheduling_preferences"),

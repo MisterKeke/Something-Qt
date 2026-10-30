@@ -467,6 +467,42 @@ target_link_libraries(SomethingQtSteamFeatureTests PRIVATE
     Qt6::Core Qt6::Gui Qt6::Quick Qt6::Sql Qt6::Test)
 add_test(NAME SomethingQtSteamFeatureTests COMMAND SomethingQtSteamFeatureTests)
 
+add_executable(SomethingQtGameUpdatesTests
+    game_updates_feature_test.cpp
+    ../src/application/application_lifecycle.cpp
+    ../src/application/application_service_graph.cpp
+    ../src/application/capability_registry.cpp
+    ../src/application/operation_coordinator.cpp
+    ../src/controllers/steam_game_updates_controller.cpp
+    ../src/domain/app_error.cpp
+    ../src/domain/task_date_rules.cpp
+    ../src/domain/task_history.cpp
+    ../src/domain/task_rules.cpp
+    ../src/domain/task_scheduling.cpp
+    ../src/domain/steam_game.cpp
+    ../src/domain/steam_game_updates.cpp
+    ../src/domain/steam_release.cpp
+    ../src/domain/weather_currency.cpp
+    ../src/platform/profile_instance_lock.cpp
+    ../src/providers/feature_parsers.cpp
+    ../src/providers/network_worker.cpp
+    ../src/providers/provider_policy.cpp
+    ../src/providers/provider_response_cache.cpp
+    ../src/providers/steam_news_parser.cpp
+    ../src/providers/steam_news_provider.cpp
+    ../src/providers/steam_release_provider.cpp
+    ../src/services/bounded_worker_pool.cpp
+    ../src/services/steam_artwork_store.cpp
+    ../src/services/steam_game_updates_service.cpp
+    ../src/storage/repositories.cpp
+    ../src/storage/schema_migrator.cpp
+    ../src/storage/storage_worker.cpp
+)
+target_include_directories(SomethingQtGameUpdatesTests PRIVATE ../src)
+target_link_libraries(SomethingQtGameUpdatesTests PRIVATE
+    Qt6::Core Qt6::Gui Qt6::Network Qt6::Sql Qt6::Test lexbor_static)
+add_test(NAME SomethingQtGameUpdatesTests COMMAND SomethingQtGameUpdatesTests)
+
 add_executable(SomethingQtDataImportTests
     data_import_test.cpp
     ../src/application/application_lifecycle.cpp

@@ -653,6 +653,7 @@ void SteamFeatureTest::releaseRadarMigrationPreservesExistingPriceProfiles()
 
     {
         QSqlQuery legacy(database);
+        QVERIFY(legacy.exec(QStringLiteral("DROP TABLE steam_game_update_news_items")));
         QVERIFY(legacy.exec(QStringLiteral("DROP TABLE steam_game_update_follows")));
         QVERIFY(legacy.exec(QStringLiteral("DROP TABLE steam_release_follows")));
         QVERIFY(legacy.exec(QStringLiteral(
@@ -662,7 +663,7 @@ void SteamFeatureTest::releaseRadarMigrationPreservesExistingPriceProfiles()
 
     QString diagnostic;
     QVERIFY2(storage::SchemaMigrator::apply(database, &diagnostic), qPrintable(diagnostic));
-    QCOMPARE(storage::SchemaMigrator::latestVersion(), 16);
+    QCOMPARE(storage::SchemaMigrator::latestVersion(), 17);
     {
         storage::StorageRepositories repositories(database);
         const auto preserved = repositories.steam.get(priceGameId);
@@ -686,7 +687,7 @@ void SteamFeatureTest::releaseRadarMigrationPreservesExistingPriceProfiles()
         QVERIFY(migratedVersion.exec(QStringLiteral(
             "SELECT MAX(version) FROM schema_migrations")));
         QVERIFY(migratedVersion.next());
-        QCOMPARE(migratedVersion.value(0).toInt(), 15);
+        QCOMPARE(migratedVersion.value(0).toInt(), 17);
     }
     closeDatabase(&database, connectionName);
 }
@@ -826,13 +827,14 @@ void SteamFeatureTest::steamPriceHistoryMigrationPreservesLegacyGamesWithoutFabr
         "1999,999,50,'US','2025-03-04T12:00:00Z','2025-03-04T12:00:00Z')")));
     QVERIFY(legacy.exec(QStringLiteral("DROP TABLE steam_price_observations")));
     QVERIFY(legacy.exec(QStringLiteral("DROP TABLE steam_release_follows")));
+    QVERIFY(legacy.exec(QStringLiteral("DROP TABLE steam_game_update_news_items")));
     QVERIFY(legacy.exec(QStringLiteral("DROP TABLE steam_game_update_follows")));
     QVERIFY(legacy.exec(QStringLiteral("DELETE FROM schema_migrations WHERE version>=12")));
     legacy.finish();
 
     QString diagnostic;
     QVERIFY2(storage::SchemaMigrator::apply(database, &diagnostic), qPrintable(diagnostic));
-    QCOMPARE(storage::SchemaMigrator::latestVersion(), 16);
+    QCOMPARE(storage::SchemaMigrator::latestVersion(), 17);
 
     {
         storage::StorageRepositories repositories(database);
