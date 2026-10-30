@@ -37,6 +37,8 @@ class WeatherController final : public QObject {
     Q_PROPERTY(int comparisonCityCount READ comparisonCityCount NOTIFY comparisonChanged)
     Q_PROPERTY(QVariantList comparisonTableHeaders READ comparisonTableHeaders NOTIFY comparisonChanged)
     Q_PROPERTY(QVariantList comparisonTableRows READ comparisonTableRows NOTIFY comparisonChanged)
+    Q_PROPERTY(QVariantList comparisonDateOptions READ comparisonDateOptions NOTIFY comparisonChanged)
+    Q_PROPERTY(QString comparisonSelectedDate READ comparisonSelectedDate NOTIFY comparisonChanged)
     Q_PROPERTY(bool canAddSearchedCity READ canAddSearchedCity NOTIFY comparisonChanged)
     Q_PROPERTY(bool canReplaceSearchedCity READ canReplaceSearchedCity NOTIFY comparisonChanged)
     Q_PROPERTY(bool searchedCityAlreadyAdded READ searchedCityAlreadyAdded NOTIFY comparisonChanged)
@@ -75,6 +77,8 @@ public:
     int comparisonCityCount() const noexcept { return m_comparisonCities.count(); }
     QVariantList comparisonTableHeaders() const;
     QVariantList comparisonTableRows() const;
+    QVariantList comparisonDateOptions() const;
+    QString comparisonSelectedDate() const { return m_comparisonSelectedDate; }
     bool canAddSearchedCity() const noexcept;
     bool canReplaceSearchedCity() const noexcept;
     bool searchedCityAlreadyAdded() const noexcept;
@@ -98,7 +102,7 @@ public:
     Q_INVOKABLE void refreshComparisonCity(QString identity);
     Q_INVOKABLE void refreshAllComparisonCities();
     Q_INVOKABLE void cancelComparisonCityRefresh(QString identity);
-    Q_INVOKABLE void selectComparisonForecastDate(QString identity, QString date);
+    Q_INVOKABLE void selectComparisonForecastDate(QString date);
     Q_INVOKABLE void updateSolarInfo();
     Q_INVOKABLE void selectPrimaryForecastDate(QString date);
     Q_INVOKABLE void selectCityForecastDate(QString date);
@@ -163,6 +167,7 @@ private:
     void publishCity(const domain::WeatherCity &city,
                      const domain::WeatherForecast &forecast);
     void updateComparisonLocalTimes();
+    void reconcileComparisonDate();
     void setPrimaryError(domain::AppError error, const QString &fallback);
     void setCityError(domain::AppError error, const QString &fallback);
     void requestNativeLocation(quint64 generation);
@@ -209,6 +214,8 @@ private:
     bool m_hasSearchedCity{false};
     bool m_comparisonLoaded{false};
     bool m_comparisonMutationPending{false};
+    bool m_comparisonDateUserSelected{false};
+    QString m_comparisonSelectedDate;
     QString m_comparisonStorageError;
 };
 

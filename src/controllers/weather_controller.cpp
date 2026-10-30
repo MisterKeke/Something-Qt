@@ -717,7 +717,11 @@ QVariantList WeatherController::comparisonTableHeaders() const
         if (!entry) continue;
         headers.push_back(QVariantMap{
             {QStringLiteral("name"), cityLabel(entry->city)},
-            {QStringLiteral("date"), entry->selectedForecastDate},
+            {QStringLiteral("date"), m_comparisonSelectedDate},
+            {QStringLiteral("dateAvailable"), !m_comparisonSelectedDate.isEmpty()
+                && entry->selectedForecastDate == m_comparisonSelectedDate},
+            {QStringLiteral("hasForecast"), !entry->forecast.days.isEmpty()},
+            {QStringLiteral("loading"), entry->loading},
         });
     }
     return headers;
@@ -783,6 +787,49 @@ QVariantList WeatherController::comparisonTableRows() const
         });
     }
     return rows;
+}
+
+QVariantList WeatherController::comparisonDateOptions() const
+{
+    QVector<QString> dates;
+    int forecastedCityCount = 0;
+    for (int row = 0; row < m_comparisonCities.count(); ++row) {
+        const QString identity = m_comparisonCities.data(
+            m_comparisonCities.index(row), models::WeatherComparisonModel::IdentityRole).toString();
+        const auto entry = m_comparisonCities.cityByIdentity(identity);
+        if (!entry || entry->forecast.days.isEmpty()) continue;
+        ++forecastedCityCount;
+        for (const domain::WeatherDay &day : entry->forecast.days) {
+            if (!day.date.isEmpty() && !dates.contains(day.date)) dates.push_back(day.date);
+        }
+    }
+    std::sort(dates.begin(), dates.end());
+
+    QVariantList options;
+    options.reserve(dates.size());
+    for (const QString &date : dates) {
+        int availableCount = 0;
+        for (int row = 0; row < m_comparisonCities.count(); ++row) {
+            const QString identity = m_comparisonCities.data(
+                m_comparisonCities.index(row), models::WeatherComparisonModel::IdentityRole).toString();
+            const auto entry = m_comparisonCities.cityByIdentity(identity);
+            if (!entry) continue;
+            const bool available = std::any_of(entry->forecast.days.cbegin(),
+                entry->forecast.days.cend(), [&date](const domain::WeatherDay &day) {
+                    return day.date == date;
+                });
+            if (available) ++availableCount;
+        }
+        options.push_back(QVariantMap{
+            {QStringLiteral("date"), date},
+            {QStringLiteral("availableCount"), availableCount},
+            {QStringLiteral("cityCount"), m_comparisonCities.count()},
+            {QStringLiteral("forecastedCityCount"), forecastedCityCount},
+            {QStringLiteral("common"), forecastedCityCount > 0
+                && availableCount == forecastedCityCount},
+        });
+    }
+    return options;
 }
 
 bool WeatherController::addSearchedCityToComparison()
@@ -914,9 +961,19 @@ void WeatherController::cancelComparisonCityRefresh(QString identity)
     m_comparisonCities.setLoading(identity, false);
 }
 
-void WeatherController::selectComparisonForecastDate(QString identity, QString date)
+void WeatherController::selectComparisonForecastDate(QString date)
 {
-    m_comparisonCities.selectForecastDate(identity, date);
+    const auto options = comparisonDateOptions();
+    const bool available = std::any_of(options.cbegin(), options.cend(),
+        [&date](const QVariant &value) {
+            const QVariantMap option = value.toMap();
+            return option.value(QStringLiteral("date")).toString() == date
+                && option.value(QStringLiteral("availableCount")).toInt() > 0;
+        });
+    if (!available) return;
+    m_comparisonDateUserSelected = true;
+    m_comparisonSelectedDate = std::move(date);
+    reconcileComparisonDate();
 }
 
 void WeatherController::cancelCitySearch()
@@ -1045,6 +1102,7 @@ void WeatherController::onStorageFinished(quint64 id, const QVariantMap &values,
         }
         m_comparisonStorageError.clear();
         emit comparisonChanged();
+        reconcileComparisonDate();
         updateComparisonLocalTimes();
         refreshAllComparisonCities();
         return;
@@ -1075,6 +1133,7 @@ void WeatherController::onStorageFinished(quint64 id, const QVariantMap &values,
         if (pending.kind == Kind::AddComparisonCity) {
             if (!m_comparisonCities.addCity(pending.city, pending.forecast, pending.updatedAt))
                 m_comparisonStorageError = QStringLiteral("The saved city could not be restored into comparison.");
+            reconcileComparisonDate();
             updateComparisonLocalTimes();
             emit cityChanged();
         } else if (pending.kind == Kind::ReplaceComparisonCity) {
@@ -1082,9 +1141,11 @@ void WeatherController::onStorageFinished(quint64 id, const QVariantMap &values,
                                                 pending.forecast, pending.updatedAt)) {
                 m_comparisonStorageError = QStringLiteral("The replacement could not be restored into comparison.");
             }
+            reconcileComparisonDate();
             updateComparisonLocalTimes();
         } else if (pending.kind == Kind::RemoveComparisonCity) {
             m_comparisonCities.removeCity(pending.identity);
+            reconcileComparisonDate();
         } else {
             m_comparisonCities.moveCity(pending.identity, pending.destinationRow);
         }
@@ -1274,6 +1335,7 @@ void WeatherController::onValueJobFinished(quint64 id, const QVariantMap &values
                 QStringLiteral("The refreshed forecast could not be processed."));
             return;
         }
+        reconcileComparisonDate();
         updateComparisonLocalTimes();
         const quint64 cacheId = submitStorage(Kind::SaveComparisonForecast,
             services::WeatherService::saveComparisonForecast(identity, forecast, updatedAt),
@@ -1423,6 +1485,72 @@ void WeatherController::updateComparisonLocalTimes()
             : QString{};
         m_comparisonCities.setLocalDateTime(identity, localTime);
     }
+}
+
+void WeatherController::reconcileComparisonDate()
+{
+    const QVariantList options = comparisonDateOptions();
+    QString selectedDate;
+    if (options.isEmpty()) m_comparisonDateUserSelected = false;
+    if (!options.isEmpty() && m_comparisonDateUserSelected) {
+        const auto selected = std::find_if(options.cbegin(), options.cend(),
+            [this](const QVariant &value) {
+                const QVariantMap option = value.toMap();
+                return option.value(QStringLiteral("date")).toString()
+                    == m_comparisonSelectedDate
+                    && option.value(QStringLiteral("availableCount")).toInt() > 0;
+            });
+        if (selected != options.cend()) selectedDate = m_comparisonSelectedDate;
+        else m_comparisonDateUserSelected = false;
+    }
+
+    if (selectedDate.isEmpty() && !options.isEmpty()) {
+        // Provider dates are ISO calendar dates. Prefer the earliest date shared
+        // by forecast-bearing cities; otherwise maximize coverage without substituting per city.
+        const auto common = std::find_if(options.cbegin(), options.cend(),
+            [](const QVariant &value) { return value.toMap().value(QStringLiteral("common")).toBool(); });
+        if (common != options.cend()) {
+            selectedDate = common->toMap().value(QStringLiteral("date")).toString();
+        } else {
+            int bestAvailability = -1;
+            for (const QVariant &value : options)
+                bestAvailability = std::max(bestAvailability,
+                    value.toMap().value(QStringLiteral("availableCount")).toInt());
+            const auto current = std::find_if(options.cbegin(), options.cend(),
+                [this, bestAvailability](const QVariant &value) {
+                    const QVariantMap option = value.toMap();
+                    return option.value(QStringLiteral("date")).toString()
+                            == m_comparisonSelectedDate
+                        && option.value(QStringLiteral("availableCount")).toInt()
+                            == bestAvailability;
+                });
+            const auto best = current != options.cend() ? current
+                : std::find_if(options.cbegin(), options.cend(),
+                    [bestAvailability](const QVariant &value) {
+                        return value.toMap().value(QStringLiteral("availableCount")).toInt()
+                            == bestAvailability;
+                    });
+            if (best != options.cend())
+                selectedDate = best->toMap().value(QStringLiteral("date")).toString();
+        }
+    }
+
+    const bool selectedDateChanged = m_comparisonSelectedDate != selectedDate;
+    m_comparisonSelectedDate = selectedDate;
+    bool cityDateChanged = false;
+    for (int row = 0; row < m_comparisonCities.count(); ++row) {
+        const QString identity = m_comparisonCities.data(
+            m_comparisonCities.index(row), models::WeatherComparisonModel::IdentityRole).toString();
+        const auto entry = m_comparisonCities.cityByIdentity(identity);
+        if (!entry) continue;
+        const bool available = std::any_of(entry->forecast.days.cbegin(),
+            entry->forecast.days.cend(), [&selectedDate](const domain::WeatherDay &day) {
+                return day.date == selectedDate;
+            });
+        cityDateChanged = m_comparisonCities.selectForecastDate(
+            identity, available ? selectedDate : QString{}) || cityDateChanged;
+    }
+    if (selectedDateChanged || cityDateChanged) emit comparisonChanged();
 }
 
 void WeatherController::selectPrimaryForecastDate(QString date)

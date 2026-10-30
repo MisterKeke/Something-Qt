@@ -52,6 +52,25 @@ Item {
         if (key === "condition") return qsTr("Current condition")
         return key
     }
+    function comparisonCardDateText(hasSelectedDay, hasForecast, loading, date) {
+        if (hasSelectedDay) return qsTr("Forecast for %1").arg(formatDate(date))
+        if (!hasForecast && loading) {
+            return date.length > 0
+                ? qsTr("Loading forecast for %1").arg(formatDate(date))
+                : qsTr("Loading forecast…")
+        }
+        return date.length > 0
+            ? qsTr("Forecast unavailable for %1").arg(formatDate(date))
+            : qsTr("Waiting for forecast date")
+    }
+    function comparisonTableDateText(dateAvailable, loading, hasForecast, date) {
+        if (dateAvailable) return qsTr("Forecast · %1").arg(formatDate(date))
+        if (date.length > 0 && loading && !hasForecast)
+            return qsTr("Loading · %1").arg(formatDate(date))
+        return date.length > 0
+            ? qsTr("Selected date unavailable · %1").arg(formatDate(date))
+            : qsTr("Forecast date unavailable")
+    }
     Component.onCompleted: controller.updateSolarInfo()
     onVisibleChanged: if (visible) controller.updateSolarInfo()
 
@@ -532,6 +551,79 @@ Item {
                         font.pixelSize: 12
                         wrapMode: Text.Wrap
                     }
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        visible: controller.comparisonDateOptions.length > 0
+                        spacing: 5
+                        Label {
+                            Layout.fillWidth: true
+                            text: qsTr("Shared provider-local forecast date")
+                            color: ThemeModule.Theme.textPrimary
+                            font.family: ThemeModule.Theme.fontFamily
+                            font.pixelSize: 12
+                            font.weight: Font.DemiBold
+                        }
+                        Label {
+                            Layout.fillWidth: true
+                            text: qsTr("All cities use this calendar date. Cities without it show unavailable.")
+                            color: ThemeModule.Theme.textSecondary
+                            font.family: ThemeModule.Theme.fontFamily
+                            font.pixelSize: 11
+                            wrapMode: Text.Wrap
+                        }
+                        Flow {
+                            Layout.fillWidth: true
+                            spacing: 5
+                            Repeater {
+                                model: controller.comparisonDateOptions
+                                delegate: Button {
+                                    required property var modelData
+                                    readonly property string dayDate: String(modelData.date || "")
+                                    text: qsTr("%1 · %2/%3")
+                                        .arg(root.formatDate(dayDate))
+                                        .arg(modelData.availableCount)
+                                        .arg(modelData.cityCount)
+                                    checkable: true
+                                    checked: dayDate === controller.comparisonSelectedDate
+                                    implicitWidth: Math.max(112, dateLabel.implicitWidth + 18)
+                                    implicitHeight: 34
+                                    padding: 5
+                                    Accessible.name: qsTr("Compare forecast date %1, available for %2 of %3 cities")
+                                        .arg(root.formatDate(dayDate))
+                                        .arg(modelData.availableCount)
+                                        .arg(modelData.cityCount)
+                                    onClicked: controller.selectComparisonForecastDate(dayDate)
+                                    contentItem: Text {
+                                        id: dateLabel
+                                        text: parent.text
+                                        color: parent.checked ? ThemeModule.Theme.textPrimary
+                                                             : ThemeModule.Theme.textSecondary
+                                        font.family: ThemeModule.Theme.fontFamily
+                                        font.pixelSize: 10
+                                        horizontalAlignment: Text.AlignHCenter
+                                        verticalAlignment: Text.AlignVCenter
+                                        elide: Text.ElideRight
+                                    }
+                                    background: Rectangle {
+                                        radius: ThemeModule.Theme.controlRadius
+                                        color: parent.checked ? ThemeModule.Theme.selectionBlue
+                                                              : ThemeModule.Theme.raisedSurface
+                                        border.color: parent.checked ? ThemeModule.Theme.accentCyan
+                                                                    : ThemeModule.Theme.borderColor
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    Label {
+                        Layout.fillWidth: true
+                        visible: controller.comparisonCityCount > 0
+                                 && controller.comparisonDateOptions.length === 0
+                        text: qsTr("Waiting for forecast dates from selected cities…")
+                        color: ThemeModule.Theme.textSecondary
+                        font.family: ThemeModule.Theme.fontFamily
+                        font.pixelSize: 11
+                    }
                     GridLayout {
                         id: comparisonGrid
                         Layout.fillWidth: true
@@ -652,61 +744,19 @@ Item {
 
                                     Label {
                                         Layout.fillWidth: true
-                                        text: selectedDay
-                                              ? qsTr("Forecast for %1").arg(root.formatDate(selectedDay.date))
-                                              : qsTr("Forecast unavailable")
+                                        text: root.comparisonCardDateText(
+                                            selectedDay !== null, hasForecast, loading,
+                                            controller.comparisonSelectedDate)
                                         color: ThemeModule.Theme.textPrimary
                                         font.family: ThemeModule.Theme.fontFamily
                                         font.pixelSize: 12
                                         font.weight: Font.DemiBold
                                     }
-                                    Flow {
-                                        Layout.fillWidth: true
-                                        spacing: 5
-                                        visible: forecast.days && forecast.days.length > 0
-
-                                        Repeater {
-                                            model: forecast.days || []
-                                            delegate: Button {
-                                                required property var modelData
-                                                required property int index
-                                                readonly property string dayDate: String(modelData.date || "")
-                                                text: root.formatDate(dayDate)
-                                                checkable: true
-                                                checked: dayDate === selectedForecastDate
-                                                implicitWidth: Math.max(68, dateText.implicitWidth + 16)
-                                                implicitHeight: 32
-                                                padding: 4
-                                                Accessible.name: qsTr("Select %1 forecast for %2")
-                                                    .arg(root.formatDate(dayDate)).arg(name)
-                                                onClicked: controller.selectComparisonForecastDate(identity, dayDate)
-                                                contentItem: Text {
-                                                    id: dateText
-                                                    text: parent.text
-                                                    color: parent.checked ? ThemeModule.Theme.textPrimary
-                                                                         : ThemeModule.Theme.textSecondary
-                                                    font.family: ThemeModule.Theme.fontFamily
-                                                    font.pixelSize: 10
-                                                    horizontalAlignment: Text.AlignHCenter
-                                                    verticalAlignment: Text.AlignVCenter
-                                                    elide: Text.ElideRight
-                                                }
-                                                background: Rectangle {
-                                                    radius: ThemeModule.Theme.controlRadius
-                                                    color: parent.checked ? ThemeModule.Theme.selectionBlue
-                                                                          : ThemeModule.Theme.raisedSurface
-                                                    border.color: parent.checked ? ThemeModule.Theme.accentCyan
-                                                                                : ThemeModule.Theme.borderColor
-                                                }
-                                            }
-                                        }
-                                    }
-
                                     GridLayout {
                                         Layout.fillWidth: true
                                         columns: 3
                                         columnSpacing: 8
-                                        visible: selectedDay !== null
+                                        visible: controller.comparisonSelectedDate.length > 0
                                         ColumnLayout {
                                             Layout.fillWidth: true
                                             spacing: 2
@@ -856,7 +906,7 @@ Item {
                         spacing: 7
                         Label {
                             Layout.fillWidth: true
-                            text: qsTr("Each city column uses the forecast date selected on its card.")
+                            text: qsTr("Daily rows use the shared provider-local calendar date; unavailable cities are marked.")
                             color: ThemeModule.Theme.textSecondary
                             font.family: ThemeModule.Theme.fontFamily
                             font.pixelSize: 11
@@ -934,9 +984,9 @@ Item {
                                                 }
                                                 Label {
                                                     Layout.fillWidth: true
-                                                    text: modelData.date.length > 0
-                                                          ? qsTr("Forecast · %1").arg(root.formatDate(modelData.date))
-                                                          : qsTr("Forecast date unavailable")
+                                                    text: root.comparisonTableDateText(
+                                                        modelData.dateAvailable, modelData.loading,
+                                                        modelData.hasForecast, modelData.date)
                                                     color: ThemeModule.Theme.textSecondary
                                                     font.family: ThemeModule.Theme.fontFamily
                                                     font.pixelSize: 10

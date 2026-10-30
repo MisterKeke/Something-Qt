@@ -216,8 +216,7 @@ bool WeatherComparisonModel::setForecast(const QString &identity,
         [&entry](const domain::WeatherDay &day) {
             return day.date == entry.selectedForecastDate;
         });
-    if (!selectedDateAvailable)
-        entry.selectedForecastDate = entry.forecast.days.first().date;
+    if (!selectedDateAvailable) entry.selectedForecastDate.clear();
     if (!lastSuccessfulRefresh.isEmpty())
         entry.lastSuccessfulRefresh = std::move(lastSuccessfulRefresh);
     entry.loading = false;
@@ -233,15 +232,16 @@ bool WeatherComparisonModel::selectForecastDate(const QString &identity,
                                                 const QString &date)
 {
     const int row = indexOfIdentity(identity);
-    if (row < 0 || date.isEmpty()) return false;
+    if (row < 0) return false;
     domain::WeatherComparisonCity &entry = m_cities[row];
-    const bool available = std::any_of(entry.forecast.days.cbegin(), entry.forecast.days.cend(),
-        [&date](const domain::WeatherDay &day) { return day.date == date; });
-    if (!available) return false;
-    if (entry.selectedForecastDate == date) return true;
+    if (!date.isEmpty()) {
+        const bool available = std::any_of(entry.forecast.days.cbegin(), entry.forecast.days.cend(),
+            [&date](const domain::WeatherDay &day) { return day.date == date; });
+        if (!available) return false;
+    }
+    if (entry.selectedForecastDate == date) return false;
     entry.selectedForecastDate = date;
     notifyRowChanged(row, {SelectedForecastDateRole});
-    emit contentsChanged();
     return true;
 }
 
