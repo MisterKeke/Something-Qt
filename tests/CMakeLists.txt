@@ -442,15 +442,21 @@ add_executable(SomethingQtSteamFeatureTests
     steam_feature_test.cpp
     provider_fixtures.qrc
     ../src/domain/app_error.cpp
+    ../src/domain/task_date_rules.cpp
     ../src/domain/task_rules.cpp
     ../src/domain/steam_game.cpp
+    ../src/domain/steam_release.cpp
     ../src/domain/weather_currency.cpp
     ../src/models/steam_games_model.cpp
     ../src/providers/feature_parsers.cpp
     ../src/providers/provider_policy.cpp
+    ../src/providers/steam_release_provider.cpp
     ../src/providers/steam_artwork_image_provider.cpp
+    ../src/services/calendar_service.cpp
     ../src/services/steam_artwork_store.cpp
+    ../src/services/steam_release_service.cpp
     ../src/services/steam_service.cpp
+    ../src/services/task_service.cpp
     ../src/domain/task_history.cpp
     ../src/domain/task_scheduling.cpp
     ../src/storage/repositories.cpp

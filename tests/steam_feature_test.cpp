@@ -1,23 +1,32 @@
 #include "domain/steam_game.h"
+#include "domain/steam_release.h"
 #include "models/steam_games_model.h"
 #include "providers/feature_parsers.h"
 #include "providers/provider_policy.h"
+#include "providers/steam_release_provider.h"
 #include "providers/steam_artwork_image_provider.h"
+#include "services/calendar_service.h"
 #include "services/steam_artwork_store.h"
+#include "services/steam_release_service.h"
 #include "services/steam_service.h"
+#include "services/task_service.h"
 #include "storage/repositories.h"
 #include "storage/schema_migrator.h"
 
 #include <QDateTime>
 #include <QFile>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QSqlDatabase>
 #include <QSqlQuery>
 #include <QTemporaryDir>
 #include <QUuid>
+#include <QUrlQuery>
 #include <QtTest>
 
 #include <cmath>
 #include <functional>
+#include <optional>
 #include <utility>
 
 using namespace something;
@@ -38,6 +47,89 @@ bool openDatabase(QSqlDatabase *database, QString *connectionName)
     *database = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), *connectionName);
     database->setDatabaseName(QStringLiteral(":memory:"));
     return database->open() && storage::SchemaMigrator::apply(*database);
+}
+
+bool openDatabaseAt(QSqlDatabase *database, QString *connectionName,
+                    const QString &databasePath)
+{
+    *connectionName = QStringLiteral("steam-release-feature-test-%1")
+        .arg(QUuid::createUuid().toString(QUuid::WithoutBraces));
+    *database = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), *connectionName);
+    database->setDatabaseName(databasePath);
+    return database->open() && storage::SchemaMigrator::apply(*database);
+}
+
+void closeDatabase(QSqlDatabase *database, const QString &connectionName)
+{
+    database->close();
+    *database = QSqlDatabase();
+    QSqlDatabase::removeDatabase(connectionName);
+}
+
+QByteArray steamReleaseResponse(quint32 appId,
+                                QString type = QStringLiteral("game"),
+                                QString releaseDate = {},
+                                std::optional<bool> comingSoon = std::nullopt,
+                                bool includeReleaseDate = true,
+                                bool success = true)
+{
+    QJsonObject data{
+        {QStringLiteral("type"), std::move(type)},
+        {QStringLiteral("name"), QStringLiteral("Fixture Release %1").arg(appId)},
+        {QStringLiteral("steam_appid"), static_cast<double>(appId)},
+        {QStringLiteral("header_image"), QStringLiteral(
+             "https://cdn.akamai.steamstatic.com/steam/apps/1/header.jpg")}};
+    if (includeReleaseDate) {
+        QJsonObject date;
+        if (comingSoon) date.insert(QStringLiteral("coming_soon"), *comingSoon);
+        if (!releaseDate.isNull()) date.insert(QStringLiteral("date"), std::move(releaseDate));
+        data.insert(QStringLiteral("release_date"), date);
+    }
+    QJsonObject envelope{{QStringLiteral("success"), success}};
+    if (success) envelope.insert(QStringLiteral("data"), data);
+    QJsonObject root{{QString::number(appId), envelope}};
+    return QJsonDocument(root).toJson(QJsonDocument::Compact);
+}
+
+domain::SteamReleaseDetails exactRelease(quint32 appId, QString title, QDate date,
+                                         domain::SteamReleaseStatus status =
+                                             domain::SteamReleaseStatus::ExactDateAnnounced)
+{
+    domain::SteamReleaseDetails details;
+    details.appId = appId;
+    details.title = std::move(title);
+    details.artworkUrl = QStringLiteral(
+        "https://cdn.akamai.steamstatic.com/steam/apps/1/header.jpg");
+    details.releaseDate.announcedText = date.toString(QStringLiteral("MMM d, yyyy"));
+    details.releaseDate.precision = domain::SteamReleaseDatePrecision::ExactDay;
+    details.releaseDate.exactDate = date;
+    details.status = status;
+    return details;
+}
+
+domain::SteamTrackedRelease trackedRelease(const domain::SteamReleaseDetails &details,
+                                            QString followedAtUtc)
+{
+    const domain::SteamStoreUrl storeUrl = domain::normalizeSteamStoreUrl(
+        QStringLiteral("https://store.steampowered.com/app/%1/").arg(details.appId));
+    domain::SteamTrackedRelease release;
+    release.appId = details.appId;
+    release.canonicalStoreUrl = storeUrl.canonicalUrl;
+    release.title = details.title;
+    release.artwork.sourceUrl = details.artworkUrl;
+    release.releaseDate = details.releaseDate;
+    release.status = details.status;
+    release.followedAtUtc = followedAtUtc;
+    release.lastSuccessfulUpdateAtUtc = followedAtUtc;
+    release.lastAttemptedUpdateAtUtc = followedAtUtc;
+    release.refreshState = domain::SteamReleaseRefreshState::Succeeded;
+    return release;
+}
+
+storage::StorageReply executeStorageCommand(storage::StorageCommand command,
+                                             storage::StorageRepositories &repositories)
+{
+    return command(repositories, [] { return false; });
 }
 
 storage::SteamGame priceGame(quint32 appId, QString name, QString countryCode,
@@ -101,6 +193,11 @@ private slots:
     void steamPriceHistoryCoversRecordingMarketsCalculationsFailuresCancellationAndCascade();
     void artworkStoreStagesBoundedContentAndImageProviderLoadsById();
     void modelExposesMissingFreeAndPaidStatesWithoutZeroFallback();
+    void releaseProviderRequestsCanonicalSteamStoreAppIds();
+    void releaseDateParsingRetainsPrecisionAndStatus();
+    void releasePersistenceCoversChangesFailuresCancellationAndIndependentDeletion();
+    void calendarServiceProjectsOnlyExactReleaseEvents();
+    void releaseRadarMigrationPreservesExistingPriceProfiles();
 };
 
 void SteamFeatureTest::storeUrlAndCountryRulesAreStrictAndCanonical()
@@ -173,6 +270,424 @@ void SteamFeatureTest::providerFixturesDistinguishPaidFreeUnavailableAndInvalid(
     QVERIFY(providers::parseSteamGameDetails(QByteArrayLiteral("{"), 12345).error.isError());
     QVERIFY(providers::parseSteamGameDetails(QByteArray(2 * 1024 * 1024 + 1, ' '),
                                              12345).error.isError());
+}
+
+void SteamFeatureTest::releaseProviderRequestsCanonicalSteamStoreAppIds()
+{
+    const auto request = providers::makeSteamReleaseProviderRequest(
+        QStringLiteral("http://STORE.SteamPowered.com/app/64001/example/?ignored=1"));
+    QVERIFY(request.succeeded());
+    QCOMPARE(request.appId, quint32(64001));
+    QCOMPARE(request.canonicalStoreUrl,
+             QStringLiteral("https://store.steampowered.com/app/64001/"));
+    QCOMPARE(static_cast<int>(request.providerRequest.provider),
+             static_cast<int>(providers::ProviderId::SteamStore));
+    QCOMPARE(request.providerRequest.url.host(), QStringLiteral("store.steampowered.com"));
+    QCOMPARE(request.providerRequest.url.path(), QStringLiteral("/api/appdetails"));
+    QVERIFY(providers::isAllowedProviderUrl(providers::ProviderId::SteamStore,
+                                             request.providerRequest.url));
+    const QUrlQuery query(request.providerRequest.url);
+    QCOMPARE(query.queryItemValue(QStringLiteral("appids")), QStringLiteral("64001"));
+    QCOMPARE(query.queryItemValue(QStringLiteral("cc")), QStringLiteral("us"));
+    QCOMPARE(query.queryItemValue(QStringLiteral("l")), QStringLiteral("english"));
+
+    QVERIFY(!providers::makeSteamReleaseProviderRequest(
+        QStringLiteral("https://store.steampowered.com.evil.test/app/64001/")).succeeded());
+    QVERIFY(!providers::makeSteamReleaseProviderRequest(
+        QStringLiteral("https://store.steampowered.com/app/4294967296/")).succeeded());
+}
+
+void SteamFeatureTest::releaseDateParsingRetainsPrecisionAndStatus()
+{
+    constexpr quint32 appId = 64002;
+    const auto parse = [appId](QString date, std::optional<bool> comingSoon = true) {
+        return providers::parseSteamReleaseDetails(
+            steamReleaseResponse(appId, QStringLiteral("game"), std::move(date), comingSoon),
+            appId);
+    };
+
+    const auto exact = parse(QStringLiteral("October 19, 2026"));
+    QVERIFY(exact.succeeded());
+    QCOMPARE(domain::steamReleaseDatePrecisionName(exact.value.releaseDate.precision),
+             QStringLiteral("exact_day"));
+    QCOMPARE(domain::steamReleaseStatusName(exact.value.status),
+             QStringLiteral("exact_date_announced"));
+    QVERIFY(exact.value.releaseDate.hasExactDate());
+    QCOMPARE(exact.value.releaseDate.exactDate.value(), QDate(2026, 10, 19));
+
+    const auto month = parse(QStringLiteral("October 2026"));
+    QVERIFY(month.succeeded());
+    QCOMPARE(domain::steamReleaseDatePrecisionName(month.value.releaseDate.precision),
+             QStringLiteral("month"));
+    QCOMPARE(month.value.releaseDate.windowStart.value(), QDate(2026, 10, 1));
+    QCOMPARE(month.value.releaseDate.windowEnd.value(), QDate(2026, 10, 31));
+    QVERIFY(!month.value.releaseDate.exactDate.has_value());
+
+    const auto year = parse(QStringLiteral("2027"));
+    QVERIFY(year.succeeded());
+    QCOMPARE(domain::steamReleaseDatePrecisionName(year.value.releaseDate.precision),
+             QStringLiteral("year"));
+    QCOMPARE(year.value.releaseDate.windowStart.value(), QDate(2027, 1, 1));
+    QCOMPARE(year.value.releaseDate.windowEnd.value(), QDate(2027, 12, 31));
+
+    const auto quarter = parse(QStringLiteral("Q2 2027"));
+    QVERIFY(quarter.succeeded());
+    QCOMPARE(domain::steamReleaseDatePrecisionName(quarter.value.releaseDate.precision),
+             QStringLiteral("quarter"));
+    QCOMPARE(quarter.value.releaseDate.windowStart.value(), QDate(2027, 4, 1));
+    QCOMPARE(quarter.value.releaseDate.windowEnd.value(), QDate(2027, 6, 30));
+
+    const auto season = parse(QStringLiteral("Spring 2028"));
+    QVERIFY(season.succeeded());
+    QCOMPARE(domain::steamReleaseDatePrecisionName(season.value.releaseDate.precision),
+             QStringLiteral("season"));
+    QCOMPARE(season.value.releaseDate.announcedText, QStringLiteral("Spring 2028"));
+    QVERIFY(!season.value.releaseDate.exactDate.has_value());
+    QVERIFY(!season.value.releaseDate.windowStart.has_value());
+
+    const auto range = parse(QStringLiteral("March 2027 - June 2027"));
+    QVERIFY(range.succeeded());
+    QCOMPARE(domain::steamReleaseDatePrecisionName(range.value.releaseDate.precision),
+             QStringLiteral("range"));
+    QCOMPARE(range.value.releaseDate.windowStart.value(), QDate(2027, 3, 1));
+    QCOMPARE(range.value.releaseDate.windowEnd.value(), QDate(2027, 6, 30));
+    QVERIFY(!range.value.releaseDate.exactDate.has_value());
+
+    const auto unfamiliar = parse(QStringLiteral("Later in 2027"));
+    QVERIFY(unfamiliar.succeeded());
+    QCOMPARE(domain::steamReleaseDatePrecisionName(unfamiliar.value.releaseDate.precision),
+             QStringLiteral("range"));
+    QCOMPARE(unfamiliar.value.releaseDate.announcedText, QStringLiteral("Later in 2027"));
+    QVERIFY(!unfamiliar.value.releaseDate.windowStart.has_value());
+    QVERIFY(!unfamiliar.value.releaseDate.exactDate.has_value());
+
+    const auto comingSoon = parse(QStringLiteral("Coming Soon"));
+    QVERIFY(comingSoon.succeeded());
+    QCOMPARE(domain::steamReleaseStatusName(comingSoon.value.status),
+             QStringLiteral("coming_soon"));
+    QCOMPARE(domain::steamReleaseDatePrecisionName(comingSoon.value.releaseDate.precision),
+             QStringLiteral("unknown"));
+    QVERIFY(!comingSoon.value.releaseDate.exactDate.has_value());
+
+    const auto missing = providers::parseSteamReleaseDetails(
+        steamReleaseResponse(appId, QStringLiteral("game"), {}, true, false), appId);
+    QVERIFY(missing.succeeded());
+    QCOMPARE(domain::steamReleaseStatusName(missing.value.status),
+             QStringLiteral("information_unavailable"));
+    QCOMPARE(domain::steamReleaseDatePrecisionName(missing.value.releaseDate.precision),
+             QStringLiteral("unknown"));
+
+    const auto released = parse(QStringLiteral("May 2, 2020"), false);
+    QVERIFY(released.succeeded());
+    QCOMPARE(domain::steamReleaseStatusName(released.value.status), QStringLiteral("released"));
+    QVERIFY(released.value.releaseDate.hasExactDate());
+    QCOMPARE(released.value.releaseDate.exactDate.value(), QDate(2020, 5, 2));
+
+    const auto unsupported = providers::parseSteamReleaseDetails(
+        steamReleaseResponse(appId, QStringLiteral("dlc"), QStringLiteral("Coming Soon")), appId);
+    QCOMPARE(static_cast<int>(unsupported.error.category()),
+             static_cast<int>(domain::ErrorCategory::CapabilityUnavailable));
+    const auto notFound = providers::parseSteamReleaseDetails(
+        steamReleaseResponse(appId, QStringLiteral("game"), {}, std::nullopt, false, false),
+        appId);
+    QCOMPARE(static_cast<int>(notFound.error.category()),
+             static_cast<int>(domain::ErrorCategory::NotFound));
+    QVERIFY(providers::parseSteamReleaseDetails(QByteArrayLiteral("{"), appId).error.isError());
+    QVERIFY(providers::parseSteamReleaseDetails(
+        steamReleaseResponse(appId + 1, QStringLiteral("game"), QStringLiteral("2027")),
+        appId).error.isError());
+}
+
+void SteamFeatureTest::releasePersistenceCoversChangesFailuresCancellationAndIndependentDeletion()
+{
+    QTemporaryDir profile;
+    QVERIFY(profile.isValid());
+    const QString databasePath = profile.filePath(QStringLiteral("profile.sqlite"));
+    QString connectionName;
+    QSqlDatabase database;
+    QVERIFY(openDatabaseAt(&database, &connectionName, databasePath));
+
+    constexpr quint32 appId = 77001;
+    const QString followedAt = QStringLiteral("2026-10-30T12:00:00.000Z");
+    qint64 priceGameId = 0;
+    {
+        storage::StorageRepositories repositories(database);
+        const auto price = addPriceGame(repositories.steam, appId,
+            QStringLiteral("Price and Release Radar"), QStringLiteral("US"),
+            QStringLiteral("USD"), QStringLiteral("priced"), true, 1999, 999, 50,
+            followedAt);
+        QVERIFY(price.succeeded());
+        priceGameId = price.value.id;
+
+        const domain::SteamReleaseDetails original = exactRelease(
+            appId, QStringLiteral("Price and Release Radar"), QDate(2027, 3, 4));
+        QVERIFY(domain::isValidSteamReleaseDetails(original));
+        const QString canonicalUrl = QStringLiteral(
+            "https://store.steampowered.com/app/%1/").arg(appId);
+        const auto added = executeStorageCommand(services::SteamReleaseService::addRelease(
+            canonicalUrl, original, followedAt), repositories);
+        QVERIFY2(!added.error.isError(), qPrintable(added.error.userMessage()));
+        QCOMPARE(added.values.value(QStringLiteral("release")).toMap()
+                     .value(QStringLiteral("exactDate")).toString(),
+                 QStringLiteral("2027-03-04"));
+
+        const auto duplicate = executeStorageCommand(services::SteamReleaseService::addRelease(
+            canonicalUrl, original, followedAt), repositories);
+        QCOMPARE(static_cast<int>(duplicate.error.category()),
+                 static_cast<int>(domain::ErrorCategory::Conflict));
+        QVERIFY(repositories.steam.get(priceGameId).succeeded());
+        QVERIFY(repositories.steamReleases.get(appId).succeeded());
+
+        storage::SteamReleaseRefreshUpdate changed;
+        changed.appId = appId;
+        changed.attemptedAtUtc = QStringLiteral("2026-11-01T12:00:00.000Z");
+        changed.refreshedDetails = exactRelease(
+            appId, QStringLiteral("Price and Release Radar"), QDate(2027, 3, 5));
+        const auto changedReply = executeStorageCommand(
+            services::SteamReleaseService::applyRefresh(profile.path(), {changed}), repositories);
+        QVERIFY(!changedReply.error.isError());
+        const auto changedRecord = repositories.steamReleases.get(appId);
+        QVERIFY(changedRecord.succeeded());
+        QVERIFY(changedRecord.value.dateChangeUnacknowledged);
+        QVariantList rows = changedReply.values.value(QStringLiteral("releases")).toList();
+        QCOMPARE(rows.size(), 1);
+        QVariantMap current = rows.front().toMap();
+        QVERIFY(current.value(QStringLiteral("dateChangeUnacknowledged")).toBool());
+        QCOMPARE(current.value(QStringLiteral("exactDate")).toString(),
+                 QStringLiteral("2027-03-05"));
+
+        const auto acknowledged = executeStorageCommand(
+            services::SteamReleaseService::acknowledgeDateChange(appId), repositories);
+        QVERIFY(!acknowledged.error.isError());
+        storage::SteamReleaseRefreshUpdate unchanged;
+        unchanged.appId = appId;
+        unchanged.attemptedAtUtc = QStringLiteral("2026-11-02T12:00:00.000Z");
+        unchanged.refreshedDetails = *changed.refreshedDetails;
+        const auto unchangedReply = executeStorageCommand(
+            services::SteamReleaseService::applyRefresh(profile.path(), {unchanged}), repositories);
+        QVERIFY(!unchangedReply.error.isError());
+        rows = unchangedReply.values.value(QStringLiteral("releases")).toList();
+        QCOMPARE(rows.size(), 1);
+        current = rows.front().toMap();
+        QVERIFY(!current.value(QStringLiteral("dateChangeUnacknowledged")).toBool());
+        QCOMPARE(current.value(QStringLiteral("lastSuccessfulUpdateAtUtc")).toString(),
+                 unchanged.attemptedAtUtc);
+
+        storage::SteamReleaseRefreshUpdate failed;
+        failed.appId = appId;
+        failed.attemptedAtUtc = QStringLiteral("2026-11-03T12:00:00.000Z");
+        failed.safeError = QStringLiteral("Could not connect to Steam.");
+        const auto failedReply = executeStorageCommand(
+            services::SteamReleaseService::applyRefresh(profile.path(), {failed}), repositories);
+        QVERIFY(!failedReply.error.isError());
+        rows = failedReply.values.value(QStringLiteral("releases")).toList();
+        QCOMPARE(rows.size(), 1);
+        current = rows.front().toMap();
+        QCOMPARE(current.value(QStringLiteral("refreshState")).toString(), QStringLiteral("failed"));
+        QCOMPARE(current.value(QStringLiteral("refreshError")).toString(), failed.safeError);
+        QCOMPARE(current.value(QStringLiteral("exactDate")).toString(),
+                 QStringLiteral("2027-03-05"));
+        QCOMPARE(current.value(QStringLiteral("lastSuccessfulUpdateAtUtc")).toString(),
+                 unchanged.attemptedAtUtc);
+        QCOMPARE(current.value(QStringLiteral("lastAttemptedUpdateAtUtc")).toString(),
+                 failed.attemptedAtUtc);
+
+        storage::SteamReleaseRefreshUpdate canceledUpdate;
+        canceledUpdate.appId = appId;
+        canceledUpdate.attemptedAtUtc = QStringLiteral("2026-11-04T12:00:00.000Z");
+        canceledUpdate.refreshedDetails = exactRelease(
+            appId, QStringLiteral("Price and Release Radar"), QDate(2027, 4, 1));
+        int cancellationChecks = 0;
+        const auto canceledCommand = services::SteamReleaseService::applyRefresh(
+            profile.path(), {canceledUpdate});
+        const auto canceledReply = canceledCommand(repositories, [&cancellationChecks] {
+            return ++cancellationChecks >= 2;
+        });
+        QVERIFY(canceledReply.error.isCancelled());
+        const auto afterCancel = repositories.steamReleases.get(appId);
+        QVERIFY(afterCancel.succeeded());
+        QVERIFY(afterCancel.value.releaseDate.hasExactDate());
+        QCOMPARE(afterCancel.value.releaseDate.exactDate.value(), QDate(2027, 3, 5));
+        QCOMPARE(afterCancel.value.lastAttemptedUpdateAtUtc, failed.attemptedAtUtc);
+    }
+    closeDatabase(&database, connectionName);
+
+    QString reopenedConnection;
+    QVERIFY(openDatabaseAt(&database, &reopenedConnection, databasePath));
+    {
+        storage::StorageRepositories repositories(database);
+        const auto snapshot = executeStorageCommand(
+            services::SteamReleaseService::loadSnapshot(profile.path()), repositories);
+        QVERIFY(!snapshot.error.isError());
+        const QVariantList savedReleases = snapshot.values.value(QStringLiteral("releases")).toList();
+        QCOMPARE(savedReleases.size(), 1);
+        const QVariantMap saved = savedReleases.front().toMap();
+        QCOMPARE(saved.value(QStringLiteral("exactDate")).toString(), QStringLiteral("2027-03-05"));
+        QCOMPARE(saved.value(QStringLiteral("refreshState")).toString(), QStringLiteral("failed"));
+        QCOMPARE(saved.value(QStringLiteral("refreshError")).toString(),
+                 QStringLiteral("Could not connect to Steam."));
+
+        const auto deletedPrice = executeStorageCommand(
+            services::SteamService::deleteGame(profile.path(), priceGameId), repositories);
+        QVERIFY(!deletedPrice.error.isError());
+        QVERIFY(!repositories.steam.get(priceGameId).succeeded());
+        QVERIFY(repositories.steamReleases.get(appId).succeeded());
+
+        const auto secondPrice = addPriceGame(repositories.steam, appId,
+            QStringLiteral("Price and Release Radar"), QStringLiteral("US"),
+            QStringLiteral("USD"), QStringLiteral("priced"), true, 1999, 999, 50,
+            followedAt);
+        QVERIFY(secondPrice.succeeded());
+        const auto deletedRelease = executeStorageCommand(
+            services::SteamReleaseService::removeRelease(profile.path(), appId), repositories);
+        QVERIFY(!deletedRelease.error.isError());
+        QVERIFY(!repositories.steamReleases.get(appId).succeeded());
+        QVERIFY(repositories.steam.get(secondPrice.value.id).succeeded());
+    }
+    closeDatabase(&database, reopenedConnection);
+}
+
+void SteamFeatureTest::calendarServiceProjectsOnlyExactReleaseEvents()
+{
+    QString connectionName;
+    QSqlDatabase database;
+    QVERIFY(openDatabase(&database, &connectionName));
+    {
+        storage::StorageRepositories repositories(database);
+        const QDate releaseDay(2027, 3, 5);
+        storage::TaskInput task;
+        task.title = QStringLiteral("Existing calendar deadline");
+        task.dueDate = releaseDay.toString(Qt::ISODate);
+        const auto createdTask = repositories.tasks.create(task);
+        QVERIFY(createdTask.succeeded());
+
+        const QString followedAt = QStringLiteral("2026-10-30T12:00:00.000Z");
+        const auto add = [&repositories, &followedAt](const domain::SteamReleaseDetails &details) {
+            return repositories.steamReleases.add(trackedRelease(details, followedAt));
+        };
+        QVERIFY(add(exactRelease(88001, QStringLiteral("Exact announcement"), releaseDay))
+                    .succeeded());
+        QVERIFY(add(exactRelease(88002, QStringLiteral("Already released"), releaseDay,
+                                 domain::SteamReleaseStatus::Released)).succeeded());
+
+        domain::SteamReleaseDetails approximate;
+        approximate.appId = 88003;
+        approximate.title = QStringLiteral("Approximate announcement");
+        approximate.artworkUrl = QStringLiteral(
+            "https://cdn.akamai.steamstatic.com/steam/apps/1/header.jpg");
+        approximate.releaseDate.announcedText = QStringLiteral("March 2027");
+        approximate.releaseDate.precision = domain::SteamReleaseDatePrecision::Month;
+        approximate.releaseDate.windowStart = QDate(2027, 3, 1);
+        approximate.releaseDate.windowEnd = QDate(2027, 3, 31);
+        approximate.status = domain::SteamReleaseStatus::ApproximateDateAnnounced;
+        QVERIFY(domain::isValidSteamReleaseDetails(approximate));
+        QVERIFY(add(approximate).succeeded());
+
+        domain::SteamReleaseDetails unknown;
+        unknown.appId = 88004;
+        unknown.title = QStringLiteral("Unknown announcement");
+        unknown.artworkUrl = QStringLiteral(
+            "https://cdn.akamai.steamstatic.com/steam/apps/1/header.jpg");
+        unknown.releaseDate.announcedText = QStringLiteral("Coming Soon");
+        unknown.status = domain::SteamReleaseStatus::ComingSoon;
+        QVERIFY(domain::isValidSteamReleaseDetails(unknown));
+        QVERIFY(add(unknown).succeeded());
+
+        const auto dayReply = executeStorageCommand(
+            services::CalendarService::dateWithSchedules(releaseDay, true), repositories);
+        QVERIFY2(!dayReply.error.isError(), qPrintable(dayReply.error.userMessage()));
+        const QVariantList taskRows = dayReply.values.value(QStringLiteral("tasks")).toList();
+        QCOMPARE(taskRows.size(), 1);
+        QCOMPARE(taskRows.front().toMap().value(QStringLiteral("id")).toLongLong(),
+                 createdTask.value.id);
+        QCOMPARE(taskRows.front().toMap().value(QStringLiteral("title")).toString(),
+                 QStringLiteral("Existing calendar deadline"));
+
+        const QVariantList releaseRows = dayReply.values.value(QStringLiteral("releases")).toList();
+        QCOMPARE(releaseRows.size(), 2);
+        for (const QVariant &row : releaseRows) {
+            const QVariantMap release = row.toMap();
+            QCOMPARE(release.value(QStringLiteral("datePrecision")).toString(),
+                     QStringLiteral("exact_day"));
+            QCOMPARE(release.value(QStringLiteral("exactDate")).toString(),
+                     releaseDay.toString(Qt::ISODate));
+        }
+
+        const auto yearReply = executeStorageCommand(
+            services::CalendarService::year(2027, true), repositories);
+        QVERIFY(!yearReply.error.isError());
+        QCOMPARE(yearReply.values.value(QStringLiteral("releases")).toList().size(), 2);
+
+        const auto initialVisibility = repositories.preferences.gameReleasesVisibleInCalendar();
+        QVERIFY(initialVisibility.succeeded());
+        QVERIFY(initialVisibility.value);
+        QVERIFY(repositories.preferences.setGameReleasesVisibleInCalendar(false).succeeded());
+        QVERIFY(!repositories.preferences.gameReleasesVisibleInCalendar().value);
+        const auto hiddenReply = executeStorageCommand(
+            services::CalendarService::dateWithSchedules(releaseDay, false), repositories);
+        QVERIFY(!hiddenReply.error.isError());
+        QVERIFY(hiddenReply.values.value(QStringLiteral("releases")).toList().isEmpty());
+        QCOMPARE(hiddenReply.values.value(QStringLiteral("tasks")).toList().size(), 1);
+        QVERIFY(repositories.preferences.setGameReleasesVisibleInCalendar(true).succeeded());
+    }
+    closeDatabase(&database, connectionName);
+}
+
+void SteamFeatureTest::releaseRadarMigrationPreservesExistingPriceProfiles()
+{
+    QString connectionName;
+    QSqlDatabase database;
+    QVERIFY(openDatabase(&database, &connectionName));
+    constexpr quint32 appId = 99001;
+    const QString followedAt = QStringLiteral("2026-10-30T12:00:00.000Z");
+    qint64 priceGameId = 0;
+    {
+        storage::StorageRepositories repositories(database);
+        const auto price = addPriceGame(repositories.steam, appId,
+            QStringLiteral("Legacy price-tracked game"), QStringLiteral("US"),
+            QStringLiteral("USD"), QStringLiteral("priced"), true, 2999, 2499, 17,
+            followedAt);
+        QVERIFY(price.succeeded());
+        priceGameId = price.value.id;
+    }
+
+    {
+        QSqlQuery legacy(database);
+        QVERIFY(legacy.exec(QStringLiteral("DROP TABLE steam_release_follows")));
+        QVERIFY(legacy.exec(QStringLiteral(
+            "DELETE FROM preferences WHERE key='calendar.game_releases_visible'")));
+        QVERIFY(legacy.exec(QStringLiteral("DELETE FROM schema_migrations WHERE version>=13")));
+    }
+
+    QString diagnostic;
+    QVERIFY2(storage::SchemaMigrator::apply(database, &diagnostic), qPrintable(diagnostic));
+    QCOMPARE(storage::SchemaMigrator::latestVersion(), 15);
+    {
+        storage::StorageRepositories repositories(database);
+        const auto preserved = repositories.steam.get(priceGameId);
+        QVERIFY(preserved.succeeded());
+        QCOMPARE(preserved.value.name, QStringLiteral("Legacy price-tracked game"));
+        QCOMPARE(preserved.value.currentPriceMinor.value(), qint64(2499));
+
+        const auto radarRows = repositories.steamReleases.list();
+        QVERIFY(radarRows.succeeded());
+        QVERIFY(radarRows.value.isEmpty());
+        const auto visibility = repositories.preferences.gameReleasesVisibleInCalendar();
+        QVERIFY(visibility.succeeded());
+        QVERIFY(visibility.value);
+        QSqlQuery seededPreference(database);
+        QVERIFY(seededPreference.exec(QStringLiteral(
+            "SELECT value FROM preferences WHERE key='calendar.game_releases_visible'")));
+        QVERIFY(seededPreference.next());
+        QCOMPARE(seededPreference.value(0).toString(), QStringLiteral("1"));
+        seededPreference.finish();
+        QSqlQuery migratedVersion(database);
+        QVERIFY(migratedVersion.exec(QStringLiteral(
+            "SELECT MAX(version) FROM schema_migrations")));
+        QVERIFY(migratedVersion.next());
+        QCOMPARE(migratedVersion.value(0).toInt(), 15);
+    }
+    closeDatabase(&database, connectionName);
 }
 
 void SteamFeatureTest::steamArtworkPolicyRejectsUnapprovedHosts()
