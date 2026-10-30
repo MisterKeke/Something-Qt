@@ -179,6 +179,16 @@ target_include_directories(SomethingQtTaskDomainTests PRIVATE ../src)
 target_link_libraries(SomethingQtTaskDomainTests PRIVATE Qt6::Core Qt6::Test)
 add_test(NAME SomethingQtTaskDomainTests COMMAND SomethingQtTaskDomainTests)
 
+add_executable(SomethingQtSchedulingTests
+    scheduling_test.cpp
+    ../src/domain/app_error.cpp
+    ../src/domain/scheduling_engine.cpp
+    ../src/domain/task_scheduling.cpp
+)
+target_include_directories(SomethingQtSchedulingTests PRIVATE ../src)
+target_link_libraries(SomethingQtSchedulingTests PRIVATE Qt6::Core Qt6::Test)
+add_test(NAME SomethingQtSchedulingTests COMMAND SomethingQtSchedulingTests)
+
 add_executable(SomethingQtTaskModelTests
     task_model_test.cpp
     ../src/models/tasks_model.cpp

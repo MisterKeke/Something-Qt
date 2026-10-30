@@ -21,6 +21,7 @@ private slots:
     void failedMigrationLeavesNoPartialVersion();
     void migratorRejectsUntrackedAndUnknownHistories();
     void taskAggregateUpdateIsAtomicAndRevisionChecked();
+    void scheduleBatchRejectsStaleTaskScheduleAndPreferenceRevisionsAtomically();
     void taskSearchFiltersPagesAndOmittedMetadata();
     void categoryDeleteMovesAssignmentsWithinOneSource();
     void appOpenUpdatesFavoriteWindowsAndPrunesAtomically();
@@ -187,6 +188,107 @@ void StorageRepositoryTest::taskAggregateUpdateIsAtomicAndRevisionChecked()
     QVERIFY(completed.value.subtasks.front().completed);
     QCOMPARE(repositories.tasks.setCompleted(created.value.id, 1, true).error.category(),
              domain::ErrorCategory::Conflict);
+
+    database.close();
+    database = QSqlDatabase();
+    QSqlDatabase::removeDatabase(connectionName);
+}
+
+void StorageRepositoryTest::scheduleBatchRejectsStaleTaskScheduleAndPreferenceRevisionsAtomically()
+{
+    QString connectionName;
+    QSqlDatabase database;
+    QVERIFY(openTestDatabase(&database, &connectionName));
+    storage::StorageRepositories repositories(database);
+
+    storage::TaskInput firstInput;
+    firstInput.title = QStringLiteral("First task");
+    storage::TaskInput secondInput;
+    secondInput.title = QStringLiteral("Second task");
+    const auto first = repositories.tasks.create(firstInput);
+    const auto second = repositories.tasks.create(secondInput);
+    QVERIFY(first.succeeded());
+    QVERIFY(second.succeeded());
+
+    const auto currentPreferences = repositories.scheduling.schedulingPreferences();
+    QVERIFY(currentPreferences.succeeded());
+
+    const auto proposalFor = [](const storage::Task &task, qint64 scheduleRevision,
+                                QDate plannedDate) {
+        storage::TaskScheduleProposal proposal;
+        proposal.schedule.taskId = task.id;
+        proposal.schedule.plannedDate = plannedDate;
+        proposal.schedule.plannedStartTime = QTime(9, 0);
+        proposal.schedule.estimatedDurationMinutes = 30;
+        proposal.schedule.revision = scheduleRevision;
+        proposal.expectedTaskRevision = task.revision;
+        return proposal;
+    };
+    const auto snapshotFor = [](const storage::Task &task, qint64 scheduleRevision) {
+        return storage::TaskScheduleSnapshot{task.id, task.revision, scheduleRevision};
+    };
+
+    const auto staleTaskProposal = proposalFor(first.value, 0, QDate(2026, 1, 6));
+    const auto staleSecondProposal = proposalFor(second.value, 0, QDate(2026, 1, 6));
+    const QVector<storage::TaskScheduleProposal> staleTaskProposals{
+        staleTaskProposal, staleSecondProposal};
+    const QVector<storage::TaskScheduleSnapshot> staleTaskSnapshot{
+        snapshotFor(first.value, 0), snapshotFor(second.value, 0)};
+
+    storage::TaskInput changedInput;
+    changedInput.title = QStringLiteral("Changed after preview");
+    changedInput.priority = QStringLiteral("medium");
+    const auto changedFirst = repositories.tasks.update(
+        first.value.id, first.value.revision, changedInput);
+    QVERIFY(changedFirst.succeeded());
+    QCOMPARE(repositories.scheduling.applyTaskSchedules(
+                 staleTaskProposals, staleTaskSnapshot, currentPreferences.value.revision)
+                 .error.category(), domain::ErrorCategory::Conflict);
+    QCOMPARE(repositories.scheduling.taskSchedule(first.value.id).value.revision, qint64(0));
+    QCOMPARE(repositories.scheduling.taskSchedule(second.value.id).value.revision, qint64(0));
+
+    storage::TaskSchedule changedSecondSchedule;
+    changedSecondSchedule.taskId = second.value.id;
+    changedSecondSchedule.plannedDate = QDate(2026, 1, 6);
+    changedSecondSchedule.plannedStartTime = QTime(9, 0);
+    changedSecondSchedule.estimatedDurationMinutes = 30;
+    const auto savedSecondSchedule = repositories.scheduling.setTaskSchedule(
+        changedSecondSchedule, 0);
+    QVERIFY(savedSecondSchedule.succeeded());
+    QCOMPARE(savedSecondSchedule.value.revision, qint64(1));
+
+    const QVector<storage::TaskScheduleProposal> staleScheduleProposals{
+        proposalFor(changedFirst.value, 0, QDate(2026, 1, 6)),
+        proposalFor(second.value, 0, QDate(2026, 1, 7))};
+    const QVector<storage::TaskScheduleSnapshot> staleScheduleSnapshot{
+        snapshotFor(changedFirst.value, 0), snapshotFor(second.value, 0)};
+    QCOMPARE(repositories.scheduling.applyTaskSchedules(
+                 staleScheduleProposals, staleScheduleSnapshot, currentPreferences.value.revision)
+                 .error.category(), domain::ErrorCategory::Conflict);
+    QCOMPARE(repositories.scheduling.taskSchedule(first.value.id).value.revision, qint64(0));
+    QCOMPARE(repositories.scheduling.taskSchedule(second.value.id).value.revision, qint64(1));
+
+    storage::SchedulingPreferences changedPreferences = currentPreferences.value;
+    changedPreferences.defaultEstimatedDurationMinutes = 75;
+    const auto savedPreferences = repositories.scheduling.setSchedulingPreferences(
+        changedPreferences, currentPreferences.value.revision);
+    QVERIFY(savedPreferences.succeeded());
+    QCOMPARE(savedPreferences.value.revision, currentPreferences.value.revision + 1);
+
+    const QVector<storage::TaskScheduleProposal> stalePreferenceProposals{
+        proposalFor(changedFirst.value, 0, QDate(2026, 1, 6)),
+        proposalFor(second.value, 1, QDate(2026, 1, 7))};
+    const QVector<storage::TaskScheduleSnapshot> stalePreferenceSnapshot{
+        snapshotFor(changedFirst.value, 0), snapshotFor(second.value, 1)};
+    QCOMPARE(repositories.scheduling.applyTaskSchedules(
+                 stalePreferenceProposals, stalePreferenceSnapshot,
+                 currentPreferences.value.revision).error.category(),
+             domain::ErrorCategory::Conflict);
+    QCOMPARE(repositories.scheduling.taskSchedule(first.value.id).value.revision, qint64(0));
+    const auto unchangedSecondSchedule = repositories.scheduling.taskSchedule(second.value.id);
+    QVERIFY(unchangedSecondSchedule.succeeded());
+    QCOMPARE(unchangedSecondSchedule.value.revision, qint64(1));
+    QCOMPARE(unchangedSecondSchedule.value.plannedDate.value(), QDate(2026, 1, 6));
 
     database.close();
     database = QSqlDatabase();
