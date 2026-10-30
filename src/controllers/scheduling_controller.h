@@ -66,6 +66,7 @@ public slots:
 
 signals:
     void stateChanged();
+    void schedulesSaved();
 
 private:
     enum class Action { LoadSnapshot, Calculate, ApplySchedules };

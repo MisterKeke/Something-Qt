@@ -4,6 +4,7 @@
 #include <QDate>
 #include <QVector>
 #include <QVariantList>
+#include <QVariantMap>
 
 namespace something::models {
 
@@ -20,7 +21,8 @@ public:
     QVariant data(const QModelIndex &index, int role = Qt::DisplayRole) const override;
     QHash<int, QByteArray> roleNames() const override;
     int count() const noexcept { return m_months.size(); }
-    void setCalendar(int visibleYear, QDate today, QString selectedDate);
+    void setCalendar(int visibleYear, QDate today, QString selectedDate,
+                     QVariantMap markersByDate = {});
 
 signals:
     void countChanged();

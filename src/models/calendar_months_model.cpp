@@ -33,7 +33,8 @@ QHash<int, QByteArray> CalendarMonthsModel::roleNames() const
     return {{MonthNameRole, "monthName"}, {YearRole, "year"}, {DaysRole, "days"}};
 }
 
-void CalendarMonthsModel::setCalendar(int visibleYear, QDate today, QString selectedDate)
+void CalendarMonthsModel::setCalendar(int visibleYear, QDate today, QString selectedDate,
+                                      QVariantMap markersByDate)
 {
     const int previousCount = m_months.size();
     beginResetModel();
@@ -60,11 +61,15 @@ void CalendarMonthsModel::setCalendar(int visibleYear, QDate today, QString sele
                 const QDate date(visibleYear, monthNumber, dayNumber);
                 const QString key = date.toString(Qt::ISODate);
                 const int dayOfWeek = date.dayOfWeek();
+                const QVariantMap markers = markersByDate.value(key).toMap();
                 days.push_back(QVariantMap{{QStringLiteral("day"), dayNumber},
                                            {QStringLiteral("date"), key},
                                            {QStringLiteral("today"), date == today},
                                            {QStringLiteral("selected"), key == selectedDate},
-                                           {QStringLiteral("weekend"), dayOfWeek == 6 || dayOfWeek == 7}});
+                                           {QStringLiteral("weekend"), dayOfWeek == 6 || dayOfWeek == 7},
+                                           {QStringLiteral("deadlineCount"), markers.value(QStringLiteral("deadlineCount"), 0)},
+                                           {QStringLiteral("plannedWorkCount"), markers.value(QStringLiteral("plannedWorkCount"), 0)},
+                                           {QStringLiteral("completedTaskCount"), markers.value(QStringLiteral("completedTaskCount"), 0)}});
             }
             m_months.push_back({locale.monthName(monthNumber, QLocale::LongFormat),
                                 visibleYear, std::move(days)});

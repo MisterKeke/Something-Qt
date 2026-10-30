@@ -411,6 +411,7 @@ void SchedulingController::finishApply(const QVariantMap &values, domain::AppErr
               .arg(acceptedCount)
         : QStringLiteral("Applied %1 accepted recommendation(s); %2 schedule record(s) changed. Generate a fresh preview when ready.")
               .arg(acceptedCount).arg(changedCount);
+    emit schedulesSaved();
     emit stateChanged();
 }
 

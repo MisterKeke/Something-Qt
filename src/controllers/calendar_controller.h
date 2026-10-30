@@ -18,6 +18,7 @@ class CalendarController final : public QObject {
     Q_PROPERTY(something::models::TasksModel *tasks READ tasks CONSTANT)
     Q_PROPERTY(bool ready READ ready NOTIFY stateChanged)
     Q_PROPERTY(bool loading READ loading NOTIFY stateChanged)
+    Q_PROPERTY(bool markersLoading READ markersLoading NOTIFY stateChanged)
     Q_PROPERTY(int visibleYear READ visibleYear NOTIFY stateChanged)
     Q_PROPERTY(QString todayDate READ todayDate NOTIFY stateChanged)
     Q_PROPERTY(QString selectedDate READ selectedDate NOTIFY stateChanged)
@@ -25,6 +26,8 @@ class CalendarController final : public QObject {
     Q_PROPERTY(QString rangeLabel READ rangeLabel NOTIFY stateChanged)
     Q_PROPERTY(QString summary READ summary NOTIFY stateChanged)
     Q_PROPERTY(QString errorMessage READ errorMessage NOTIFY stateChanged)
+    Q_PROPERTY(QString markerErrorMessage READ markerErrorMessage NOTIFY stateChanged)
+    Q_PROPERTY(QVariantMap selectedSchedules READ selectedSchedules NOTIFY stateChanged)
 
 public:
     CalendarController(application::ApplicationServiceGraph *graph,
@@ -34,6 +37,7 @@ public:
     models::TasksModel *tasks() noexcept { return &m_tasks; }
     bool ready() const noexcept { return m_ready; }
     bool loading() const noexcept { return m_loading; }
+    bool markersLoading() const noexcept { return m_markersLoading; }
     int visibleYear() const noexcept { return m_visibleYear; }
     QString todayDate() const;
     QString selectedDate() const { return m_selectedDate; }
@@ -41,6 +45,8 @@ public:
     QString rangeLabel() const { return m_rangeLabel; }
     QString summary() const { return m_summary; }
     QString errorMessage() const { return m_errorMessage; }
+    QString markerErrorMessage() const { return m_markerErrorMessage; }
+    QVariantMap selectedSchedules() const { return m_selectedSchedules; }
 
     Q_INVOKABLE void previousYear();
     Q_INVOKABLE void nextYear();
@@ -51,15 +57,18 @@ public:
 
 public slots:
     void onTaskMutation(qint64 taskId, const QVariantMap &currentTask, bool deleted);
+    void refreshScheduleData();
 
 signals:
     void stateChanged();
 
 private:
+    enum class Action { SelectedDate, YearMarkers };
     void onLifecycleChanged(application::ApplicationLifecycle::State state);
     void updateCalendarModel();
     void updateLabels();
     void loadSelectedDate(bool clearRows);
+    void loadYearIndicators(bool clearExisting = false);
     void onStorageFinished(quint64 operationId, const QVariantMap &values,
                            domain::AppError error);
     void setError(QString message);
@@ -69,18 +78,23 @@ private:
     models::CalendarMonthsModel m_months;
     models::TasksModel m_tasks;
     QTimer m_clockTimer;
-    QHash<quint64, bool> m_pending;
+    QHash<quint64, Action> m_pending;
+    QVariantMap m_dateMarkers;
+    QVariantMap m_selectedSchedules;
     QDate m_observedLocalDate;
     int m_visibleYear{0};
     quint64 m_dateOperationId{0};
+    quint64 m_yearOperationId{0};
     bool m_ready{false};
     bool m_pageVisible{false};
     bool m_loading{false};
+    bool m_markersLoading{false};
     QString m_selectedDate;
     QString m_selectedDateLabel;
     QString m_rangeLabel;
     QString m_summary;
     QString m_errorMessage;
+    QString m_markerErrorMessage;
 };
 
 } // namespace something::controllers

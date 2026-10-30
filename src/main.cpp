@@ -216,6 +216,8 @@ int main(int argc, char *argv[])
                      &dashboardController, &something::controllers::DashboardController::refreshTaskSummaries);
     QObject::connect(&tasksController, &something::controllers::TasksController::taskMutationMayHaveCommitted,
                      &schedulingController, &something::controllers::SchedulingController::onTaskMutationMayHaveCommitted);
+    QObject::connect(&schedulingController, &something::controllers::SchedulingController::schedulesSaved,
+                     &calendarController, &something::controllers::CalendarController::refreshScheduleData);
     QObject::connect(&favoritesController, &something::controllers::FavoritesController::newsChanged,
                      &dashboardController, &something::controllers::DashboardController::reloadFavoriteNews);
     QObject::connect(&settingsController, &something::controllers::SettingsController::weekStartChanged,

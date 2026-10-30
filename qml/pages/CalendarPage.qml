@@ -2,6 +2,7 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import "../components" as Shared
+import "../dialogs" as Dialogs
 import Something.App as ThemeModule
 
 Item {
@@ -11,6 +12,19 @@ Item {
     property var taskActions: taskController
     property bool embedded: false
     implicitHeight: calendarColumn.implicitHeight
+
+    function dateAccessibleName(day) {
+        var parts = []
+        if (Number(day.deadlineCount) > 0)
+            parts.push(qsTr("%1 deadlines").arg(Number(day.deadlineCount)))
+        if (Number(day.plannedWorkCount) > 0)
+            parts.push(qsTr("%1 planned work items").arg(Number(day.plannedWorkCount)))
+        if (Number(day.completedTaskCount) > 0)
+            parts.push(qsTr("%1 completed tasks").arg(Number(day.completedTaskCount)))
+        var activity = parts.length > 0 ? qsTr(". ") + parts.join(", ") : ""
+        return (Boolean(day.selected) ? qsTr("Selected date, ") : "")
+               + String(day.date) + activity
+    }
 
     Component.onCompleted: controller.setPageVisible(visible)
     onVisibleChanged: if (controller) controller.setPageVisible(visible)
@@ -70,6 +84,28 @@ Item {
                         Accessible.name: qsTr("Next year")
                         quiet: true
                         onClicked: root.controller.nextYear()
+                    }
+                }
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 8
+                    BusyIndicator {
+                        visible: root.controller.markersLoading
+                        running: visible
+                        implicitWidth: 20
+                        implicitHeight: 20
+                        Accessible.name: qsTr("Loading calendar activity")
+                    }
+                    Label {
+                        visible: root.controller.markerErrorMessage.length > 0
+                        Layout.fillWidth: true
+                        text: root.controller.markerErrorMessage
+                        color: ThemeModule.Theme.error
+                        font.family: ThemeModule.Theme.fontFamily
+                        font.pixelSize: 11
+                        wrapMode: Text.Wrap
+                        Accessible.role: Accessible.AlertMessage
                     }
                 }
 
@@ -139,28 +175,48 @@ Item {
                                             Layout.fillWidth: true
                                             Layout.minimumWidth: 0
                                             Layout.preferredWidth: 1
-                                            Layout.preferredHeight: root.embedded ? 30 : 36
+                                            Layout.preferredHeight: root.embedded ? 36 : 42
                                             Button {
                                                 anchors.fill: parent
                                                 visible: Number(modelData.day) > 0
                                                 enabled: visible
                                                 text: visible ? String(modelData.day) : ""
-                                                Accessible.name: visible
-                                                    ? (Boolean(modelData.selected)
-                                                       ? qsTr("Selected date, %1").arg(modelData.date)
-                                                       : qsTr("Show tasks for %1").arg(modelData.date)) : ""
+                                                Accessible.name: visible ? root.dateAccessibleName(modelData) : ""
                                                 onClicked: root.controller.selectDate(String(modelData.date))
-                                                contentItem: Text {
-                                                    text: parent.text
-                                                    color: modelData.selected ? ThemeModule.Theme.textPrimary
-                                                           : modelData.today ? ThemeModule.Theme.accentCyan
-                                                                             : ThemeModule.Theme.textSecondary
-                                                    font.family: ThemeModule.Theme.fontFamily
-                                                    font.pixelSize: 12
-                                                    font.weight: modelData.today || modelData.selected
-                                                                  ? Font.Bold : Font.Normal
-                                                    horizontalAlignment: Text.AlignHCenter
-                                                    verticalAlignment: Text.AlignVCenter
+                                                contentItem: Column {
+                                                    spacing: 1
+                                                    anchors.centerIn: parent
+                                                    Text {
+                                                        text: parent.parent.text
+                                                        color: modelData.selected ? ThemeModule.Theme.textPrimary
+                                                               : modelData.today ? ThemeModule.Theme.accentCyan
+                                                                                 : ThemeModule.Theme.textSecondary
+                                                        font.family: ThemeModule.Theme.fontFamily
+                                                        font.pixelSize: 12
+                                                        font.weight: modelData.today || modelData.selected
+                                                                      ? Font.Bold : Font.Normal
+                                                        horizontalAlignment: Text.AlignHCenter
+                                                        anchors.horizontalCenter: parent.horizontalCenter
+                                                    }
+                                                    Row {
+                                                        spacing: 2
+                                                        anchors.horizontalCenter: parent.horizontalCenter
+                                                        Rectangle {
+                                                            visible: Number(modelData.deadlineCount) > 0
+                                                            width: 5; height: 5; radius: 3
+                                                            color: ThemeModule.Theme.warning
+                                                        }
+                                                        Rectangle {
+                                                            visible: Number(modelData.plannedWorkCount) > 0
+                                                            width: 5; height: 5; radius: 3
+                                                            color: ThemeModule.Theme.accentCyan
+                                                        }
+                                                        Rectangle {
+                                                            visible: Number(modelData.completedTaskCount) > 0
+                                                            width: 5; height: 5; radius: 3
+                                                            color: ThemeModule.Theme.success
+                                                        }
+                                                    }
                                                 }
                                                 background: Rectangle {
                                                     radius: ThemeModule.Theme.controlRadius
@@ -183,6 +239,33 @@ Item {
                             }
                         }
                     }
+                }
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 14
+                    Repeater {
+                        model: [
+                            { label: qsTr("Deadline"), color: ThemeModule.Theme.warning },
+                            { label: qsTr("Planned work"), color: ThemeModule.Theme.accentCyan },
+                            { label: qsTr("Completed"), color: ThemeModule.Theme.success }
+                        ]
+                        delegate: RowLayout {
+                            required property var modelData
+                            spacing: 5
+                            Rectangle {
+                                width: 7; height: 7; radius: 4
+                                color: modelData.color
+                            }
+                            Label {
+                                text: modelData.label
+                                color: ThemeModule.Theme.textSecondary
+                                font.family: ThemeModule.Theme.fontFamily
+                                font.pixelSize: ThemeModule.Theme.metadataFontSize
+                            }
+                        }
+                    }
+                    Item { Layout.fillWidth: true }
                 }
             }
         }
@@ -242,14 +325,15 @@ Item {
                            : root.controller.loading || !root.controller.ready
                              ? "loading" : "empty"
                     title: root.controller.errorMessage.length > 0
-                           ? qsTr("Tasks could not be loaded") : qsTr("No tasks are due on this date")
+                           ? qsTr("Tasks could not be loaded") : qsTr("No deadlines or planned work on this date")
                     message: root.controller.errorMessage.length > 0
                              ? qsTr("The selected date is unchanged. Retry this card when storage is available.")
-                             : qsTr("Choose another date above to inspect its tasks.")
+                             : qsTr("Choose another date above to inspect its deadlines and planned work.")
                 }
                 Repeater {
                     model: root.controller.tasks
                     delegate: Shared.TaskSummaryCard {
+                        property var calendarSchedule: root.controller.selectedSchedules[String(model.taskId)] || ({})
                         Layout.fillWidth: true
                         taskController: root.taskActions
                         taskId: model.taskId
@@ -263,9 +347,20 @@ Item {
                         revision: model.revision
                         tags: model.tags
                         subtasks: model.subtasks
+                        showCalendarMetadata: true
+                        deadlineOnSelectedDate: String(model.dueDate || "") === root.controller.selectedDate
+                        scheduleMetadata: calendarSchedule
+                        plannedWorkOnSelectedDate: String(calendarSchedule.plannedDate || "")
+                                                     === root.controller.selectedDate
+                        onOpenTaskRequested: function(task) { taskEditor.openForTask(task) }
                     }
                 }
             }
         }
+    }
+
+    Dialogs.TaskEditorDialog {
+        id: taskEditor
+        taskController: root.taskActions
     }
 }
