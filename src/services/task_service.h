@@ -13,6 +13,8 @@ class TaskService final {
 public:
     static storage::StorageCommand list(storage::TaskFilter filter, int pageSize);
     static storage::StorageCommand calendarDate(QDate date);
+    static storage::StorageCommand calendarDateWithSchedules(QDate date);
+    static storage::StorageCommand calendarYear(int year);
     static storage::StorageCommand calendarDatePage(QDate date, int offset, int pageSize = 50);
     static storage::StorageCommand dashboardToday(QDate today,
                                                   bool includeOverdue = true,

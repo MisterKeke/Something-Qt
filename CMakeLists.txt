@@ -79,6 +79,7 @@ qt_add_executable(SomethingQt WIN32
     src/controllers/steam_games_controller.cpp
     src/controllers/favorites_controller.cpp
     src/controllers/running_applications_controller.cpp
+    src/controllers/scheduling_controller.cpp
     src/controllers/settings_controller.cpp
     src/controllers/tasks_controller.cpp
     src/controllers/task_history_controller.cpp
@@ -91,6 +92,8 @@ qt_add_executable(SomethingQt WIN32
     src/domain/task_date_rules.cpp
     src/domain/task_history.cpp
     src/domain/task_rules.cpp
+    src/domain/task_scheduling.cpp
+    src/domain/scheduling_engine.cpp
     src/domain/steam_game.cpp
     src/domain/weather_currency.cpp
     src/platform/profile_instance_lock.cpp
@@ -125,6 +128,7 @@ qt_add_executable(SomethingQt WIN32
     src/services/application_command_service.cpp
     src/services/application_mutation_workflow.cpp
     src/services/preferences_service.cpp
+    src/services/scheduling_service.cpp
     src/services/weather_service.cpp
     src/services/wallpaper_asset_store.cpp
     src/services/wallpaper_service.cpp
@@ -133,6 +137,7 @@ qt_add_executable(SomethingQt WIN32
     src/storage/schema_migrator.cpp
     src/storage/storage_worker.cpp
     src/models/tasks_model.cpp
+    src/models/scheduling_preview_model.cpp
     src/models/task_history_model.cpp
     src/models/terminal_output_model.cpp
     src/models/calendar_months_model.cpp

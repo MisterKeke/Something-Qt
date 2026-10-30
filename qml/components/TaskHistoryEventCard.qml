@@ -111,6 +111,9 @@ Rectangle {
         if (field === "title") return qsTr("Title")
         if (field === "description") return qsTr("Description")
         if (field === "dueDate") return qsTr("Due date")
+        if (field === "plannedDate") return qsTr("Planned work date")
+        if (field === "plannedStartTime") return qsTr("Planned start time")
+        if (field === "estimatedDurationMinutes") return qsTr("Estimated duration")
         if (field === "priority") return qsTr("Priority")
         if (field === "difficulty") return qsTr("Difficulty")
         if (field === "completed") return qsTr("Completion")
@@ -131,6 +134,13 @@ Rectangle {
             if (/^\d{4}-\d{2}-\d{2}$/.test(rawDate))
                 return Qt.formatDate(new Date(rawDate + "T00:00:00"), "MMM d")
         }
+        if (field === "plannedDate") {
+            const plannedDate = String(value)
+            if (/^\d{4}-\d{2}-\d{2}$/.test(plannedDate))
+                return Qt.formatDate(new Date(plannedDate + "T00:00:00"), "MMM d, yyyy")
+        }
+        if (field === "estimatedDurationMinutes")
+            return qsTr("%1 min").arg(Number(value))
         if (Array.isArray(value)) {
             if (field === "tags") return value.length ? value.join(", ") : qsTr("(none)")
             if (field === "subtasks") {

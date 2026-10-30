@@ -3,7 +3,9 @@
 #include "../domain/task_date_rules.h"
 
 #include <QDate>
+#include <QMap>
 #include <QVariantList>
+#include <QVariantMap>
 #include <algorithm>
 
 #include <utility>
@@ -24,6 +26,83 @@ QVariantList taskRows(const QVector<storage::Task> &tasks)
     rows.reserve(tasks.size());
     for (const auto &task : tasks) rows.push_back(TaskService::toVariantMap(task));
     return rows;
+}
+
+QVariantMap scheduleRow(const storage::TaskSchedule &schedule)
+{
+    return {
+        {QStringLiteral("taskId"), schedule.taskId},
+        {QStringLiteral("plannedDate"), schedule.plannedDate
+             ? schedule.plannedDate->toString(Qt::ISODate) : QString{}},
+        {QStringLiteral("plannedStartTime"), schedule.plannedStartTime
+             ? schedule.plannedStartTime->toString(QStringLiteral("HH:mm")) : QString{}},
+        {QStringLiteral("estimatedDurationMinutes"), schedule.estimatedDurationMinutes
+             ? QVariant(*schedule.estimatedDurationMinutes) : QVariant{}},
+        {QStringLiteral("revision"), schedule.revision},
+        {QStringLiteral("updatedAt"), schedule.updatedAt},
+    };
+}
+
+storage::StorageCommand calendarRange(QDate start, QDate end)
+{
+    return [start, end](storage::StorageRepositories &repositories,
+                        const std::function<bool()> &cancelled) {
+        if (!start.isValid() || !end.isValid() || start > end)
+            return errorReply(domain::AppError(domain::ErrorCategory::Validation));
+
+        QMap<qint64, storage::Task> tasksById;
+        storage::TaskFilter filter;
+        filter.dueFrom = start.toString(Qt::ISODate);
+        filter.dueTo = end.toString(Qt::ISODate);
+        filter.sort = QStringLiteral("created_at");
+        filter.direction = QStringLiteral("desc");
+        filter.limit = 200;
+        for (int offset = 0; ; offset += filter.limit) {
+            if (cancelled()) return errorReply(domain::AppError::cancelled());
+            filter.offset = offset;
+            const auto result = repositories.tasks.list(filter);
+            if (!result.succeeded()) return errorReply(result.error);
+            for (const storage::Task &task : result.value)
+                tasksById.insert(task.id, task);
+            if (result.value.size() < filter.limit) break;
+        }
+
+        if (cancelled()) return errorReply(domain::AppError::cancelled());
+        const auto scheduleResult = repositories.scheduling.taskSchedules();
+        if (!scheduleResult.succeeded()) return errorReply(scheduleResult.error);
+        QMap<qint64, storage::TaskSchedule> schedulesById;
+        for (const storage::TaskSchedule &schedule : scheduleResult.value) {
+            if (cancelled()) return errorReply(domain::AppError::cancelled());
+            const bool plannedInRange = schedule.plannedDate
+                && *schedule.plannedDate >= start && *schedule.plannedDate <= end;
+            if (plannedInRange && !tasksById.contains(schedule.taskId)) {
+                const auto taskResult = repositories.tasks.get(schedule.taskId);
+                if (!taskResult.succeeded()) return errorReply(taskResult.error);
+                tasksById.insert(taskResult.value.id, taskResult.value);
+            }
+            if (tasksById.contains(schedule.taskId))
+                schedulesById.insert(schedule.taskId, schedule);
+        }
+
+        QVector<storage::Task> tasks;
+        tasks.reserve(tasksById.size());
+        for (auto it = tasksById.cbegin(); it != tasksById.cend(); ++it)
+            tasks.push_back(it.value());
+        std::stable_sort(tasks.begin(), tasks.end(), [](const auto &left, const auto &right) {
+            if (left.createdAt != right.createdAt) return left.createdAt > right.createdAt;
+            return left.id > right.id;
+        });
+
+        QVariantList scheduleRows;
+        scheduleRows.reserve(schedulesById.size());
+        for (auto it = schedulesById.cbegin(); it != schedulesById.cend(); ++it)
+            scheduleRows.push_back(scheduleRow(it.value()));
+
+        storage::StorageReply reply;
+        reply.values.insert(QStringLiteral("tasks"), taskRows(tasks));
+        reply.values.insert(QStringLiteral("schedules"), scheduleRows);
+        return reply;
+    };
 }
 
 storage::RepositoryResult<QVector<storage::Task>> queryTasks(
@@ -73,6 +152,24 @@ storage::StorageCommand TaskService::calendarDate(QDate date)
         reply.values.insert(QStringLiteral("tasks"), taskRows(tasks));
         return reply;
     };
+}
+
+storage::StorageCommand TaskService::calendarDateWithSchedules(QDate date)
+{
+    if (!date.isValid())
+        return [](storage::StorageRepositories &, const std::function<bool()> &) {
+            return errorReply(domain::AppError(domain::ErrorCategory::Validation));
+        };
+    return calendarRange(date, date);
+}
+
+storage::StorageCommand TaskService::calendarYear(int year)
+{
+    if (year < 1 || year > 9999)
+        return [](storage::StorageRepositories &, const std::function<bool()> &) {
+            return errorReply(domain::AppError(domain::ErrorCategory::Validation));
+        };
+    return calendarRange(QDate(year, 1, 1), QDate(year, 12, 31));
 }
 
 storage::StorageCommand TaskService::calendarDatePage(QDate date, int offset, int pageSize)

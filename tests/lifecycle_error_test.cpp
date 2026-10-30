@@ -9,6 +9,7 @@
 #include <QSignalSpy>
 #include <QSemaphore>
 #include <QSqlQuery>
+#include <QThread>
 #include <QTemporaryDir>
 #include <QtTest>
 
@@ -33,6 +34,7 @@ private slots:
     void graphDrainsOperationsBeforeClosingStorage();
     void profileMaintenanceDrainsAndRejectsFeatureAdmission();
     void boundedWorkerPoolRejectsExcessQueuedJobs();
+    void shutdownCancelsInFlightSchedulingCalculation();
 };
 
 void LifecycleErrorTest::safeMessagesAreStableAndCancellationIsQuiet()
@@ -380,6 +382,44 @@ void LifecycleErrorTest::boundedWorkerPoolRejectsExcessQueuedJobs()
                               10000);
     QCOMPARE(pool.outstandingJobs(), 0);
     QCOMPARE(operations.activeCount(), 0);
+}
+
+void LifecycleErrorTest::shutdownCancelsInFlightSchedulingCalculation()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+
+    application::ApplicationServiceGraph graph(QStringLiteral("scheduling-shutdown-test"),
+                                               directory.path());
+    QSignalSpy resultSpy(&graph,
+                         &application::ApplicationServiceGraph::expensiveValueJobFinished);
+    QVERIFY(resultSpy.isValid());
+    graph.start();
+    QTRY_COMPARE_WITH_TIMEOUT(graph.lifecycle().state(),
+                              application::ApplicationLifecycle::State::Running,
+                              5000);
+
+    QSemaphore calculationStarted;
+    const auto operation = graph.beginOperation(QStringLiteral("smart schedule calculation"));
+    QVERIFY(operation.isValid());
+    QVERIFY(graph.submitExpensiveValue(operation,
+        [&calculationStarted](const application::CancellationToken &cancellation) {
+            calculationStarted.release();
+            while (!cancellation.isCancellationRequested()) QThread::msleep(1);
+
+            services::BoundedWorkerPool::ValueResult result;
+            result.values.insert(QStringLiteral("recommendations"),
+                                 QStringLiteral("preview calculated before shutdown"));
+            return result;
+        }));
+    QVERIFY(calculationStarted.tryAcquire(1, 5000));
+
+    graph.shutdown();
+    QTRY_VERIFY_WITH_TIMEOUT(graph.isShutdownComplete(), 5000);
+    QVERIFY(operation.cancellation.isCancellationRequested());
+    QVERIFY(!graph.acceptsResult(operation.id));
+    QCOMPARE(graph.operations().activeCount(), 0);
+    QCOMPARE(resultSpy.count(), 0);
 }
 
 QTEST_GUILESS_MAIN(LifecycleErrorTest)

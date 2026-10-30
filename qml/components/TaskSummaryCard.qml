@@ -18,6 +18,30 @@ Rectangle {
     property double revision: 0
     property var tags: []
     property var subtasks: []
+    property bool showCalendarMetadata: false
+    property bool deadlineOnSelectedDate: false
+    property var scheduleMetadata: ({})
+    property bool plannedWorkOnSelectedDate: false
+
+    signal openTaskRequested(var task)
+
+    readonly property string plannedDate: String(scheduleMetadata.plannedDate || "")
+    readonly property string plannedStartTime: String(scheduleMetadata.plannedStartTime || "")
+    readonly property int estimatedDurationMinutes: Number(scheduleMetadata.estimatedDurationMinutes || 0)
+
+    function taskDetails() {
+        return {
+            id: root.taskId,
+            revision: root.revision,
+            title: root.title,
+            description: root.description,
+            dueDate: root.dueDate,
+            priority: root.priority,
+            difficulty: root.difficulty,
+            tags: root.tags,
+            subtasks: root.subtasks
+        }
+    }
 
     implicitHeight: cardColumn.implicitHeight + 20
     radius: ThemeModule.Theme.panelRadius
@@ -55,6 +79,12 @@ Rectangle {
                     font.weight: Font.DemiBold
                     font.strikeout: root.completed
                     wrapMode: Text.Wrap
+                    Accessible.role: root.showCalendarMetadata ? Accessible.Button : Accessible.StaticText
+                    TapHandler {
+                        enabled: root.showCalendarMetadata
+                        acceptedButtons: Qt.LeftButton
+                        onTapped: root.openTaskRequested(root.taskDetails())
+                    }
                 }
                 Label {
                     visible: root.description.length > 0
@@ -106,6 +136,45 @@ Rectangle {
         }
 
         Flow {
+            visible: root.showCalendarMetadata
+            Layout.fillWidth: true
+            Layout.leftMargin: 44
+            spacing: 6
+
+            ThemeModule.StatusBadge {
+                visible: root.deadlineOnSelectedDate
+                text: qsTr("Deadline · %1").arg(root.dueDate)
+                badgeColor: ThemeModule.Theme.warning
+            }
+            ThemeModule.StatusBadge {
+                visible: root.plannedDate.length > 0
+                text: qsTr("Planned work · %1%2")
+                    .arg(root.plannedDate)
+                    .arg(root.plannedStartTime.length > 0 ? " · " + root.plannedStartTime : "")
+                badgeColor: ThemeModule.Theme.accentCyan
+            }
+            ThemeModule.StatusBadge {
+                visible: root.showCalendarMetadata && root.completed
+                text: qsTr("Completed")
+                badgeColor: ThemeModule.Theme.success
+            }
+            ThemeModule.StatusBadge {
+                visible: root.showCalendarMetadata && root.plannedDate.length > 0
+                         && root.dueDate.length > 0 && root.plannedDate > root.dueDate
+                text: qsTr("Planned after deadline")
+                badgeColor: ThemeModule.Theme.error
+            }
+            Label {
+                visible: root.plannedDate.length > 0 && root.estimatedDurationMinutes > 0
+                text: qsTr("%1 min estimate").arg(root.estimatedDurationMinutes)
+                color: ThemeModule.Theme.textSecondary
+                font.family: ThemeModule.Theme.fontFamily
+                font.pixelSize: ThemeModule.Theme.metadataFontSize
+                verticalAlignment: Text.AlignVCenter
+            }
+        }
+
+        Flow {
             visible: root.tags.length > 0
             Layout.fillWidth: true
             Layout.leftMargin: 44
@@ -151,6 +220,19 @@ Rectangle {
                         root.taskId, Number(modelData.id), root.revision, checked)
                 }
             }
+        }
+
+        RowLayout {
+            visible: root.showCalendarMetadata
+            Layout.fillWidth: true
+            Layout.leftMargin: 44
+            ThemeModule.AppButton {
+                text: qsTr("Open details")
+                quiet: true
+                implicitHeight: 32
+                onClicked: root.openTaskRequested(root.taskDetails())
+            }
+            Item { Layout.fillWidth: true }
         }
     }
 }
