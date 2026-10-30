@@ -42,9 +42,12 @@ SteamStoreUrl normalizeSteamStoreUrl(QString value)
 
     const QUrl url(value, QUrl::StrictMode);
     const QString scheme = url.scheme().toLower();
+    const int port = url.port(-1);
+    const int standardPort = scheme == QStringLiteral("https") ? 443 : 80;
     if (!url.isValid() || (scheme != QStringLiteral("http")
                            && scheme != QStringLiteral("https"))
         || !url.userInfo().isEmpty()
+        || (port != -1 && port != standardPort)
         || url.host().compare(QStringLiteral("store.steampowered.com"),
                               Qt::CaseInsensitive) != 0) {
         return {0, {}, AppError(ErrorCategory::Validation)};

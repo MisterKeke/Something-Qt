@@ -509,6 +509,29 @@ target_link_libraries(SomethingQtGameUpdatesTests PRIVATE
     Qt6::Core Qt6::Gui Qt6::Network Qt6::Sql Qt6::Test lexbor_static)
 add_test(NAME SomethingQtGameUpdatesTests COMMAND SomethingQtGameUpdatesTests)
 
+add_executable(SomethingQtGameCollectionsTests
+    game_collections_feature_test.cpp
+    ../src/domain/app_error.cpp
+    ../src/domain/task_date_rules.cpp
+    ../src/domain/task_history.cpp
+    ../src/domain/task_rules.cpp
+    ../src/domain/task_scheduling.cpp
+    ../src/domain/steam_game.cpp
+    ../src/domain/steam_game_catalog.cpp
+    ../src/domain/steam_collections.cpp
+    ../src/domain/steam_release.cpp
+    ../src/domain/steam_game_updates.cpp
+    ../src/domain/weather_currency.cpp
+    ../src/services/steam_artwork_store.cpp
+    ../src/services/steam_collections_service.cpp
+    ../src/storage/repositories.cpp
+    ../src/storage/schema_migrator.cpp
+)
+target_include_directories(SomethingQtGameCollectionsTests PRIVATE ../src)
+target_link_libraries(SomethingQtGameCollectionsTests PRIVATE
+    Qt6::Core Qt6::Gui Qt6::Sql Qt6::Test)
+add_test(NAME SomethingQtGameCollectionsTests COMMAND SomethingQtGameCollectionsTests)
+
 add_executable(SomethingQtDataImportTests
     data_import_test.cpp
     ../src/application/application_lifecycle.cpp

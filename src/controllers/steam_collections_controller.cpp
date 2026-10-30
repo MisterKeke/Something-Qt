@@ -268,6 +268,12 @@ void SteamCollectionsController::requestSnapshot()
     emit stateChanged();
 }
 
+void SteamCollectionsController::refreshSnapshot()
+{
+    if (!m_ready || !m_snapshotLoaded || m_loading || m_busy || m_addBusy) return;
+    requestSnapshot();
+}
+
 void SteamCollectionsController::applySnapshot(const QVariantMap &values)
 {
     m_collections = values.value(QStringLiteral("collections")).toList();

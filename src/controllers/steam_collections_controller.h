@@ -74,6 +74,7 @@ public:
                               qint64 targetCollectionId, quint32 appId);
     Q_INVOKABLE QVariantList availableCatalogGames(qint64 collectionId) const;
     Q_INVOKABLE void openStore(quint32 appId);
+    Q_INVOKABLE void refreshSnapshot();
     Q_INVOKABLE void retryLoad();
     Q_INVOKABLE void clearNotification();
     Q_INVOKABLE void clearMessages();

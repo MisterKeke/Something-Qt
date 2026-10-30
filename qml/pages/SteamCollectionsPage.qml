@@ -28,6 +28,11 @@ Item {
     implicitHeight: content.implicitHeight + 8
     Accessible.name: qsTr("Steam Game Collections")
 
+    onVisibleChanged: {
+        if (visible && controller)
+            controller.refreshSnapshot()
+    }
+
     function captureViewState() {
         return {
             selectedCollectionId: controller ? controller.selectedCollectionId : 0,
