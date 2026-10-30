@@ -9,12 +9,10 @@
 #include <QObject>
 #include <QByteArray>
 #include <QHash>
-#include <QQueue>
 #include <QSet>
 #include <QVariantList>
 
 #include <optional>
-#include <QVector>
 
 namespace something::controllers {
 
@@ -102,11 +100,6 @@ private:
         bool appendPage{false};
         quint64 generation{0};
     };
-    struct ArtworkWork final {
-        quint32 appId{0};
-        QString url;
-    };
-
     void onLifecycleChanged(application::ApplicationLifecycle::State state);
     void onStorageFinished(quint64 id, const QVariantMap &values, domain::AppError error);
     void onHttpsFinished(quint64 id, const QByteArray &body, domain::AppError error);
@@ -118,13 +111,14 @@ private:
     void requestSnapshot();
     void requestNewsPage(bool append);
     void reloadNews();
-    void startRefresh(QVector<quint32> appIds,
+    void startRefresh(std::optional<quint32> appId = std::nullopt,
                       std::optional<qint64> olderThanUnixSeconds = std::nullopt);
     void dispatchRefreshQueue();
+    void scheduleRefreshDispatch();
     void recordRefreshCheck(quint32 appId, const QString &attemptedAtUtc,
                             bool succeeded, const QString &safeError,
                             quint64 generation);
-    void completeRefreshItem(quint32 appId, bool succeeded, quint64 generation);
+    void completeRefreshItem(bool succeeded, quint64 generation);
     void finishRefresh();
     void cancelAll();
     void cancelPending(quint64 id);
@@ -135,6 +129,7 @@ private:
     int gameIndex(quint32 appId) const;
     void queueArtwork(quint32 appId);
     void dispatchArtworkQueue();
+    void scheduleArtworkDispatch();
     void finishArtwork(quint32 appId, const QString &url);
     QString safeNewsError(domain::AppError error) const;
     static QVariantMap articleMap(const domain::SteamNewsArticle &article);
@@ -144,10 +139,6 @@ private:
     application::ApplicationServiceGraph *m_graph{nullptr};
     QHash<quint64, Pending> m_pending;
     QSet<quint32> m_reservedAppIds;
-    QSet<quint32> m_refreshCompletedAppIds;
-    QQueue<quint32> m_refreshQueue;
-    QQueue<ArtworkWork> m_artworkQueue;
-    QHash<quint32, QString> m_queuedArtworkUrls;
     QHash<quint32, QString> m_activeArtworkUrls;
     QVariantList m_games;
     QVariantList m_newsItems;
@@ -158,17 +149,21 @@ private:
     QString m_searchText;
     QString m_refreshStatus;
     std::optional<quint32> m_newsAppFilter;
+    std::optional<quint32> m_refreshSingleAppId;
     storage::SteamGameUpdateNewsCursor m_newsCursor;
     std::optional<qint64> m_refreshOlderThanUnixSeconds;
     quint64 m_newsGeneration{0};
     quint64 m_refreshGeneration{0};
+    quint64 m_artworkGeneration{0};
     quint32 m_selectedAppId{0};
+    int m_refreshNextGameIndex{0};
     int m_activeRefreshRequests{0};
     int m_refreshTotal{0};
     int m_refreshFinishedCount{0};
     int m_refreshSuccessCount{0};
     int m_refreshFailureCount{0};
     int m_activeArtworkRequests{0};
+    int m_nextArtworkGameIndex{0};
     bool m_ready{false};
     bool m_snapshotStarted{false};
     bool m_snapshotBusy{false};
@@ -180,6 +175,8 @@ private:
     bool m_newsMutationBusy{false};
     bool m_unreadOnly{false};
     bool m_refreshBusy{false};
+    bool m_refreshDispatchScheduled{false};
+    bool m_artworkDispatchScheduled{false};
 };
 
 } // namespace something::controllers

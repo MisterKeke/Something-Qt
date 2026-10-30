@@ -12,9 +12,10 @@
 #include <QDesktopServices>
 #include <QHostAddress>
 #include <QThread>
+#include <QTimer>
 #include <QUrl>
+#include <QVector>
 
-#include <algorithm>
 #include <utility>
 
 namespace something::controllers {
@@ -22,6 +23,8 @@ namespace {
 
 constexpr int kMaximumRefreshRequests = 3;
 constexpr int kMaximumArtworkRequests = 3;
+constexpr int kMaximumRefreshDispatchAttemptsPerTurn = 3;
+constexpr int kMaximumArtworkScansPerTurn = 32;
 constexpr int kNewsPageSize = 60;
 constexpr qsizetype kMaximumNewsSourceUrlBytes = 4096;
 
@@ -444,16 +447,12 @@ void SteamGameUpdatesController::loadMoreNews()
 void SteamGameUpdatesController::refreshGame(quint32 appId)
 {
     if (gameIndex(appId) < 0) return;
-    startRefresh({appId});
+    startRefresh(appId);
 }
 
 void SteamGameUpdatesController::refreshAll()
 {
-    QVector<quint32> appIds;
-    appIds.reserve(m_games.size());
-    for (const QVariant &value : m_games)
-        appIds.push_back(value.toMap().value(QStringLiteral("appId")).toUInt());
-    startRefresh(std::move(appIds));
+    startRefresh();
 }
 
 void SteamGameUpdatesController::loadOlderFromSteam(quint32 appId)
@@ -476,17 +475,14 @@ void SteamGameUpdatesController::loadOlderFromSteam(quint32 appId)
 }
 
 void SteamGameUpdatesController::startRefresh(
-    QVector<quint32> appIds, std::optional<qint64> olderThanUnixSeconds)
+    std::optional<quint32> appId, std::optional<qint64> olderThanUnixSeconds)
 {
     if (!m_ready || !m_snapshotLoaded || m_refreshBusy || m_addBusy || m_removeBusy) return;
-    std::sort(appIds.begin(), appIds.end());
-    appIds.erase(std::unique(appIds.begin(), appIds.end()), appIds.end());
-    m_refreshQueue.clear();
-    m_refreshCompletedAppIds.clear();
-    for (quint32 appId : appIds) {
-        if (appId != 0 && gameIndex(appId) >= 0) m_refreshQueue.enqueue(appId);
-    }
-    m_refreshTotal = m_refreshQueue.size();
+    if (appId && (*appId == 0 || gameIndex(*appId) < 0)) return;
+    m_refreshSingleAppId = appId;
+    m_refreshNextGameIndex = 0;
+    m_refreshDispatchScheduled = false;
+    m_refreshTotal = appId ? 1 : m_games.size();
     m_refreshOlderThanUnixSeconds = olderThanUnixSeconds;
     m_refreshFinishedCount = 0;
     m_refreshSuccessCount = 0;
@@ -511,9 +507,21 @@ void SteamGameUpdatesController::startRefresh(
 void SteamGameUpdatesController::dispatchRefreshQueue()
 {
     if (!m_refreshBusy) return;
+    int attempts = 0;
     while (m_activeRefreshRequests < kMaximumRefreshRequests
-           && !m_refreshQueue.isEmpty()) {
-        const quint32 appId = m_refreshQueue.dequeue();
+           && attempts < kMaximumRefreshDispatchAttemptsPerTurn
+           && m_refreshBusy) {
+        const bool hasNext = m_refreshSingleAppId
+            ? m_refreshNextGameIndex == 0
+            : m_refreshNextGameIndex < m_games.size();
+        if (!hasNext) break;
+        const int index = m_refreshSingleAppId ? gameIndex(*m_refreshSingleAppId)
+                                               : m_refreshNextGameIndex;
+        ++m_refreshNextGameIndex;
+        ++attempts;
+        if (index < 0 || index >= m_games.size()) continue;
+        const quint32 appId = m_games.at(index).toMap()
+            .value(QStringLiteral("appId")).toUInt();
         const auto request = providers::makeSteamNewsProviderRequest(
             appId, m_refreshOlderThanUnixSeconds);
         const QString attemptedAt = currentTimestamp();
@@ -535,6 +543,25 @@ void SteamGameUpdatesController::dispatchRefreshQueue()
         }
         ++m_activeRefreshRequests;
     }
+    const bool hasMore = m_refreshSingleAppId
+        ? m_refreshNextGameIndex == 0
+        : m_refreshNextGameIndex < m_games.size();
+    if (m_refreshBusy && hasMore
+        && m_activeRefreshRequests < kMaximumRefreshRequests) {
+        scheduleRefreshDispatch();
+    }
+}
+
+void SteamGameUpdatesController::scheduleRefreshDispatch()
+{
+    if (m_refreshDispatchScheduled || !m_refreshBusy) return;
+    m_refreshDispatchScheduled = true;
+    const quint64 generation = m_refreshGeneration;
+    QTimer::singleShot(0, this, [this, generation] {
+        if (generation != m_refreshGeneration || !m_refreshBusy) return;
+        m_refreshDispatchScheduled = false;
+        dispatchRefreshQueue();
+    });
 }
 
 void SteamGameUpdatesController::recordRefreshCheck(
@@ -555,17 +582,14 @@ void SteamGameUpdatesController::recordRefreshCheck(
                 safeError.isEmpty()
                     ? QStringLiteral("The refresh result could not be saved to this profile.")
                     : safeError);
-            completeRefreshItem(appId, false, generation);
+            completeRefreshItem(false, generation);
         }
     }
 }
 
-void SteamGameUpdatesController::completeRefreshItem(
-    quint32 appId, bool succeeded, quint64 generation)
+void SteamGameUpdatesController::completeRefreshItem(bool succeeded, quint64 generation)
 {
-    if (!m_refreshBusy || generation != m_refreshGeneration
-        || m_refreshCompletedAppIds.contains(appId)) return;
-    m_refreshCompletedAppIds.insert(appId);
+    if (!m_refreshBusy || generation != m_refreshGeneration) return;
     ++m_refreshFinishedCount;
     if (succeeded) ++m_refreshSuccessCount;
     else ++m_refreshFailureCount;
@@ -578,7 +602,9 @@ void SteamGameUpdatesController::completeRefreshItem(
 void SteamGameUpdatesController::finishRefresh()
 {
     m_refreshBusy = false;
-    m_refreshQueue.clear();
+    m_refreshSingleAppId.reset();
+    m_refreshNextGameIndex = 0;
+    m_refreshDispatchScheduled = false;
     m_refreshOlderThanUnixSeconds.reset();
     m_refreshStatus = QStringLiteral("Updated %1 of %2 games; %3 failed.")
         .arg(m_refreshSuccessCount).arg(m_refreshTotal).arg(m_refreshFailureCount);
@@ -600,9 +626,10 @@ void SteamGameUpdatesController::cancelRefresh()
         }
     }
     ++m_refreshGeneration;
-    m_refreshQueue.clear();
+    m_refreshSingleAppId.reset();
+    m_refreshNextGameIndex = 0;
+    m_refreshDispatchScheduled = false;
     m_refreshOlderThanUnixSeconds.reset();
-    m_refreshCompletedAppIds.clear();
     m_activeRefreshRequests = 0;
     m_refreshBusy = false;
     m_refreshStatus = QStringLiteral("Refresh canceled. Cached news was kept.");
@@ -828,7 +855,7 @@ void SteamGameUpdatesController::onStorageFinished(
             const qint64 cursor = oldest > 0
                 ? (oldest < now ? oldest + 1 : now) : now;
             m_refreshBusy = false;
-            startRefresh({pending.appId}, cursor);
+            startRefresh(pending.appId, cursor);
         }
         return;
     case Kind::Snapshot:
@@ -839,8 +866,10 @@ void SteamGameUpdatesController::onStorageFinished(
             m_games = values.value(QStringLiteral("games")).toList();
             m_snapshotLoaded = true;
             m_errorMessage.clear();
-            for (const QVariant &game : m_games)
-                queueArtwork(game.toMap().value(QStringLiteral("appId")).toUInt());
+            ++m_artworkGeneration;
+            m_nextArtworkGameIndex = 0;
+            m_artworkDispatchScheduled = false;
+            dispatchArtworkQueue();
             reloadNews();
         }
         emit stateChanged();
@@ -874,6 +903,7 @@ void SteamGameUpdatesController::onStorageFinished(
                     .value(QStringLiteral("artworkFilename")).toString();
                 if (!filename.isEmpty()) emit artworkInvalidated(filename);
                 m_games.removeAt(index);
+                if (index < m_nextArtworkGameIndex) --m_nextArtworkGameIndex;
             }
             if (m_selectedAppId == pending.appId) {
                 m_selectedAppId = 0;
@@ -969,9 +999,8 @@ void SteamGameUpdatesController::onStorageFinished(
                 pending.safeError.isEmpty()
                     ? QStringLiteral("The refresh result could not be saved to this profile.")
                     : pending.safeError);
-        completeRefreshItem(pending.appId,
-                            pending.success && !error.isError() && !error.isCancelled(),
-                            pending.generation);
+        completeRefreshItem(
+            pending.success && !error.isError() && !error.isCancelled(), pending.generation);
         return;
     case Kind::ArtworkSave:
         if (!error.isError() && !error.isCancelled()) {
@@ -1001,9 +1030,14 @@ void SteamGameUpdatesController::cancelAll()
     for (quint64 id : ids) cancelPending(id);
     m_pending.clear();
     m_reservedAppIds.clear();
-    m_refreshQueue.clear();
-    m_refreshCompletedAppIds.clear();
-    m_queuedArtworkUrls.clear();
+    ++m_refreshGeneration;
+    m_refreshSingleAppId.reset();
+    m_refreshNextGameIndex = 0;
+    m_refreshDispatchScheduled = false;
+    m_refreshOlderThanUnixSeconds.reset();
+    ++m_artworkGeneration;
+    m_nextArtworkGameIndex = 0;
+    m_artworkDispatchScheduled = false;
     m_activeArtworkUrls.clear();
     m_activeRefreshRequests = 0;
     m_activeArtworkRequests = 0;
@@ -1045,48 +1079,79 @@ int SteamGameUpdatesController::gameIndex(quint32 appId) const
 
 void SteamGameUpdatesController::queueArtwork(quint32 appId)
 {
-    const int index = gameIndex(appId);
-    if (index < 0) return;
-    const QVariantMap game = m_games.at(index).toMap();
-    if (!game.value(QStringLiteral("artworkFilename")).toString().isEmpty()) return;
-    const QString url = domain::normalizeSteamArtworkUrl(
-        game.value(QStringLiteral("artworkUrl")).toString());
-    if (url.isEmpty() || m_queuedArtworkUrls.value(appId) == url
-        || m_activeArtworkUrls.value(appId) == url) return;
-    m_queuedArtworkUrls.insert(appId, url);
-    m_artworkQueue.enqueue({appId, url});
+    if (gameIndex(appId) < 0) return;
     dispatchArtworkQueue();
 }
 
 void SteamGameUpdatesController::dispatchArtworkQueue()
 {
-    if (!m_ready) return;
+    if (!m_ready || !m_snapshotLoaded) return;
+    int scanned = 0;
     while (m_activeArtworkRequests < kMaximumArtworkRequests
-           && !m_artworkQueue.isEmpty()) {
-        const ArtworkWork work = m_artworkQueue.dequeue();
-        if (m_queuedArtworkUrls.value(work.appId) != work.url) continue;
-        m_queuedArtworkUrls.remove(work.appId);
-        m_activeArtworkUrls.insert(work.appId, work.url);
-        Pending pending;
-        pending.appId = work.appId;
-        pending.artworkUrl = work.url;
-        const providers::ProviderRequest request{
-            providers::ProviderId::SteamArtwork, QUrl(work.url)};
-        ++m_activeArtworkRequests;
-        if (!submitNetwork(Kind::ArtworkNetwork, request, pending)) {
-            finishArtwork(work.appId, work.url);
+           && m_nextArtworkGameIndex < m_games.size()
+           && scanned < kMaximumArtworkScansPerTurn) {
+        const QVariantMap game = m_games.at(m_nextArtworkGameIndex++).toMap();
+        ++scanned;
+        const quint32 appId = game.value(QStringLiteral("appId")).toUInt();
+        if (appId == 0
+            || !game.value(QStringLiteral("artworkFilename")).toString().isEmpty()) {
             continue;
         }
+        const QString url = domain::normalizeSteamArtworkUrl(
+            game.value(QStringLiteral("artworkUrl")).toString());
+        if (url.isEmpty() || m_activeArtworkUrls.contains(appId)) continue;
+        m_activeArtworkUrls.insert(appId, url);
+        Pending pending;
+        pending.appId = appId;
+        pending.artworkUrl = url;
+        const providers::ProviderRequest request{
+            providers::ProviderId::SteamArtwork, QUrl(url)};
+        ++m_activeArtworkRequests;
+        if (!submitNetwork(Kind::ArtworkNetwork, request, pending)) {
+            m_activeArtworkUrls.remove(appId);
+            m_activeArtworkRequests = qMax(0, m_activeArtworkRequests - 1);
+        }
     }
+    if (m_nextArtworkGameIndex < m_games.size()
+        && m_activeArtworkRequests < kMaximumArtworkRequests
+        && scanned >= kMaximumArtworkScansPerTurn) {
+        scheduleArtworkDispatch();
+    }
+}
+
+void SteamGameUpdatesController::scheduleArtworkDispatch()
+{
+    if (m_artworkDispatchScheduled || !m_ready) return;
+    m_artworkDispatchScheduled = true;
+    const quint64 generation = m_artworkGeneration;
+    QTimer::singleShot(0, this, [this, generation] {
+        if (generation != m_artworkGeneration || !m_ready) return;
+        m_artworkDispatchScheduled = false;
+        dispatchArtworkQueue();
+    });
 }
 
 void SteamGameUpdatesController::finishArtwork(quint32 appId, const QString &url)
 {
+    bool releasedActiveRequest = false;
     if (m_activeArtworkUrls.value(appId) == url) {
         m_activeArtworkUrls.remove(appId);
         m_activeArtworkRequests = qMax(0, m_activeArtworkRequests - 1);
+        releasedActiveRequest = true;
     }
-    if (m_queuedArtworkUrls.value(appId) == url) m_queuedArtworkUrls.remove(appId);
+    if (releasedActiveRequest) {
+        const int index = gameIndex(appId);
+        if (index >= 0) {
+            const QVariantMap game = m_games.at(index).toMap();
+            const QString currentUrl = domain::normalizeSteamArtworkUrl(
+                game.value(QStringLiteral("artworkUrl")).toString());
+            if (game.value(QStringLiteral("artworkFilename")).toString().isEmpty()
+                && !currentUrl.isEmpty() && currentUrl != url
+                && index < m_nextArtworkGameIndex) {
+                m_nextArtworkGameIndex = index;
+            }
+        }
+    }
     dispatchArtworkQueue();
 }
 
