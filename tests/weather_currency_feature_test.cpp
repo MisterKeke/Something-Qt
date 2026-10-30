@@ -1,6 +1,10 @@
+#include "application/application_service_graph.h"
+#include "controllers/weather_controller.h"
 #include "domain/weather_currency.h"
 #include "models/currency_rates_model.h"
+#include "models/weather_comparison_model.h"
 #include "models/weather_forecast_model.h"
+#include "platform/location_provider.h"
 #include "providers/feature_parsers.h"
 #include "providers/provider_policy.h"
 #include "services/currency_service.h"
@@ -15,11 +19,14 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QSqlDatabase>
+#include <QSqlQuery>
+#include <QTemporaryDir>
 #include <QTimeZone>
 #include <QUuid>
 #include <QtTest>
 
 #include <limits>
+#include <utility>
 
 using namespace something;
 
@@ -44,6 +51,13 @@ bool openDatabase(QSqlDatabase *database, QString *connectionName)
 domain::WeatherForecast sampleForecast()
 {
     return providers::parseWeatherForecast(fixture(QStringLiteral("weather-forecast-success.json"))).value;
+}
+
+domain::WeatherCity comparisonCity(qint64 id, QString name, double latitude,
+                                   double longitude, QString timezone)
+{
+    return domain::WeatherCity{id, std::move(name), {}, QStringLiteral("Testland"),
+                               std::move(timezone), latitude, longitude, true};
 }
 
 QByteArray weatherForecastJson(const QString &timezone, const QJsonArray &dates,
@@ -79,10 +93,37 @@ QByteArray weatherForecastJson(const QString &timezone, const QJsonArray &dates,
     }).toJson(QJsonDocument::Compact);
 }
 
+domain::WeatherForecast datedForecast(const QString &timezone,
+                                      const QJsonArray &dates)
+{
+    return providers::parseWeatherForecast(weatherForecastJson(timezone, dates)).value;
+}
+
 double unixSeconds(const QDate &date, const QTime &time, const QTimeZone &timezone)
 {
     return static_cast<double>(QDateTime(date, time, timezone).toUTC().toSecsSinceEpoch());
 }
+
+class FixedClock final : public domain::Clock {
+public:
+    QDateTime nowUtc() const override
+    {
+        return QDateTime(QDate(2026, 10, 30), QTime(12, 0), QTimeZone::UTC);
+    }
+    QTimeZone localTimeZone() const override { return QTimeZone::UTC; }
+};
+
+class UnavailableLocationProvider final : public platform::LocationProvider {
+public:
+    using LocationProvider::LocationProvider;
+    bool available() const noexcept override { return false; }
+    void request(quint64 requestId) override
+    {
+        emit positionReady(requestId, 0.0, 0.0,
+                           domain::AppError(domain::ErrorCategory::CapabilityUnavailable));
+    }
+    void cancel(quint64) override {}
+};
 
 } // namespace
 
@@ -100,6 +141,9 @@ private slots:
     void currencyProviderFixturesPreserveMissingAndSortAllRates();
     void providerPoliciesMatchTheReferenceEndpoints();
     void weatherAndCurrencyModelsPublishTypedRows();
+    void weatherComparisonModelEnforcesCapacityDuplicatesAndIndependentFailures();
+    void weatherComparisonControllerAlignsProviderLocalDates();
+    void weatherComparisonPersistenceRestoresOrderCacheAndPreservesPrimaryLocation();
     void serviceCommandsPersistOnlyLocationsAndFavoriteDefinitions();
 };
 
@@ -464,6 +508,246 @@ void WeatherCurrencyFeatureTest::weatherAndCurrencyModelsPublishTypedRows()
     QVERIFY(!favorites.data(favorites.index(0), models::CurrencyFavoritesModel::RateRole).isValid());
     QCOMPARE(favorites.data(favorites.index(0), models::CurrencyFavoritesModel::RateStatusRole).toString(),
              QStringLiteral("missing"));
+}
+
+void WeatherCurrencyFeatureTest::weatherComparisonModelEnforcesCapacityDuplicatesAndIndependentFailures()
+{
+    models::WeatherComparisonModel comparison;
+    const domain::WeatherForecast forecast = sampleForecast();
+    QVector<domain::WeatherCity> cities{
+        comparisonCity(101, QStringLiteral("Istanbul"), 41.0082, 28.9784,
+                       QStringLiteral("Europe/Istanbul")),
+        comparisonCity(102, QStringLiteral("Tokyo"), 35.6762, 139.6503,
+                       QStringLiteral("Asia/Tokyo")),
+        comparisonCity(103, QStringLiteral("London"), 51.5072, -0.1276,
+                       QStringLiteral("Europe/London")),
+        comparisonCity(104, QStringLiteral("Sydney"), -33.8688, 151.2093,
+                       QStringLiteral("Australia/Sydney")),
+    };
+    QVERIFY(comparison.addCity(cities.at(0), forecast,
+                               QStringLiteral("2026-10-30T12:00:00Z")));
+    QVERIFY(!comparison.addCity(
+        comparisonCity(105, QStringLiteral("Istanbul duplicate"), 41.0082, 28.9784,
+                       QStringLiteral("Europe/Istanbul")), forecast,
+        QStringLiteral("2026-10-30T12:00:00Z")));
+    for (qsizetype index = 1; index < cities.size(); ++index)
+        QVERIFY(comparison.addCity(cities.at(index), forecast,
+                                   QStringLiteral("2026-10-30T12:00:00Z")));
+    QCOMPARE(comparison.count(), 4);
+    QVERIFY(!comparison.addCity(
+        comparisonCity(106, QStringLiteral("Reykjavik"), 64.1466, -21.9426,
+                       QStringLiteral("Atlantic/Reykjavik")), forecast,
+        QStringLiteral("2026-10-30T12:00:00Z")));
+
+    const QString firstIdentity = domain::stableWeatherCityIdentity(cities.at(0));
+    const QString secondIdentity = domain::stableWeatherCityIdentity(cities.at(1));
+    QVERIFY(comparison.setLoading(firstIdentity, true));
+    QVERIFY(comparison.setError(firstIdentity, QStringLiteral("Offline")));
+    const auto failedCity = comparison.cityByIdentity(firstIdentity);
+    QVERIFY(failedCity.has_value());
+    QVERIFY(!failedCity->loading);
+    QCOMPARE(failedCity->error, QStringLiteral("Offline"));
+    QCOMPARE(failedCity->forecast.days.size(), forecast.days.size());
+    QCOMPARE(failedCity->lastSuccessfulRefresh, QStringLiteral("2026-10-30T12:00:00Z"));
+    const auto healthyCity = comparison.cityByIdentity(secondIdentity);
+    QVERIFY(healthyCity.has_value());
+    QVERIFY(healthyCity->error.isEmpty());
+    QVERIFY(!healthyCity->loading);
+
+    QVERIFY(comparison.setLoading(secondIdentity, true));
+    QVERIFY(comparison.setForecast(secondIdentity, forecast,
+                                   QStringLiteral("2026-10-30T13:00:00Z")));
+    QCOMPARE(comparison.cityByIdentity(firstIdentity)->error, QStringLiteral("Offline"));
+    QCOMPARE(comparison.cityByIdentity(secondIdentity)->lastSuccessfulRefresh,
+             QStringLiteral("2026-10-30T13:00:00Z"));
+    QVERIFY(comparison.setLoading(secondIdentity, true));
+    QVERIFY(comparison.setLoading(secondIdentity, false)); // A canceled refresh keeps its cached forecast.
+    QCOMPARE(comparison.cityByIdentity(secondIdentity)->forecast.days.size(), forecast.days.size());
+    QVERIFY(comparison.setLoading(secondIdentity, true));
+    QVERIFY(comparison.removeCity(secondIdentity));
+    QVERIFY(!comparison.setForecast(secondIdentity, forecast,
+                                    QStringLiteral("2026-10-30T13:00:00Z")));
+    QCOMPARE(comparison.count(), 3);
+}
+
+void WeatherCurrencyFeatureTest::weatherComparisonControllerAlignsProviderLocalDates()
+{
+    QTemporaryDir temporary;
+    QVERIFY(temporary.isValid());
+    application::ApplicationServiceGraph graph(QStringLiteral("weather-date-policy"),
+                                                temporary.path());
+    FixedClock clock;
+    UnavailableLocationProvider location;
+    controllers::WeatherController controller(&graph, &clock, &location);
+    const QTimeZone westZone(QStringLiteral("Pacific/Pago_Pago").toUtf8());
+    const QTimeZone eastZone(QStringLiteral("Pacific/Kiritimati").toUtf8());
+    QVERIFY(westZone.isValid());
+    QVERIFY(eastZone.isValid());
+    QCOMPARE(clock.nowUtc().toTimeZone(westZone).date(), QDate(2026, 10, 30));
+    QCOMPARE(clock.nowUtc().toTimeZone(eastZone).date(), QDate(2026, 10, 31));
+
+    const domain::WeatherCity west = comparisonCity(
+        201, QStringLiteral("Pago Pago"), -14.2756, -170.7020,
+        QStringLiteral("Pacific/Pago_Pago"));
+    const domain::WeatherCity east = comparisonCity(
+        202, QStringLiteral("Kiritimati"), 1.8721, -157.4278,
+        QStringLiteral("Pacific/Kiritimati"));
+    const domain::WeatherForecast westForecast = datedForecast(
+        QStringLiteral("Pacific/Pago_Pago"),
+        QJsonArray{QStringLiteral("2026-10-30"), QStringLiteral("2026-10-31")});
+    const domain::WeatherForecast eastForecast = datedForecast(
+        QStringLiteral("Pacific/Kiritimati"),
+        QJsonArray{QStringLiteral("2026-10-31"), QStringLiteral("2026-11-01")});
+    QVERIFY(!westForecast.days.isEmpty());
+    QVERIFY(!eastForecast.days.isEmpty());
+    QCOMPARE(westForecast.days.first().date, QStringLiteral("2026-10-30"));
+    QCOMPARE(eastForecast.days.first().date, QStringLiteral("2026-10-31"));
+    QVERIFY(controller.comparisonCities()->addCity(west, westForecast));
+    QVERIFY(controller.comparisonCities()->addCity(east, eastForecast));
+
+    QCOMPARE(controller.comparisonCities()->data(
+                 controller.comparisonCities()->index(0), models::WeatherComparisonModel::TimezoneRole)
+                 .toString(), QStringLiteral("Pacific/Pago_Pago"));
+    QCOMPARE(controller.comparisonCities()->data(
+                 controller.comparisonCities()->index(1), models::WeatherComparisonModel::TimezoneRole)
+                 .toString(), QStringLiteral("Pacific/Kiritimati"));
+
+    const QVariantMap sharedDate = controller.comparisonDateOptions().at(1).toMap();
+    QCOMPARE(sharedDate.value(QStringLiteral("date")).toString(), QStringLiteral("2026-10-31"));
+    QCOMPARE(sharedDate.value(QStringLiteral("availableCount")).toInt(), 2);
+    QVERIFY(sharedDate.value(QStringLiteral("common")).toBool());
+    controller.selectComparisonForecastDate(QStringLiteral("2026-10-31"));
+    QCOMPARE(controller.comparisonSelectedDate(), QStringLiteral("2026-10-31"));
+    QCOMPARE(controller.comparisonCities()->data(
+                 controller.comparisonCities()->index(0),
+                 models::WeatherComparisonModel::SelectedForecastDateRole).toString(),
+             QStringLiteral("2026-10-31"));
+    QCOMPARE(controller.comparisonCities()->data(
+                 controller.comparisonCities()->index(1),
+                 models::WeatherComparisonModel::SelectedForecastDateRole).toString(),
+             QStringLiteral("2026-10-31"));
+
+    controller.selectComparisonForecastDate(QStringLiteral("2026-10-30"));
+    QCOMPARE(controller.comparisonSelectedDate(), QStringLiteral("2026-10-30"));
+    QCOMPARE(controller.comparisonCities()->data(
+                 controller.comparisonCities()->index(0),
+                 models::WeatherComparisonModel::SelectedForecastDateRole).toString(),
+             QStringLiteral("2026-10-30"));
+    QVERIFY(controller.comparisonCities()->data(
+                controller.comparisonCities()->index(1),
+                models::WeatherComparisonModel::SelectedForecastDateRole).toString().isEmpty());
+    const QVariantMap unavailableHeader = controller.comparisonTableHeaders().at(1).toMap();
+    QVERIFY(!unavailableHeader.value(QStringLiteral("dateAvailable")).toBool());
+    QCOMPARE(unavailableHeader.value(QStringLiteral("date")).toString(),
+             QStringLiteral("2026-10-30"));
+    const QVariantMap maximumRow = controller.comparisonTableRows().at(2).toMap();
+    QCOMPARE(maximumRow.value(QStringLiteral("values")).toList().at(1).toMap()
+                 .value(QStringLiteral("text")).toString(),
+             QStringLiteral("—"));
+
+    controller.selectComparisonForecastDate(QStringLiteral("2026-12-01"));
+    QCOMPARE(controller.comparisonSelectedDate(), QStringLiteral("2026-10-30"));
+}
+
+void WeatherCurrencyFeatureTest::weatherComparisonPersistenceRestoresOrderCacheAndPreservesPrimaryLocation()
+{
+    QSqlDatabase database;
+    QString connection;
+    QVERIFY(openDatabase(&database, &connection));
+    const auto noCancel = [] { return false; };
+    const domain::WeatherForecast primaryForecast = sampleForecast();
+    {
+        storage::StorageRepositories repositories(database);
+        QCOMPARE(services::WeatherService::savePrimaryLocation(
+                     41.0082, 28.9784, primaryForecast,
+                     QStringLiteral("2026-10-30T12:00:00Z"))(repositories, noCancel)
+                     .error.category(), domain::ErrorCategory::None);
+    }
+    {
+        QSqlQuery migration(database);
+        QVERIFY(migration.exec(QStringLiteral(
+            "SELECT name FROM schema_migrations WHERE version=11")));
+        QVERIFY(migration.next());
+        QCOMPARE(migration.value(0).toString(),
+                 QStringLiteral("weather comparison cities and forecast cache"));
+    }
+    {
+        QSqlQuery downgrade(database);
+        QVERIFY(downgrade.exec(QStringLiteral("DROP TABLE weather_comparison_cities")));
+        QVERIFY(downgrade.exec(QStringLiteral(
+            "DELETE FROM schema_migrations WHERE version=11")));
+    }
+    QString migrationDiagnostic;
+    QVERIFY2(storage::SchemaMigrator::apply(database, &migrationDiagnostic),
+             qPrintable(migrationDiagnostic));
+    {
+        QSqlQuery migration(database);
+        QVERIFY(migration.exec(QStringLiteral(
+            "SELECT name FROM schema_migrations WHERE version=11")));
+        QVERIFY(migration.next());
+        QCOMPARE(migration.value(0).toString(),
+                 QStringLiteral("weather comparison cities and forecast cache"));
+    }
+    {
+        storage::StorageRepositories repositories(database);
+        const domain::WeatherCity cityA = comparisonCity(
+            301, QStringLiteral("Oslo"), 59.9139, 10.7522, QStringLiteral("Europe/Oslo"));
+        const domain::WeatherCity cityB = comparisonCity(
+            302, QStringLiteral("Seoul"), 37.5665, 126.9780, QStringLiteral("Asia/Seoul"));
+        const domain::WeatherForecast forecastA = datedForecast(
+            QStringLiteral("Europe/Oslo"), QJsonArray{QStringLiteral("2026-10-30")});
+        const domain::WeatherForecast forecastB = datedForecast(
+            QStringLiteral("Asia/Seoul"), QJsonArray{QStringLiteral("2026-10-31")});
+        const QString identityA = domain::stableWeatherCityIdentity(cityA);
+        const QString identityB = domain::stableWeatherCityIdentity(cityB);
+        QCOMPARE(services::WeatherService::addComparisonCity(
+                     cityA, forecastA, QStringLiteral("2026-10-30T12:00:00Z"))(
+                     repositories, noCancel).error.category(), domain::ErrorCategory::None);
+        QCOMPARE(services::WeatherService::addComparisonCity(
+                     cityB, forecastB, QStringLiteral("2026-10-30T12:00:00Z"))(
+                     repositories, noCancel).error.category(), domain::ErrorCategory::None);
+        QCOMPARE(services::WeatherService::addComparisonCity(
+                     comparisonCity(303, QStringLiteral("Oslo duplicate"),
+                                    59.9139, 10.7522, QStringLiteral("Europe/Oslo")),
+                     forecastA, QStringLiteral("2026-10-30T12:00:00Z"))(
+                     repositories, noCancel).error.category(), domain::ErrorCategory::Conflict);
+
+        QCOMPARE(services::WeatherService::reorderComparisonCities({identityB, identityA})(
+                     repositories, noCancel).error.category(), domain::ErrorCategory::None);
+        const domain::WeatherForecast refreshed = datedForecast(
+            QStringLiteral("Europe/Oslo"), QJsonArray{QStringLiteral("2026-11-01")});
+        QCOMPARE(services::WeatherService::saveComparisonForecast(
+                     identityA, refreshed, QStringLiteral("2026-10-31T12:00:00Z"))(
+                     repositories, noCancel).error.category(), domain::ErrorCategory::None);
+
+        const storage::StorageReply loaded = services::WeatherService::loadComparisonCities()(
+            repositories, noCancel);
+        QCOMPARE(loaded.error.category(), domain::ErrorCategory::None);
+        const QVariantList cities = loaded.values.value(QStringLiteral("cities")).toList();
+        QCOMPARE(cities.size(), 2);
+        QCOMPARE(cities.at(0).toMap().value(QStringLiteral("identity")).toString(), identityB);
+        QCOMPARE(cities.at(0).toMap().value(QStringLiteral("displayOrder")).toInt(), 0);
+        QCOMPARE(cities.at(1).toMap().value(QStringLiteral("identity")).toString(), identityA);
+        QCOMPARE(cities.at(1).toMap().value(QStringLiteral("updatedAt")).toString(),
+                 QStringLiteral("2026-10-31T12:00:00Z"));
+        const auto cachedForecast = providers::parseWeatherForecast(
+            cities.at(1).toMap().value(QStringLiteral("forecastJson")).toString().toUtf8());
+        QVERIFY(cachedForecast.succeeded());
+        QCOMPARE(cachedForecast.value.days.first().date, QStringLiteral("2026-11-01"));
+
+        const storage::StorageReply primary = services::WeatherService::loadPrimaryLocation()(
+            repositories, noCancel);
+        QCOMPARE(primary.error.category(), domain::ErrorCategory::None);
+        QCOMPARE(primary.values.value(QStringLiteral("latitude")).toDouble(), 41.0082);
+        QCOMPARE(primary.values.value(QStringLiteral("longitude")).toDouble(), 28.9784);
+        const auto retainedPrimaryForecast = providers::parseWeatherForecast(
+            primary.values.value(QStringLiteral("forecastJson")).toString().toUtf8());
+        QVERIFY(retainedPrimaryForecast.succeeded());
+        QCOMPARE(retainedPrimaryForecast.value.timezone, primaryForecast.timezone);
+    }
+    database.close();
+    database = QSqlDatabase();
+    QSqlDatabase::removeDatabase(connection);
 }
 
 void WeatherCurrencyFeatureTest::serviceCommandsPersistOnlyLocationsAndFavoriteDefinitions()

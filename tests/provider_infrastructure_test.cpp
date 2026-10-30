@@ -449,6 +449,57 @@ private slots:
         worker.shutdown();
     }
 
+    void openMeteoCityRequestsKeepOfflineAndCancellationResultsIndependent()
+    {
+        auto *manager = static_cast<FixtureManager *>(nullptr);
+        const QUrl successfulCity(QStringLiteral(
+            "https://api.open-meteo.com/v1/forecast?latitude=35.68&longitude=139.65"));
+        const QUrl offlineCity(QStringLiteral(
+            "https://api.open-meteo.com/v1/forecast?latitude=41.01&longitude=28.98"));
+        const QUrl cancelledCity(QStringLiteral(
+            "https://api.open-meteo.com/v1/forecast?latitude=-33.87&longitude=151.21"));
+        providers::NetworkWorker worker(nullptr, [&manager](QObject *parent) {
+            manager = new FixtureManager(parent);
+            return manager;
+        });
+        worker.initialize();
+        manager->responses.insert(successfulCity.toString(QUrl::FullyEncoded),
+            FixtureResponse{200, fixture(QStringLiteral("weather-forecast-success.json")), {}, 0});
+        manager->responses.insert(offlineCity.toString(QUrl::FullyEncoded),
+            FixtureResponse{200, {}, {}, 0, QNetworkReply::HostNotFoundError});
+        manager->responses.insert(cancelledCity.toString(QUrl::FullyEncoded),
+            FixtureResponse{200, fixture(QStringLiteral("weather-forecast-success.json")), {}, 100});
+
+        QSignalSpy finished(&worker, &providers::NetworkWorker::requestFinished);
+        application::OperationCoordinator operations;
+        const auto success = operations.begin(QStringLiteral("Open-Meteo city one"));
+        const auto offline = operations.begin(QStringLiteral("Open-Meteo city two"));
+        const auto cancelled = operations.begin(QStringLiteral("Open-Meteo city three"));
+        worker.get(success, {providers::ProviderId::OpenMeteoForecast, successfulCity, false, 0});
+        worker.get(offline, {providers::ProviderId::OpenMeteoForecast, offlineCity, false, 0});
+        worker.get(cancelled, {providers::ProviderId::OpenMeteoForecast, cancelledCity, false, 0});
+        operations.cancel(cancelled.id);
+        worker.cancel(cancelled.id.value);
+
+        QTRY_COMPARE_WITH_TIMEOUT(finished.size(), 3, 1000);
+        QHash<quint64, domain::ErrorCategory> categories;
+        QHash<quint64, QByteArray> bodies;
+        for (const auto &row : finished) {
+            const quint64 id = row.at(0).toULongLong();
+            categories.insert(id, row.at(2).value<domain::AppError>().category());
+            bodies.insert(id, row.at(1).toByteArray());
+        }
+        QCOMPARE(categories.value(success.id.value), domain::ErrorCategory::None);
+        QVERIFY(!bodies.value(success.id.value).isEmpty());
+        QCOMPARE(categories.value(offline.id.value), domain::ErrorCategory::Connection);
+        QVERIFY(bodies.value(offline.id.value).isEmpty());
+        QCOMPARE(categories.value(cancelled.id.value), domain::ErrorCategory::Cancelled);
+        QCOMPARE(manager->requestCounts.value(successfulCity.toString(QUrl::FullyEncoded)), 1);
+        QCOMPARE(manager->requestCounts.value(offlineCity.toString(QUrl::FullyEncoded)), 1);
+        QCOMPARE(manager->requestCounts.value(cancelledCity.toString(QUrl::FullyEncoded)), 1);
+        worker.shutdown();
+    }
+
     void networkConcurrencyNeverExceedsFourRequests()
     {
         auto *manager = static_cast<FixtureManager *>(nullptr);

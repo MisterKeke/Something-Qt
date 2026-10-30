@@ -266,24 +266,37 @@ add_test(NAME SomethingQtFavoritesFeatureTests COMMAND SomethingQtFavoritesFeatu
 add_executable(SomethingQtWeatherCurrencyTests
     weather_currency_feature_test.cpp
     provider_fixtures.qrc
+    ../src/application/application_lifecycle.cpp
+    ../src/application/application_service_graph.cpp
+    ../src/application/capability_registry.cpp
+    ../src/application/operation_coordinator.cpp
+    ../src/controllers/weather_controller.cpp
     ../src/domain/app_error.cpp
     ../src/domain/task_rules.cpp
     ../src/domain/weather_currency.cpp
     ../src/models/currency_rates_model.cpp
+    ../src/models/weather_comparison_model.cpp
     ../src/models/weather_forecast_model.cpp
+    ../src/platform/location_provider.cpp
+    ../src/platform/profile_instance_lock.cpp
     ../src/providers/feature_parsers.cpp
+    ../src/providers/network_worker.cpp
     ../src/providers/provider_policy.cpp
+    ../src/providers/provider_response_cache.cpp
+    ../src/services/bounded_worker_pool.cpp
     ../src/services/currency_service.cpp
     ../src/services/weather_service.cpp
     ../src/domain/task_history.cpp
     ../src/domain/task_scheduling.cpp
     ../src/storage/repositories.cpp
     ../src/storage/schema_migrator.cpp
+    ../src/storage/storage_worker.cpp
 )
 target_include_directories(SomethingQtWeatherCurrencyTests PRIVATE ../src)
 target_link_libraries(SomethingQtWeatherCurrencyTests PRIVATE
     Qt6::Core
     Qt6::Gui
+    Qt6::Network
     Qt6::Sql
     Qt6::Test
 )
