@@ -47,6 +47,8 @@ struct WeatherComparisonCity final {
     WeatherCity city;
     WeatherForecast forecast;
     QString lastSuccessfulRefresh;
+    QString selectedForecastDate;
+    QString localDateTime;
     QString error;
     bool loading{false};
 };

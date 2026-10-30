@@ -36,6 +36,7 @@ class WeatherController final : public QObject {
     Q_PROPERTY(QVariantList cityCandidates READ cityCandidates NOTIFY cityChanged)
     Q_PROPERTY(int comparisonCityCount READ comparisonCityCount NOTIFY comparisonChanged)
     Q_PROPERTY(bool canAddSearchedCity READ canAddSearchedCity NOTIFY comparisonChanged)
+    Q_PROPERTY(bool canReplaceSearchedCity READ canReplaceSearchedCity NOTIFY comparisonChanged)
     Q_PROPERTY(bool searchedCityAlreadyAdded READ searchedCityAlreadyAdded NOTIFY comparisonChanged)
     Q_PROPERTY(bool primaryLoading READ primaryLoading NOTIFY primaryChanged)
     Q_PROPERTY(bool primaryRefreshing READ primaryRefreshing NOTIFY primaryChanged)
@@ -71,6 +72,7 @@ public:
     QVariantList cityCandidates() const;
     int comparisonCityCount() const noexcept { return m_comparisonCities.count(); }
     bool canAddSearchedCity() const noexcept;
+    bool canReplaceSearchedCity() const noexcept;
     bool searchedCityAlreadyAdded() const noexcept;
     bool primaryLoading() const noexcept { return m_primaryLoading; }
     bool primaryRefreshing() const noexcept { return m_primaryRefreshing; }
@@ -86,11 +88,13 @@ public:
     Q_INVOKABLE void cancelCitySearch();
     Q_INVOKABLE void selectCityCandidate(int candidateIndex);
     Q_INVOKABLE bool addSearchedCityToComparison();
+    Q_INVOKABLE void replaceComparisonCity(QString identity);
     Q_INVOKABLE void removeComparisonCity(QString identity);
     Q_INVOKABLE void moveComparisonCity(QString identity, int offset);
     Q_INVOKABLE void refreshComparisonCity(QString identity);
     Q_INVOKABLE void refreshAllComparisonCities();
     Q_INVOKABLE void cancelComparisonCityRefresh(QString identity);
+    Q_INVOKABLE void selectComparisonForecastDate(QString identity, QString date);
     Q_INVOKABLE void updateSolarInfo();
     Q_INVOKABLE void selectPrimaryForecastDate(QString date);
     Q_INVOKABLE void selectCityForecastDate(QString date);
@@ -105,7 +109,7 @@ private:
                       PrimarySave, CityGeocode, CityGeocodeParse,
                       CityForecast, CityForecastParse,
                       LoadComparison, AddComparisonCity, RemoveComparisonCity,
-                      ReorderComparisonCities, SaveComparisonForecast,
+                      ReplaceComparisonCity, ReorderComparisonCities, SaveComparisonForecast,
                       ComparisonForecast, ComparisonForecastParse };
     struct Pending final {
         Kind kind{Kind::LoadPrimary};
@@ -154,6 +158,7 @@ private:
                         bool fromCache);
     void publishCity(const domain::WeatherCity &city,
                      const domain::WeatherForecast &forecast);
+    void updateComparisonLocalTimes();
     void setPrimaryError(domain::AppError error, const QString &fallback);
     void setCityError(domain::AppError error, const QString &fallback);
     void requestNativeLocation(quint64 generation);

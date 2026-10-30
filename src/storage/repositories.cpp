@@ -2158,7 +2158,8 @@ RepositoryResult<void> WeatherComparisonRepository::add(
 {
     Q_ASSERT(QThread::currentThread() == m_database.driver()->thread());
     const QString identity = domain::stableWeatherCityIdentity(city);
-    if (identity.isEmpty() || city.name.trimmed().isEmpty() || city.name.size() > 120
+    if (identity.isEmpty() || city.geocodingId < 0
+        || city.name.trimmed().isEmpty() || city.name.size() > 120
         || city.administrativeArea.size() > 120 || city.country.size() > 120
         || city.timezone.size() > 100
         || !domain::isValidWeatherCoordinates(city.latitude, city.longitude)
@@ -2194,6 +2195,76 @@ RepositoryResult<void> WeatherComparisonRepository::add(
     if (forecastUpdatedAt.isEmpty()) query.addBindValue(QVariant());
     else query.addBindValue(forecastUpdatedAt);
     if (!query.exec()) return failureVoid(queryFailure(query));
+    return {};
+}
+
+RepositoryResult<void> WeatherComparisonRepository::replace(
+    const QString &identity, const domain::WeatherCity &city,
+    QString forecastJson, QString forecastUpdatedAt)
+{
+    Q_ASSERT(QThread::currentThread() == m_database.driver()->thread());
+    const QString newIdentity = domain::stableWeatherCityIdentity(city);
+    if (identity.trimmed().isEmpty() || newIdentity.isEmpty() || city.geocodingId < 0
+        || city.name.trimmed().isEmpty() || city.name.size() > 120
+        || city.administrativeArea.size() > 120 || city.country.size() > 120
+        || city.timezone.size() > 100 || !domain::isValidWeatherCoordinates(city.latitude, city.longitude)
+        || forecastJson.isEmpty() || forecastUpdatedAt.isEmpty()) {
+        return failureVoid(domain::ErrorCategory::Validation);
+    }
+    if (!m_database.transaction()) return failureVoid(domain::ErrorCategory::Storage);
+    const auto rollback = [this] { m_database.rollback(); };
+    const auto existing = load();
+    if (!existing.succeeded()) {
+        rollback();
+        return failureVoid(existing.error.category());
+    }
+    bool targetFound = false;
+    for (const WeatherComparisonLocation &entry : existing.value) {
+        const QString existingIdentity = domain::stableWeatherCityIdentity(entry.city);
+        if (existingIdentity == identity) {
+            targetFound = true;
+            continue;
+        }
+        if (domain::isSameWeatherLocation(entry.city, city)) {
+            rollback();
+            return failureVoid(domain::ErrorCategory::Conflict);
+        }
+    }
+    if (!targetFound) {
+        rollback();
+        return failureVoid(domain::ErrorCategory::NotFound);
+    }
+
+    QSqlQuery query(m_database);
+    query.prepare(QStringLiteral(
+        "UPDATE weather_comparison_cities SET identity=?,geocoding_id=?,display_name=?,"
+        "administrative_area=?,country=?,timezone=?,latitude=?,longitude=?,forecast_json=?,"
+        "forecast_updated_at=?,updated_at=CURRENT_TIMESTAMP WHERE identity=?"));
+    query.addBindValue(newIdentity);
+    if (city.geocodingId > 0) query.addBindValue(city.geocodingId);
+    else query.addBindValue(QVariant());
+    query.addBindValue(city.name.trimmed());
+    query.addBindValue(city.administrativeArea);
+    query.addBindValue(city.country);
+    query.addBindValue(city.timezone);
+    query.addBindValue(city.latitude);
+    query.addBindValue(city.longitude);
+    query.addBindValue(forecastJson);
+    query.addBindValue(forecastUpdatedAt);
+    query.addBindValue(identity);
+    if (!query.exec()) {
+        const auto category = queryFailure(query);
+        rollback();
+        return failureVoid(category);
+    }
+    if (query.numRowsAffected() != 1) {
+        rollback();
+        return failureVoid(domain::ErrorCategory::NotFound);
+    }
+    if (!m_database.commit()) {
+        rollback();
+        return failureVoid(domain::ErrorCategory::Storage);
+    }
     return {};
 }
 

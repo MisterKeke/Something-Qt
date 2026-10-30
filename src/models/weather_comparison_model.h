@@ -27,6 +27,8 @@ public:
         LoadingRole,
         ErrorRole,
         HasForecastRole,
+        SelectedForecastDateRole,
+        LocalDateTimeRole,
     };
     Q_ENUM(Role)
 
@@ -43,6 +45,9 @@ public:
     std::optional<domain::WeatherComparisonCity> cityByIdentity(
         const QString &identity) const;
     bool containsCity(const domain::WeatherCity &city) const noexcept;
+    bool replaceCity(const QString &identity, domain::WeatherCity city,
+                     domain::WeatherForecast forecast,
+                     QString lastSuccessfulRefresh);
     bool addCity(domain::WeatherCity city,
                  domain::WeatherForecast forecast = {},
                  QString lastSuccessfulRefresh = {},
@@ -53,6 +58,8 @@ public:
     bool setError(const QString &identity, QString error);
     bool setForecast(const QString &identity, domain::WeatherForecast forecast,
                      QString lastSuccessfulRefresh);
+    bool selectForecastDate(const QString &identity, const QString &date);
+    bool setLocalDateTime(const QString &identity, QString localDateTime);
     void clear();
 
 signals:

@@ -148,6 +148,29 @@ storage::StorageCommand WeatherService::addComparisonCity(
     };
 }
 
+storage::StorageCommand WeatherService::replaceComparisonCity(
+    QString identity, domain::WeatherCity city,
+    domain::WeatherForecast forecast, QString updatedAt)
+{
+    return [identity = std::move(identity), city = std::move(city),
+            forecast = std::move(forecast), updatedAt = std::move(updatedAt)](
+               storage::StorageRepositories &repositories,
+               const std::function<bool()> &cancelled) {
+        if (cancelled()) return failed(domain::AppError::cancelled());
+        if (identity.isEmpty() || updatedAt.isEmpty() || !validForecast(forecast)
+            || domain::stableWeatherCityIdentity(city).isEmpty()) {
+            return failed(domain::AppError(domain::ErrorCategory::Validation));
+        }
+        const auto replaced = repositories.weatherComparison.replace(
+            identity, city, QString::fromUtf8(providers::serializeWeatherForecast(forecast)),
+            updatedAt);
+        if (!replaced.succeeded()) return failed(replaced.error);
+        storage::StorageReply reply;
+        reply.values.insert(QStringLiteral("saved"), true);
+        return reply;
+    };
+}
+
 storage::StorageCommand WeatherService::removeComparisonCity(QString identity)
 {
     return [identity = std::move(identity)](

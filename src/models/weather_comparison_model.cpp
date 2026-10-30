@@ -40,6 +40,8 @@ QVariant WeatherComparisonModel::data(const QModelIndex &index, int role) const
     case LoadingRole: return entry.loading;
     case ErrorRole: return entry.error;
     case HasForecastRole: return !entry.forecast.days.isEmpty();
+    case SelectedForecastDateRole: return entry.selectedForecastDate;
+    case LocalDateTimeRole: return entry.localDateTime;
     default: return {};
     }
 }
@@ -53,7 +55,9 @@ QHash<int, QByteArray> WeatherComparisonModel::roleNames() const
             {ForecastRole, "forecast"},
             {LastSuccessfulRefreshRole, "lastSuccessfulRefresh"},
             {LoadingRole, "loading"}, {ErrorRole, "error"},
-            {HasForecastRole, "hasForecast"}};
+            {HasForecastRole, "hasForecast"},
+            {SelectedForecastDateRole, "selectedForecastDate"},
+            {LocalDateTimeRole, "localDateTime"}};
 }
 
 int WeatherComparisonModel::indexOfIdentity(const QString &identity) const noexcept
@@ -82,6 +86,42 @@ bool WeatherComparisonModel::containsCity(const domain::WeatherCity &city) const
         });
 }
 
+bool WeatherComparisonModel::replaceCity(const QString &identity,
+                                         domain::WeatherCity city,
+                                         domain::WeatherForecast forecast,
+                                         QString lastSuccessfulRefresh)
+{
+    const int row = indexOfIdentity(identity);
+    if (row < 0 || city.name.trimmed().isEmpty()
+        || !domain::isValidWeatherCoordinates(city.latitude, city.longitude)
+        || domain::stableWeatherCityIdentity(city).isEmpty() || forecast.days.isEmpty()) {
+        return false;
+    }
+    city.name = city.name.trimmed();
+    for (qsizetype existingRow = 0; existingRow < m_cities.size(); ++existingRow) {
+        if (existingRow != row && domain::isSameWeatherLocation(m_cities.at(existingRow).city, city))
+            return false;
+    }
+    if (!forecast.timezone.isEmpty()) city.timezone = forecast.timezone;
+
+    domain::WeatherComparisonCity &entry = m_cities[row];
+    entry.city = std::move(city);
+    entry.forecast = std::move(forecast);
+    entry.lastSuccessfulRefresh = std::move(lastSuccessfulRefresh);
+    entry.selectedForecastDate = entry.forecast.days.first().date;
+    entry.localDateTime.clear();
+    entry.error.clear();
+    entry.loading = false;
+    notifyRowChanged(row, {IdentityRole, GeocodingIdRole, NameRole,
+                           AdministrativeAreaRole, CountryRole, LatitudeRole,
+                           LongitudeRole, TimezoneRole, ForecastRole,
+                           LastSuccessfulRefreshRole, LoadingRole, ErrorRole,
+                           HasForecastRole, SelectedForecastDateRole,
+                           LocalDateTimeRole});
+    emit contentsChanged();
+    return true;
+}
+
 bool WeatherComparisonModel::addCity(domain::WeatherCity city,
                                      domain::WeatherForecast forecast,
                                      QString lastSuccessfulRefresh,
@@ -97,8 +137,14 @@ bool WeatherComparisonModel::addCity(domain::WeatherCity city,
 
     const int row = m_cities.size();
     beginInsertRows({}, row, row);
-    m_cities.push_back(domain::WeatherComparisonCity{
-        std::move(city), std::move(forecast), std::move(lastSuccessfulRefresh), {}, loading});
+    domain::WeatherComparisonCity entry;
+    entry.city = std::move(city);
+    entry.forecast = std::move(forecast);
+    entry.lastSuccessfulRefresh = std::move(lastSuccessfulRefresh);
+    entry.loading = loading;
+    if (!entry.forecast.days.isEmpty())
+        entry.selectedForecastDate = entry.forecast.days.first().date;
+    m_cities.push_back(std::move(entry));
     endInsertRows();
     emit countChanged();
     emit contentsChanged();
@@ -165,12 +211,49 @@ bool WeatherComparisonModel::setForecast(const QString &identity,
     domain::WeatherComparisonCity &entry = m_cities[row];
     if (!forecast.timezone.isEmpty()) entry.city.timezone = forecast.timezone;
     entry.forecast = std::move(forecast);
+    const bool selectedDateAvailable = std::any_of(
+        entry.forecast.days.cbegin(), entry.forecast.days.cend(),
+        [&entry](const domain::WeatherDay &day) {
+            return day.date == entry.selectedForecastDate;
+        });
+    if (!selectedDateAvailable)
+        entry.selectedForecastDate = entry.forecast.days.first().date;
     if (!lastSuccessfulRefresh.isEmpty())
         entry.lastSuccessfulRefresh = std::move(lastSuccessfulRefresh);
     entry.loading = false;
     entry.error.clear();
     notifyRowChanged(row, {TimezoneRole, ForecastRole, LastSuccessfulRefreshRole,
-                           LoadingRole, ErrorRole, HasForecastRole});
+                           LoadingRole, ErrorRole, HasForecastRole,
+                           SelectedForecastDateRole});
+    emit contentsChanged();
+    return true;
+}
+
+bool WeatherComparisonModel::selectForecastDate(const QString &identity,
+                                                const QString &date)
+{
+    const int row = indexOfIdentity(identity);
+    if (row < 0 || date.isEmpty()) return false;
+    domain::WeatherComparisonCity &entry = m_cities[row];
+    const bool available = std::any_of(entry.forecast.days.cbegin(), entry.forecast.days.cend(),
+        [&date](const domain::WeatherDay &day) { return day.date == date; });
+    if (!available) return false;
+    if (entry.selectedForecastDate == date) return true;
+    entry.selectedForecastDate = date;
+    notifyRowChanged(row, {SelectedForecastDateRole});
+    emit contentsChanged();
+    return true;
+}
+
+bool WeatherComparisonModel::setLocalDateTime(const QString &identity,
+                                              QString localDateTime)
+{
+    const int row = indexOfIdentity(identity);
+    if (row < 0) return false;
+    domain::WeatherComparisonCity &entry = m_cities[row];
+    if (entry.localDateTime == localDateTime) return true;
+    entry.localDateTime = std::move(localDateTime);
+    notifyRowChanged(row, {LocalDateTimeRole});
     emit contentsChanged();
     return true;
 }

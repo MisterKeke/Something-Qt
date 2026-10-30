@@ -138,6 +138,9 @@ public:
     RepositoryResult<QVector<WeatherComparisonLocation>> load() const;
     RepositoryResult<void> add(const domain::WeatherCity &city,
                                QString forecastJson, QString forecastUpdatedAt);
+    RepositoryResult<void> replace(const QString &identity,
+                                  const domain::WeatherCity &city,
+                                  QString forecastJson, QString forecastUpdatedAt);
     RepositoryResult<void> remove(const QString &identity);
     RepositoryResult<void> reorder(const QVector<QString> &orderedIdentities);
     RepositoryResult<void> saveForecast(const QString &identity,
