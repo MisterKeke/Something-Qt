@@ -56,7 +56,7 @@ void StorageRepositoryTest::migrationsAreTransactionalIndependentAndRepeatable()
     QString connectionName;
     QSqlDatabase database;
     QVERIFY(openTestDatabase(&database, &connectionName));
-    QCOMPARE(storage::SchemaMigrator::latestVersion(), 12);
+    QCOMPARE(storage::SchemaMigrator::latestVersion(), 14);
     QVERIFY(storage::SchemaMigrator::apply(database));
 
     QSqlQuery history(database);

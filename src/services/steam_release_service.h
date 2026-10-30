@@ -15,6 +15,7 @@ public:
     static storage::StorageCommand applyRefresh(
         QString profileDirectory, QVector<storage::SteamReleaseRefreshUpdate> updates);
     static storage::StorageCommand removeRelease(QString profileDirectory, quint32 appId);
+    static storage::StorageCommand acknowledgeDateChange(quint32 appId);
     static storage::StorageCommand saveArtwork(QString profileDirectory, quint32 appId,
                                                QString expectedSourceUrl,
                                                StagedSteamArtwork artwork);

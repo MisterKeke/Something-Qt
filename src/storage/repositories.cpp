@@ -3920,7 +3920,8 @@ RepositoryResult<domain::SteamTrackedRelease> SteamReleaseRepository::load(quint
         "SELECT steam_app_id,store_url,title,artwork_source_url,artwork_filename,artwork_mime_type,"
         "artwork_byte_size,release_date_text,release_date_precision,release_date_exact,"
         "release_window_start,release_window_end,release_status,followed_at_utc,"
-        "last_successful_update_at_utc,last_attempted_update_at_utc,refresh_state,refresh_error "
+        "last_successful_update_at_utc,last_attempted_update_at_utc,refresh_state,refresh_error,"
+        "date_change_unacknowledged "
         "FROM steam_release_follows WHERE steam_app_id=?"));
     query.addBindValue(appId);
     if (!query.exec()) return failure<domain::SteamTrackedRelease>(queryFailure(query));
@@ -3962,6 +3963,7 @@ RepositoryResult<domain::SteamTrackedRelease> SteamReleaseRepository::load(quint
     release.lastAttemptedUpdateAtUtc = query.value(15).toString();
     release.refreshState = *refreshState;
     release.refreshError = query.value(17).toString();
+    release.dateChangeUnacknowledged = query.value(18).toBool();
     if (!validTrackedSteamRelease(release))
         return failure<domain::SteamTrackedRelease>(domain::ErrorCategory::Storage);
 
@@ -4055,17 +4057,13 @@ RepositoryResult<void> SteamReleaseRepository::applyRefreshBatch(
     Transaction transaction(m_database);
     if (!transaction.active()) return failureVoid(domain::ErrorCategory::Storage);
     for (const SteamReleaseRefreshUpdate &update : updates) {
-        QSqlQuery exists(m_database);
-        exists.prepare(QStringLiteral(
-            "SELECT 1 FROM steam_release_follows WHERE steam_app_id=?"));
-        exists.addBindValue(update.appId);
-        if (!exists.exec()) return failureVoid(queryFailure(exists));
-        if (!exists.next()) return failureVoid(domain::ErrorCategory::NotFound);
-        exists.finish();
+        const auto existing = load(update.appId);
+        if (!existing.succeeded()) return failureVoid(existing.error.category());
 
         QSqlQuery query(m_database);
         if (update.refreshedDetails) {
             const domain::SteamReleaseDetails &details = *update.refreshedDetails;
+            const bool dateChanged = existing.value.releaseDate != details.releaseDate;
             query.prepare(QStringLiteral(
                 "UPDATE steam_release_follows SET title=?,artwork_filename=CASE "
                 "WHEN artwork_source_url=? THEN artwork_filename ELSE '' END,"
@@ -4073,6 +4071,8 @@ RepositoryResult<void> SteamReleaseRepository::applyRefreshBatch(
                 "artwork_byte_size=CASE WHEN artwork_source_url=? THEN artwork_byte_size ELSE 0 END,"
                 "artwork_source_url=?,release_date_text=?,release_date_precision=?,"
                 "release_date_exact=?,release_window_start=?,release_window_end=?,release_status=?,"
+                "date_change_unacknowledged=CASE WHEN ? THEN 1 "
+                "ELSE date_change_unacknowledged END,"
                 "last_successful_update_at_utc=?,last_attempted_update_at_utc=?,"
                 "refresh_state='succeeded',refresh_error='',updated_at=? WHERE steam_app_id=?"));
             query.addBindValue(details.title.trimmed());
@@ -4089,6 +4089,7 @@ RepositoryResult<void> SteamReleaseRepository::applyRefreshBatch(
             query.addBindValue(details.releaseDate.windowEnd
                 ? QVariant(details.releaseDate.windowEnd->toString(Qt::ISODate)) : QVariant());
             query.addBindValue(domain::steamReleaseStatusName(details.status));
+            query.addBindValue(dateChanged);
             query.addBindValue(update.attemptedAtUtc);
             query.addBindValue(update.attemptedAtUtc);
             query.addBindValue(update.attemptedAtUtc);
@@ -4109,6 +4110,29 @@ RepositoryResult<void> SteamReleaseRepository::applyRefreshBatch(
     }
     if (!transaction.commit()) return failureVoid(domain::ErrorCategory::Storage);
     return {};
+}
+
+RepositoryResult<void> SteamReleaseRepository::acknowledgeDateChange(quint32 appId)
+{
+    Q_ASSERT(QThread::currentThread() == m_database.driver()->thread());
+    if (appId == 0) return failureVoid(domain::ErrorCategory::Validation);
+
+    QSqlQuery query(m_database);
+    query.prepare(QStringLiteral(
+        "UPDATE steam_release_follows SET date_change_unacknowledged=0,"
+        "updated_at=CURRENT_TIMESTAMP WHERE steam_app_id=?"));
+    query.addBindValue(appId);
+    if (!query.exec()) return failureVoid(queryFailure(query));
+    if (query.numRowsAffected() == 1) return {};
+
+    query.finish();
+    QSqlQuery exists(m_database);
+    exists.prepare(QStringLiteral(
+        "SELECT 1 FROM steam_release_follows WHERE steam_app_id=?"));
+    exists.addBindValue(appId);
+    if (!exists.exec()) return failureVoid(queryFailure(exists));
+    if (exists.next()) return {};
+    return failureVoid(domain::ErrorCategory::NotFound);
 }
 
 RepositoryResult<void> SteamReleaseRepository::setArtwork(

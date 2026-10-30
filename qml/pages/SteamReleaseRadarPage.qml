@@ -110,6 +110,7 @@ Item {
                     enabled: root.controller && root.controller.snapshotLoaded
                              && !root.controller.addBusy && !root.controller.refreshBusy
                              && !root.controller.deleteBusy
+                             && !root.controller.dateChangeAcknowledgeBusy
                     onAccepted: root.addRelease()
                 }
                 Shared.AppButton {
@@ -118,6 +119,7 @@ Item {
                     enabled: root.controller && root.controller.snapshotLoaded
                              && !root.controller.addBusy && !root.controller.refreshBusy
                              && !root.controller.deleteBusy
+                             && !root.controller.dateChangeAcknowledgeBusy
                     onClicked: root.addRelease()
                 }
             }
@@ -186,7 +188,8 @@ Item {
                     enabled: root.controller && root.controller.snapshotLoaded
                              && root.controller.releases.count > 0
                              && !root.controller.refreshBusy && !root.controller.addBusy
-                             && !root.controller.deleteBusy
+                     && !root.controller.deleteBusy
+                     && !root.controller.dateChangeAcknowledgeBusy
                     onClicked: root.controller.refreshReleases()
                 }
             }
@@ -277,6 +280,7 @@ Item {
                 required property string lastAttemptedUpdateAtUtc
                 required property string refreshState
                 required property string refreshError
+                required property bool dateChangeUnacknowledged
                 property bool radarActive: root.active
 
                 width: ListView.view.width
@@ -389,6 +393,37 @@ Item {
                                 }
                             }
 
+                            RowLayout {
+                                Layout.fillWidth: true
+                                spacing: 8
+                                visible: delegateRoot.dateChangeUnacknowledged
+                                Shared.StatusBadge {
+                                    text: qsTr("Release date changed")
+                                    badgeColor: ThemeModule.Theme.warning
+                                }
+                                Label {
+                                    Layout.fillWidth: true
+                                    text: qsTr("Steam’s latest announcement is shown below.")
+                                    color: ThemeModule.Theme.textSecondary
+                                    font.family: ThemeModule.Theme.fontFamily
+                                    font.pixelSize: 11
+                                    wrapMode: Text.Wrap
+                                }
+                                Shared.AppButton {
+                                    text: qsTr("Acknowledge")
+                                    quiet: true
+                                    enabled: root.controller
+                                             && !root.controller.dateChangeAcknowledgeBusy
+                                             && !root.controller.refreshBusy
+                                             && !root.controller.deleteBusy
+                                             && !root.controller.addBusy
+                                    Accessible.name: qsTr("Acknowledge release date change for %1")
+                                                     .arg(delegateRoot.title)
+                                    onClicked: root.controller.acknowledgeDateChange(
+                                                   Number(delegateRoot.appId))
+                                }
+                            }
+
                             Label {
                                 Layout.fillWidth: true
                                 text: delegateRoot.releaseDateText.length > 0
@@ -449,6 +484,7 @@ Item {
                                     enabled: root.controller && !root.controller.deleteBusy
                                              && !root.controller.refreshBusy
                                              && !root.controller.addBusy
+                                             && !root.controller.dateChangeAcknowledgeBusy
                                     Accessible.name: qsTr("Remove %1 from Release Radar").arg(delegateRoot.title)
                                     onClicked: {
                                         removeDialog.appId = Number(delegateRoot.appId)

@@ -24,6 +24,7 @@ class SteamReleaseController final : public QObject {
     Q_PROPERTY(bool refreshBusy READ refreshBusy NOTIFY stateChanged)
     Q_PROPERTY(QString refreshStatus READ refreshStatus NOTIFY stateChanged)
     Q_PROPERTY(bool deleteBusy READ deleteBusy NOTIFY stateChanged)
+    Q_PROPERTY(bool dateChangeAcknowledgeBusy READ dateChangeAcknowledgeBusy NOTIFY stateChanged)
     Q_PROPERTY(QString errorMessage READ errorMessage NOTIFY stateChanged)
     Q_PROPERTY(QString notification READ notification NOTIFY stateChanged)
 
@@ -39,12 +40,14 @@ public:
     bool refreshBusy() const noexcept { return m_refreshBusy; }
     QString refreshStatus() const { return m_refreshStatus; }
     bool deleteBusy() const noexcept { return m_deleteBusy; }
+    bool dateChangeAcknowledgeBusy() const noexcept { return m_dateChangeAcknowledgeBusy; }
     QString errorMessage() const { return m_errorMessage; }
     QString notification() const { return m_notification; }
 
     Q_INVOKABLE void addRelease(QString storeUrl);
     Q_INVOKABLE void refreshReleases();
     Q_INVOKABLE void removeRelease(quint32 appId);
+    Q_INVOKABLE void acknowledgeDateChange(quint32 appId);
     Q_INVOKABLE void openStore(quint32 appId);
     Q_INVOKABLE void retryLoad();
     Q_INVOKABLE void clearNotification();
@@ -59,7 +62,7 @@ signals:
 
 private:
     enum class Kind { Snapshot, AddNetwork, AddParse, AddInsert, Delete,
-                      RefreshNetwork, RefreshParse, RefreshCommit,
+                      RefreshNetwork, RefreshParse, RefreshCommit, DateChangeAcknowledge,
                       ArtworkNetwork, ArtworkStage, ArtworkSave };
     struct Pending final {
         Kind kind{Kind::Snapshot};
@@ -134,6 +137,7 @@ private:
     bool m_refreshBusy{false};
     bool m_refreshCommitPending{false};
     bool m_deleteBusy{false};
+    bool m_dateChangeAcknowledgeBusy{false};
 };
 
 } // namespace something::controllers

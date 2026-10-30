@@ -192,7 +192,8 @@ void SteamReleaseController::requestSnapshot()
 
 void SteamReleaseController::addRelease(QString storeUrl)
 {
-    if (!m_ready || !m_snapshotLoaded || m_addBusy || m_refreshBusy || m_deleteBusy) return;
+    if (!m_ready || !m_snapshotLoaded || m_addBusy || m_refreshBusy || m_deleteBusy
+        || m_dateChangeAcknowledgeBusy) return;
     m_addError.clear();
     m_notification.clear();
     const providers::SteamReleaseProviderRequest request =
@@ -226,7 +227,8 @@ void SteamReleaseController::addRelease(QString storeUrl)
 
 void SteamReleaseController::refreshReleases()
 {
-    if (!m_ready || !m_snapshotLoaded || m_refreshBusy || m_addBusy || m_deleteBusy) return;
+    if (!m_ready || !m_snapshotLoaded || m_refreshBusy || m_addBusy || m_deleteBusy
+        || m_dateChangeAcknowledgeBusy) return;
     m_refreshWork.clear();
     m_refreshUpdates.clear();
     m_refreshFinished.clear();
@@ -348,7 +350,7 @@ void SteamReleaseController::finishRefreshBatch()
 void SteamReleaseController::removeRelease(quint32 appId)
 {
     if (!m_ready || !m_snapshotLoaded || appId == 0 || m_deleteBusy
-        || m_addBusy || m_refreshBusy) return;
+        || m_addBusy || m_refreshBusy || m_dateChangeAcknowledgeBusy) return;
     const int row = m_releases.rowForAppId(appId);
     if (row < 0) return;
     Pending pending;
@@ -362,6 +364,27 @@ void SteamReleaseController::removeRelease(quint32 appId)
             pending)) {
         m_deleteBusy = false;
         m_errorMessage = QStringLiteral("The release could not be removed.");
+    }
+    emit stateChanged();
+}
+
+void SteamReleaseController::acknowledgeDateChange(quint32 appId)
+{
+    if (!m_ready || !m_snapshotLoaded || appId == 0 || m_dateChangeAcknowledgeBusy
+        || m_addBusy || m_refreshBusy || m_deleteBusy) return;
+    const int row = m_releases.rowForAppId(appId);
+    if (row < 0 || !m_releases.allRows().at(row)
+            .value(QStringLiteral("dateChangeUnacknowledged")).toBool()) return;
+
+    Pending pending;
+    pending.kind = Kind::DateChangeAcknowledge;
+    pending.appId = appId;
+    m_dateChangeAcknowledgeBusy = true;
+    m_errorMessage.clear();
+    if (!submitStorage(Kind::DateChangeAcknowledge,
+            services::SteamReleaseService::acknowledgeDateChange(appId), pending)) {
+        m_dateChangeAcknowledgeBusy = false;
+        m_errorMessage = QStringLiteral("The release date change could not be acknowledged.");
     }
     emit stateChanged();
 }
@@ -643,6 +666,22 @@ void SteamReleaseController::onStorageFinished(quint64 id, const QVariantMap &va
         }
         emit stateChanged();
         return;
+    case Kind::DateChangeAcknowledge:
+        m_dateChangeAcknowledgeBusy = false;
+        if (error.isError() || error.isCancelled()) {
+            setSafeError(error,
+                         QStringLiteral("The release date change could not be acknowledged."));
+        } else {
+            const int row = m_releases.rowForAppId(pending.appId);
+            if (row >= 0) {
+                QVariantMap release = m_releases.allRows().at(row);
+                release.insert(QStringLiteral("dateChangeUnacknowledged"), false);
+                m_releases.update(std::move(release));
+            }
+            m_errorMessage.clear();
+        }
+        emit stateChanged();
+        return;
     case Kind::RefreshCommit:
         if (pending.refreshGeneration != m_refreshGeneration) return;
         m_refreshCommitPending = false;
@@ -730,6 +769,7 @@ void SteamReleaseController::cancelAll()
     m_addBusy = false;
     m_refreshBusy = false;
     m_deleteBusy = false;
+    m_dateChangeAcknowledgeBusy = false;
 }
 
 void SteamReleaseController::releaseAddReservation(quint32 appId)

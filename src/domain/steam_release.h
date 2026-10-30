@@ -50,6 +50,9 @@ struct SteamReleaseDateInfo final {
     std::optional<QDate> windowStart;
     std::optional<QDate> windowEnd;
 
+    friend bool operator==(const SteamReleaseDateInfo &,
+                           const SteamReleaseDateInfo &) = default;
+
     bool hasExactDate() const noexcept
     {
         return precision == SteamReleaseDatePrecision::ExactDay
@@ -89,6 +92,7 @@ struct SteamTrackedRelease final {
     QString lastAttemptedUpdateAtUtc;
     SteamReleaseRefreshState refreshState{SteamReleaseRefreshState::NeverAttempted};
     QString refreshError;
+    bool dateChangeUnacknowledged{false};
 };
 
 QString steamReleaseDatePrecisionName(SteamReleaseDatePrecision precision);

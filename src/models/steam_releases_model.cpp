@@ -116,7 +116,8 @@ QHash<int, QByteArray> SteamReleasesModel::roleNames() const
             {StatusLabelRole, "statusLabel"}, {FollowedAtUtcRole, "followedAtUtc"},
             {LastSuccessfulUpdateAtUtcRole, "lastSuccessfulUpdateAtUtc"},
             {LastAttemptedUpdateAtUtcRole, "lastAttemptedUpdateAtUtc"},
-            {RefreshStateRole, "refreshState"}, {RefreshErrorRole, "refreshError"}};
+            {RefreshStateRole, "refreshState"}, {RefreshErrorRole, "refreshError"},
+            {DateChangeUnacknowledgedRole, "dateChangeUnacknowledged"}};
 }
 
 QVariant SteamReleasesModel::roleValue(const QVariantMap &release, int role)
@@ -143,6 +144,8 @@ QVariant SteamReleasesModel::roleValue(const QVariantMap &release, int role)
         return release.value(QStringLiteral("lastAttemptedUpdateAtUtc"));
     case RefreshStateRole: return release.value(QStringLiteral("refreshState"));
     case RefreshErrorRole: return release.value(QStringLiteral("refreshError"));
+    case DateChangeUnacknowledgedRole:
+        return release.value(QStringLiteral("dateChangeUnacknowledged"));
     default: return {};
     }
 }

@@ -265,6 +265,7 @@ public:
     RepositoryResult<void> applyRefreshBatch(
         const QVector<SteamReleaseRefreshUpdate> &updates,
         const std::function<bool()> &cancellationRequested = {});
+    RepositoryResult<void> acknowledgeDateChange(quint32 appId);
     RepositoryResult<void> setArtwork(
         quint32 appId, const QString &expectedSourceUrl,
         const domain::SteamReleaseArtworkMetadata &artwork);

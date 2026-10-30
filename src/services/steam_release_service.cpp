@@ -90,6 +90,7 @@ QVariantMap SteamReleaseService::releaseValue(const domain::SteamTrackedRelease 
         {QStringLiteral("refreshState"),
          domain::steamReleaseRefreshStateName(release.refreshState)},
         {QStringLiteral("refreshError"), release.refreshError},
+        {QStringLiteral("dateChangeUnacknowledged"), release.dateChangeUnacknowledged},
     };
 }
 
@@ -202,6 +203,19 @@ storage::StorageCommand SteamReleaseService::removeRelease(QString profileDirect
                                repositories.steam, repositories.steamReleases);
         storage::StorageReply reply;
         reply.values.insert(QStringLiteral("deletedAppId"), appId);
+        return reply;
+    };
+}
+
+storage::StorageCommand SteamReleaseService::acknowledgeDateChange(quint32 appId)
+{
+    return [appId](storage::StorageRepositories &repositories,
+                   const std::function<bool()> &cancelled) {
+        if (cancelled()) return failed(domain::AppError::cancelled());
+        const auto acknowledged = repositories.steamReleases.acknowledgeDateChange(appId);
+        if (!acknowledged.succeeded()) return failed(acknowledged.error);
+        storage::StorageReply reply;
+        reply.values.insert(QStringLiteral("appId"), appId);
         return reply;
     };
 }

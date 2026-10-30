@@ -309,12 +309,13 @@ void SteamFeatureTest::steamPriceHistoryMigrationPreservesLegacyGamesWithoutFabr
         "'https://store.steampowered.com/app/555001/','Legacy tracked game','priced','USD',"
         "1999,999,50,'US','2025-03-04T12:00:00Z','2025-03-04T12:00:00Z')")));
     QVERIFY(legacy.exec(QStringLiteral("DROP TABLE steam_price_observations")));
-    QVERIFY(legacy.exec(QStringLiteral("DELETE FROM schema_migrations WHERE version=12")));
+    QVERIFY(legacy.exec(QStringLiteral("DROP TABLE steam_release_follows")));
+    QVERIFY(legacy.exec(QStringLiteral("DELETE FROM schema_migrations WHERE version>=12")));
     legacy.finish();
 
     QString diagnostic;
     QVERIFY2(storage::SchemaMigrator::apply(database, &diagnostic), qPrintable(diagnostic));
-    QCOMPARE(storage::SchemaMigrator::latestVersion(), 12);
+    QCOMPARE(storage::SchemaMigrator::latestVersion(), 14);
 
     {
         storage::StorageRepositories repositories(database);

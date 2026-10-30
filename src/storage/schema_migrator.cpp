@@ -330,6 +330,11 @@ constexpr const char *steamReleaseRadar[] = {
     "CREATE INDEX idx_steam_release_follows_status_date ON steam_release_follows(release_status, release_date_exact, steam_app_id)",
 };
 
+constexpr const char *steamReleaseDateChangeNotice[] = {
+    "ALTER TABLE steam_release_follows ADD COLUMN date_change_unacknowledged "
+    "INTEGER NOT NULL DEFAULT 0 CHECK(date_change_unacknowledged IN (0,1))",
+};
+
 constexpr const char *favoriteOrdering[] = {
     "DROP INDEX idx_favorite_categories_order",
     "CREATE INDEX idx_favorite_categories_order ON favorite_categories(source, display_order, name_normalized, id)",
@@ -489,6 +494,8 @@ constexpr std::array migrations{
               qsizetype(std::size(steamPriceObservations))},
     Migration{13, "Steam Release Radar", steamReleaseRadar,
               qsizetype(std::size(steamReleaseRadar))},
+    Migration{14, "Steam release date change acknowledgement", steamReleaseDateChangeNotice,
+              qsizetype(std::size(steamReleaseDateChangeNotice))},
 };
 
 bool fail(QString *diagnostic, const QString &message)

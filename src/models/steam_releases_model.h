@@ -18,7 +18,8 @@ public:
                 DatePrecisionRole, DatePrecisionLabelRole, HasExactDateRole,
                 ExactDateRole, WindowStartRole, WindowEndRole, StatusRole,
                 StatusLabelRole, FollowedAtUtcRole, LastSuccessfulUpdateAtUtcRole,
-                LastAttemptedUpdateAtUtcRole, RefreshStateRole, RefreshErrorRole };
+                LastAttemptedUpdateAtUtcRole, RefreshStateRole, RefreshErrorRole,
+                DateChangeUnacknowledgedRole };
     Q_ENUM(Role)
 
     explicit SteamReleasesModel(QObject *parent = nullptr);
