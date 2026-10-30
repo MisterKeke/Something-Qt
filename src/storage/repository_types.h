@@ -4,6 +4,7 @@
 #include "../domain/task.h"
 #include "../domain/task_history.h"
 #include "../domain/task_scheduling.h"
+#include "../domain/steam_release.h"
 #include "../domain/weather_currency.h"
 
 #include <QString>
@@ -274,6 +275,13 @@ struct SteamRefreshUpdate final {
     QString attemptedAt;
     QString safeError;
     std::optional<SteamGame> refreshedGame;
+};
+
+struct SteamReleaseRefreshUpdate final {
+    quint32 appId{0};
+    QString attemptedAtUtc;
+    QString safeError;
+    std::optional<domain::SteamReleaseDetails> refreshedDetails;
 };
 
 } // namespace something::storage

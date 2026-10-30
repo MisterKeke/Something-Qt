@@ -122,6 +122,7 @@ qt_add_executable(SomethingQt WIN32
     src/services/setup_icon_store.cpp
     src/services/setups_service.cpp
     src/services/steam_artwork_store.cpp
+    src/services/steam_release_service.cpp
     src/services/steam_service.cpp
     src/services/currency_service.cpp
     src/services/favorites_service.cpp

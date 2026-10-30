@@ -247,9 +247,32 @@ public:
         const std::function<bool()> &cancellationRequested = {});
     RepositoryResult<void> setArtwork(qint64 gameId, const AssetMetadata &asset);
     RepositoryResult<void> removeArtwork(qint64 gameId);
+    RepositoryResult<bool> hasArtworkFilename(const QString &filename) const;
     RepositoryResult<void> remove(qint64 id);
 private:
     RepositoryResult<SteamGame> load(qint64 id) const;
+    QSqlDatabase &m_database;
+};
+
+class SteamReleaseRepository final {
+public:
+    explicit SteamReleaseRepository(QSqlDatabase &database);
+    RepositoryResult<QVector<domain::SteamTrackedRelease>> list() const;
+    RepositoryResult<domain::SteamTrackedRelease> get(quint32 appId) const;
+    RepositoryResult<domain::SteamTrackedRelease> add(
+        domain::SteamTrackedRelease release,
+        const std::function<bool()> &cancellationRequested = {});
+    RepositoryResult<void> applyRefreshBatch(
+        const QVector<SteamReleaseRefreshUpdate> &updates,
+        const std::function<bool()> &cancellationRequested = {});
+    RepositoryResult<void> setArtwork(
+        quint32 appId, const QString &expectedSourceUrl,
+        const domain::SteamReleaseArtworkMetadata &artwork);
+    RepositoryResult<bool> hasArtworkFilename(const QString &filename) const;
+    RepositoryResult<void> remove(quint32 appId);
+
+private:
+    RepositoryResult<domain::SteamTrackedRelease> load(quint32 appId) const;
     QSqlDatabase &m_database;
 };
 
@@ -271,6 +294,7 @@ public:
     SetupsRepository setups;
     WallpapersRepository wallpapers;
     SteamRepository steam;
+    SteamReleaseRepository steamReleases;
     DataImportRepository dataImport;
 };
 

@@ -94,5 +94,12 @@ struct SteamTrackedRelease final {
 QString steamReleaseDatePrecisionName(SteamReleaseDatePrecision precision);
 QString steamReleaseStatusName(SteamReleaseStatus status);
 QString steamReleaseRefreshStateName(SteamReleaseRefreshState state);
+std::optional<SteamReleaseDatePrecision> steamReleaseDatePrecisionFromName(
+    const QString &name);
+std::optional<SteamReleaseStatus> steamReleaseStatusFromName(const QString &name);
+std::optional<SteamReleaseRefreshState> steamReleaseRefreshStateFromName(
+    const QString &name);
+bool isValidSteamReleaseDateInfo(const SteamReleaseDateInfo &date);
+bool isValidSteamReleaseDetails(const SteamReleaseDetails &details);
 
 } // namespace something::domain

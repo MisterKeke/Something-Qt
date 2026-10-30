@@ -1,5 +1,6 @@
 #include "repositories.h"
 
+#include "../domain/steam_game.h"
 #include "../domain/task_rules.h"
 #include "../domain/task_history.h"
 
@@ -110,6 +111,77 @@ bool validAsset(const AssetMetadata &asset, const QStringList &allowedMimeTypes)
         return false;
     }
     return true;
+}
+
+bool validUtcInstant(const QString &value)
+{
+    if (value.isEmpty() || !value.endsWith(QLatin1Char('Z'))) return false;
+    const QDateTime parsed = QDateTime::fromString(value, Qt::ISODateWithMs);
+    return parsed.isValid() && parsed.timeSpec() == Qt::UTC;
+}
+
+bool validSteamReleaseArtwork(quint32 appId,
+                              const domain::SteamReleaseArtworkMetadata &artwork)
+{
+    if (!artwork.sourceUrl.isEmpty()
+        && domain::normalizeSteamArtworkUrl(artwork.sourceUrl) != artwork.sourceUrl) {
+        return false;
+    }
+    if (artwork.cachedFilename.isEmpty())
+        return artwork.mimeType.isEmpty() && artwork.byteSize == 0;
+    if (artwork.sourceUrl.isEmpty()) return false;
+    static const QStringList allowedMimeTypes{
+        QStringLiteral("image/jpeg"), QStringLiteral("image/png"), QStringLiteral("image/webp")};
+    const AssetMetadata asset{artwork.cachedFilename, artwork.mimeType, artwork.byteSize};
+    static const QRegularExpression filenamePattern(
+        QStringLiteral("^[1-9][0-9]{0,9}-[a-f0-9]{64}\\.(jpg|png|webp)$"));
+    const bool mimeMatchesExtension =
+        (artwork.cachedFilename.endsWith(QStringLiteral(".jpg"))
+         && artwork.mimeType == QStringLiteral("image/jpeg"))
+        || (artwork.cachedFilename.endsWith(QStringLiteral(".png"))
+            && artwork.mimeType == QStringLiteral("image/png"))
+        || (artwork.cachedFilename.endsWith(QStringLiteral(".webp"))
+            && artwork.mimeType == QStringLiteral("image/webp"));
+    return appId != 0 && validAsset(asset, allowedMimeTypes)
+        && artwork.byteSize <= 2LL * 1024 * 1024 && mimeMatchesExtension
+        && filenamePattern.match(artwork.cachedFilename).hasMatch()
+        && artwork.cachedFilename.startsWith(QString::number(appId) + QLatin1Char('-'));
+}
+
+bool validTrackedSteamRelease(const domain::SteamTrackedRelease &release)
+{
+    const domain::SteamStoreUrl normalized =
+        domain::normalizeSteamStoreUrl(release.canonicalStoreUrl);
+    domain::SteamReleaseDetails details;
+    details.appId = release.appId;
+    details.title = release.title;
+    details.artworkUrl = release.artwork.sourceUrl;
+    details.releaseDate = release.releaseDate;
+    details.status = release.status;
+    if (!normalized.isValid() || normalized.appId != release.appId
+        || normalized.canonicalUrl != release.canonicalStoreUrl
+        || !domain::isValidSteamReleaseDetails(details)
+        || !validSteamReleaseArtwork(release.appId, release.artwork)
+        || !validUtcInstant(release.followedAtUtc)) {
+        return false;
+    }
+
+    switch (release.refreshState) {
+    case domain::SteamReleaseRefreshState::NeverAttempted:
+        return release.lastAttemptedUpdateAtUtc.isEmpty()
+            && release.lastSuccessfulUpdateAtUtc.isEmpty() && release.refreshError.isEmpty();
+    case domain::SteamReleaseRefreshState::Succeeded:
+        return validUtcInstant(release.lastAttemptedUpdateAtUtc)
+            && validUtcInstant(release.lastSuccessfulUpdateAtUtc)
+            && release.refreshError.isEmpty();
+    case domain::SteamReleaseRefreshState::Failed:
+        return validUtcInstant(release.lastAttemptedUpdateAtUtc)
+            && !release.refreshError.trimmed().isEmpty()
+            && release.refreshError.size() <= 500
+            && (release.lastSuccessfulUpdateAtUtc.isEmpty()
+                || validUtcInstant(release.lastSuccessfulUpdateAtUtc));
+    }
+    return false;
 }
 
 class Transaction final {
@@ -3793,6 +3865,311 @@ RepositoryResult<void> SteamRepository::remove(qint64 id)
                                         : failureVoid(domain::ErrorCategory::NotFound);
 }
 
+RepositoryResult<bool> SteamRepository::hasArtworkFilename(const QString &filename) const
+{
+    Q_ASSERT(QThread::currentThread() == m_database.driver()->thread());
+    if (filename.isEmpty()) return failure<bool>(domain::ErrorCategory::Validation);
+    QSqlQuery query(m_database);
+    query.prepare(QStringLiteral("SELECT 1 FROM steam_game_images WHERE filename=? LIMIT 1"));
+    query.addBindValue(filename);
+    if (!query.exec()) return failure<bool>(queryFailure(query));
+    RepositoryResult<bool> result;
+    result.value = query.next();
+    return result;
+}
+
+SteamReleaseRepository::SteamReleaseRepository(QSqlDatabase &database)
+    : m_database(database)
+{
+}
+
+RepositoryResult<QVector<domain::SteamTrackedRelease>> SteamReleaseRepository::list() const
+{
+    Q_ASSERT(QThread::currentThread() == m_database.driver()->thread());
+    QSqlQuery query(m_database);
+    if (!query.exec(QStringLiteral(
+            "SELECT steam_app_id FROM steam_release_follows ORDER BY title COLLATE NOCASE,steam_app_id"))) {
+        return failure<QVector<domain::SteamTrackedRelease>>(queryFailure(query));
+    }
+    QVector<quint32> appIds;
+    while (query.next()) appIds.push_back(query.value(0).toUInt());
+    query.finish();
+
+    RepositoryResult<QVector<domain::SteamTrackedRelease>> result;
+    result.value.reserve(appIds.size());
+    for (quint32 appId : appIds) {
+        const auto release = load(appId);
+        if (!release.succeeded())
+            return failure<QVector<domain::SteamTrackedRelease>>(release.error.category());
+        result.value.push_back(release.value);
+    }
+    return result;
+}
+
+RepositoryResult<domain::SteamTrackedRelease> SteamReleaseRepository::get(quint32 appId) const
+{
+    Q_ASSERT(QThread::currentThread() == m_database.driver()->thread());
+    if (appId == 0) return failure<domain::SteamTrackedRelease>(domain::ErrorCategory::Validation);
+    return load(appId);
+}
+
+RepositoryResult<domain::SteamTrackedRelease> SteamReleaseRepository::load(quint32 appId) const
+{
+    QSqlQuery query(m_database);
+    query.prepare(QStringLiteral(
+        "SELECT steam_app_id,store_url,title,artwork_source_url,artwork_filename,artwork_mime_type,"
+        "artwork_byte_size,release_date_text,release_date_precision,release_date_exact,"
+        "release_window_start,release_window_end,release_status,followed_at_utc,"
+        "last_successful_update_at_utc,last_attempted_update_at_utc,refresh_state,refresh_error "
+        "FROM steam_release_follows WHERE steam_app_id=?"));
+    query.addBindValue(appId);
+    if (!query.exec()) return failure<domain::SteamTrackedRelease>(queryFailure(query));
+    if (!query.next()) return failure<domain::SteamTrackedRelease>(domain::ErrorCategory::NotFound);
+
+    domain::SteamTrackedRelease release;
+    release.appId = query.value(0).toUInt();
+    release.canonicalStoreUrl = query.value(1).toString();
+    release.title = query.value(2).toString();
+    release.artwork.sourceUrl = query.value(3).toString();
+    release.artwork.cachedFilename = query.value(4).toString();
+    release.artwork.mimeType = query.value(5).toString();
+    release.artwork.byteSize = query.value(6).toLongLong();
+    release.releaseDate.announcedText = query.value(7).toString();
+    const auto precision = domain::steamReleaseDatePrecisionFromName(query.value(8).toString());
+    const auto status = domain::steamReleaseStatusFromName(query.value(12).toString());
+    const auto refreshState = domain::steamReleaseRefreshStateFromName(query.value(16).toString());
+    if (!precision || !status || !refreshState)
+        return failure<domain::SteamTrackedRelease>(domain::ErrorCategory::Storage);
+    release.releaseDate.precision = *precision;
+    if (!query.value(9).isNull()) {
+        const QDate date = QDate::fromString(query.value(9).toString(), Qt::ISODate);
+        if (!date.isValid()) return failure<domain::SteamTrackedRelease>(domain::ErrorCategory::Storage);
+        release.releaseDate.exactDate = date;
+    }
+    if (!query.value(10).isNull()) {
+        const QDate date = QDate::fromString(query.value(10).toString(), Qt::ISODate);
+        if (!date.isValid()) return failure<domain::SteamTrackedRelease>(domain::ErrorCategory::Storage);
+        release.releaseDate.windowStart = date;
+    }
+    if (!query.value(11).isNull()) {
+        const QDate date = QDate::fromString(query.value(11).toString(), Qt::ISODate);
+        if (!date.isValid()) return failure<domain::SteamTrackedRelease>(domain::ErrorCategory::Storage);
+        release.releaseDate.windowEnd = date;
+    }
+    release.status = *status;
+    release.followedAtUtc = query.value(13).toString();
+    release.lastSuccessfulUpdateAtUtc = query.value(14).toString();
+    release.lastAttemptedUpdateAtUtc = query.value(15).toString();
+    release.refreshState = *refreshState;
+    release.refreshError = query.value(17).toString();
+    if (!validTrackedSteamRelease(release))
+        return failure<domain::SteamTrackedRelease>(domain::ErrorCategory::Storage);
+
+    RepositoryResult<domain::SteamTrackedRelease> result;
+    result.value = std::move(release);
+    return result;
+}
+
+RepositoryResult<domain::SteamTrackedRelease> SteamReleaseRepository::add(
+    domain::SteamTrackedRelease release,
+    const std::function<bool()> &cancellationRequested)
+{
+    Q_ASSERT(QThread::currentThread() == m_database.driver()->thread());
+    release.title = release.title.trimmed();
+    const domain::SteamStoreUrl normalized =
+        domain::normalizeSteamStoreUrl(release.canonicalStoreUrl);
+    if (normalized.isValid()) release.canonicalStoreUrl = normalized.canonicalUrl;
+    if (!validTrackedSteamRelease(release))
+        return failure<domain::SteamTrackedRelease>(domain::ErrorCategory::Validation);
+    if (cancellationRequested && cancellationRequested())
+        return failure<domain::SteamTrackedRelease>(domain::ErrorCategory::Cancelled);
+
+    Transaction transaction(m_database);
+    if (!transaction.active())
+        return failure<domain::SteamTrackedRelease>(domain::ErrorCategory::Storage);
+    QSqlQuery query(m_database);
+    query.prepare(QStringLiteral(
+        "INSERT INTO steam_release_follows(steam_app_id,store_url,title,artwork_source_url,"
+        "artwork_filename,artwork_mime_type,artwork_byte_size,release_date_text,"
+        "release_date_precision,release_date_exact,release_window_start,release_window_end,"
+        "release_status,followed_at_utc,last_successful_update_at_utc,"
+        "last_attempted_update_at_utc,refresh_state,refresh_error) "
+        "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"));
+    query.addBindValue(release.appId);
+    query.addBindValue(release.canonicalStoreUrl);
+    query.addBindValue(release.title);
+    query.addBindValue(release.artwork.sourceUrl);
+    query.addBindValue(release.artwork.cachedFilename);
+    query.addBindValue(release.artwork.mimeType);
+    query.addBindValue(release.artwork.byteSize);
+    query.addBindValue(release.releaseDate.announcedText);
+    query.addBindValue(domain::steamReleaseDatePrecisionName(release.releaseDate.precision));
+    query.addBindValue(release.releaseDate.exactDate
+        ? QVariant(release.releaseDate.exactDate->toString(Qt::ISODate)) : QVariant());
+    query.addBindValue(release.releaseDate.windowStart
+        ? QVariant(release.releaseDate.windowStart->toString(Qt::ISODate)) : QVariant());
+    query.addBindValue(release.releaseDate.windowEnd
+        ? QVariant(release.releaseDate.windowEnd->toString(Qt::ISODate)) : QVariant());
+    query.addBindValue(domain::steamReleaseStatusName(release.status));
+    query.addBindValue(release.followedAtUtc);
+    query.addBindValue(nullableString(release.lastSuccessfulUpdateAtUtc));
+    query.addBindValue(nullableString(release.lastAttemptedUpdateAtUtc));
+    query.addBindValue(domain::steamReleaseRefreshStateName(release.refreshState));
+    query.addBindValue(release.refreshError);
+    if (!query.exec()) return failure<domain::SteamTrackedRelease>(queryFailure(query));
+    query.finish();
+    if (cancellationRequested && cancellationRequested())
+        return failure<domain::SteamTrackedRelease>(domain::ErrorCategory::Cancelled);
+    const auto inserted = load(release.appId);
+    if (!inserted.succeeded()) return inserted;
+    if (!transaction.commit())
+        return failure<domain::SteamTrackedRelease>(domain::ErrorCategory::Storage);
+    return inserted;
+}
+
+RepositoryResult<void> SteamReleaseRepository::applyRefreshBatch(
+    const QVector<SteamReleaseRefreshUpdate> &updates,
+    const std::function<bool()> &cancellationRequested)
+{
+    Q_ASSERT(QThread::currentThread() == m_database.driver()->thread());
+    QSet<quint32> seen;
+    for (const SteamReleaseRefreshUpdate &update : updates) {
+        if (update.appId == 0 || seen.contains(update.appId)
+            || !validUtcInstant(update.attemptedAtUtc)) {
+            return failureVoid(domain::ErrorCategory::Validation);
+        }
+        seen.insert(update.appId);
+        if (update.refreshedDetails) {
+            if (update.refreshedDetails->appId != update.appId
+                || !domain::isValidSteamReleaseDetails(*update.refreshedDetails)
+                || !update.safeError.isEmpty()) {
+                return failureVoid(domain::ErrorCategory::Validation);
+            }
+        } else if (update.safeError.trimmed().isEmpty() || update.safeError.size() > 500) {
+            return failureVoid(domain::ErrorCategory::Validation);
+        }
+    }
+    if (cancellationRequested && cancellationRequested())
+        return failureVoid(domain::ErrorCategory::Cancelled);
+
+    Transaction transaction(m_database);
+    if (!transaction.active()) return failureVoid(domain::ErrorCategory::Storage);
+    for (const SteamReleaseRefreshUpdate &update : updates) {
+        QSqlQuery exists(m_database);
+        exists.prepare(QStringLiteral(
+            "SELECT 1 FROM steam_release_follows WHERE steam_app_id=?"));
+        exists.addBindValue(update.appId);
+        if (!exists.exec()) return failureVoid(queryFailure(exists));
+        if (!exists.next()) return failureVoid(domain::ErrorCategory::NotFound);
+        exists.finish();
+
+        QSqlQuery query(m_database);
+        if (update.refreshedDetails) {
+            const domain::SteamReleaseDetails &details = *update.refreshedDetails;
+            query.prepare(QStringLiteral(
+                "UPDATE steam_release_follows SET title=?,artwork_filename=CASE "
+                "WHEN artwork_source_url=? THEN artwork_filename ELSE '' END,"
+                "artwork_mime_type=CASE WHEN artwork_source_url=? THEN artwork_mime_type ELSE '' END,"
+                "artwork_byte_size=CASE WHEN artwork_source_url=? THEN artwork_byte_size ELSE 0 END,"
+                "artwork_source_url=?,release_date_text=?,release_date_precision=?,"
+                "release_date_exact=?,release_window_start=?,release_window_end=?,release_status=?,"
+                "last_successful_update_at_utc=?,last_attempted_update_at_utc=?,"
+                "refresh_state='succeeded',refresh_error='',updated_at=? WHERE steam_app_id=?"));
+            query.addBindValue(details.title.trimmed());
+            query.addBindValue(details.artworkUrl);
+            query.addBindValue(details.artworkUrl);
+            query.addBindValue(details.artworkUrl);
+            query.addBindValue(details.artworkUrl);
+            query.addBindValue(details.releaseDate.announcedText);
+            query.addBindValue(domain::steamReleaseDatePrecisionName(details.releaseDate.precision));
+            query.addBindValue(details.releaseDate.exactDate
+                ? QVariant(details.releaseDate.exactDate->toString(Qt::ISODate)) : QVariant());
+            query.addBindValue(details.releaseDate.windowStart
+                ? QVariant(details.releaseDate.windowStart->toString(Qt::ISODate)) : QVariant());
+            query.addBindValue(details.releaseDate.windowEnd
+                ? QVariant(details.releaseDate.windowEnd->toString(Qt::ISODate)) : QVariant());
+            query.addBindValue(domain::steamReleaseStatusName(details.status));
+            query.addBindValue(update.attemptedAtUtc);
+            query.addBindValue(update.attemptedAtUtc);
+            query.addBindValue(update.attemptedAtUtc);
+            query.addBindValue(update.appId);
+        } else {
+            query.prepare(QStringLiteral(
+                "UPDATE steam_release_follows SET last_attempted_update_at_utc=?,"
+                "refresh_state='failed',refresh_error=?,updated_at=? WHERE steam_app_id=?"));
+            query.addBindValue(update.attemptedAtUtc);
+            query.addBindValue(update.safeError.trimmed());
+            query.addBindValue(update.attemptedAtUtc);
+            query.addBindValue(update.appId);
+        }
+        if (!query.exec()) return failureVoid(queryFailure(query));
+        if (query.numRowsAffected() != 1) return failureVoid(domain::ErrorCategory::NotFound);
+        if (cancellationRequested && cancellationRequested())
+            return failureVoid(domain::ErrorCategory::Cancelled);
+    }
+    if (!transaction.commit()) return failureVoid(domain::ErrorCategory::Storage);
+    return {};
+}
+
+RepositoryResult<void> SteamReleaseRepository::setArtwork(
+    quint32 appId, const QString &expectedSourceUrl,
+    const domain::SteamReleaseArtworkMetadata &artwork)
+{
+    Q_ASSERT(QThread::currentThread() == m_database.driver()->thread());
+    if (appId == 0 || expectedSourceUrl.isEmpty()
+        || domain::normalizeSteamArtworkUrl(expectedSourceUrl) != expectedSourceUrl
+        || artwork.sourceUrl != expectedSourceUrl
+        || !validSteamReleaseArtwork(appId, artwork)
+        || artwork.cachedFilename.isEmpty()) {
+        return failureVoid(domain::ErrorCategory::Validation);
+    }
+    QSqlQuery query(m_database);
+    query.prepare(QStringLiteral(
+        "UPDATE steam_release_follows SET artwork_filename=?,artwork_mime_type=?,"
+        "artwork_byte_size=?,updated_at=CURRENT_TIMESTAMP "
+        "WHERE steam_app_id=? AND artwork_source_url=?"));
+    query.addBindValue(artwork.cachedFilename);
+    query.addBindValue(artwork.mimeType);
+    query.addBindValue(artwork.byteSize);
+    query.addBindValue(appId);
+    query.addBindValue(expectedSourceUrl);
+    if (!query.exec()) return failureVoid(queryFailure(query));
+    if (query.numRowsAffected() == 1) return {};
+    query.finish();
+    QSqlQuery exists(m_database);
+    exists.prepare(QStringLiteral("SELECT 1 FROM steam_release_follows WHERE steam_app_id=?"));
+    exists.addBindValue(appId);
+    if (!exists.exec()) return failureVoid(queryFailure(exists));
+    return failureVoid(exists.next() ? domain::ErrorCategory::Conflict
+                                     : domain::ErrorCategory::NotFound);
+}
+
+RepositoryResult<bool> SteamReleaseRepository::hasArtworkFilename(const QString &filename) const
+{
+    Q_ASSERT(QThread::currentThread() == m_database.driver()->thread());
+    if (filename.isEmpty()) return failure<bool>(domain::ErrorCategory::Validation);
+    QSqlQuery query(m_database);
+    query.prepare(QStringLiteral(
+        "SELECT 1 FROM steam_release_follows WHERE artwork_filename=? LIMIT 1"));
+    query.addBindValue(filename);
+    if (!query.exec()) return failure<bool>(queryFailure(query));
+    RepositoryResult<bool> result;
+    result.value = query.next();
+    return result;
+}
+
+RepositoryResult<void> SteamReleaseRepository::remove(quint32 appId)
+{
+    Q_ASSERT(QThread::currentThread() == m_database.driver()->thread());
+    if (appId == 0) return failureVoid(domain::ErrorCategory::Validation);
+    QSqlQuery query(m_database);
+    query.prepare(QStringLiteral("DELETE FROM steam_release_follows WHERE steam_app_id=?"));
+    query.addBindValue(appId);
+    if (!query.exec()) return failureVoid(queryFailure(query));
+    return query.numRowsAffected() == 1 ? RepositoryResult<void>{}
+                                        : failureVoid(domain::ErrorCategory::NotFound);
+}
+
 StorageRepositories::StorageRepositories(QSqlDatabase &database)
     : tasks(database)
     , taskHistory(database)
@@ -3807,6 +4184,7 @@ StorageRepositories::StorageRepositories(QSqlDatabase &database)
     , setups(database)
     , wallpapers(database)
     , steam(database)
+    , steamReleases(database)
     , dataImport(database)
 {
 }

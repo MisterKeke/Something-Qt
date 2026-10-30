@@ -260,6 +260,76 @@ constexpr const char *steamPriceObservations[] = {
     "CREATE INDEX idx_steam_price_observations_game_time ON steam_price_observations(steam_game_id, observed_at_utc, id)",
 };
 
+constexpr const char *steamReleaseRadar[] = {
+    // Independent App-ID membership: no foreign key to steam_games.
+    R"SQL(CREATE TABLE steam_release_follows (
+        steam_app_id INTEGER PRIMARY KEY CHECK(steam_app_id BETWEEN 1 AND 4294967295),
+        store_url TEXT NOT NULL,
+        title TEXT NOT NULL CHECK(length(trim(title)) BETWEEN 1 AND 300),
+        artwork_source_url TEXT NOT NULL DEFAULT '',
+        artwork_filename TEXT NOT NULL DEFAULT '',
+        artwork_mime_type TEXT NOT NULL DEFAULT '',
+        artwork_byte_size INTEGER NOT NULL DEFAULT 0 CHECK(artwork_byte_size >= 0),
+        release_date_text TEXT NOT NULL DEFAULT '' CHECK(length(release_date_text) <= 200),
+        release_date_precision TEXT NOT NULL CHECK(release_date_precision IN
+            ('unknown', 'exact_day', 'month', 'year', 'quarter', 'season', 'range')),
+        release_date_exact TEXT CHECK(release_date_exact IS NULL OR
+            (length(release_date_exact) = 10 AND date(release_date_exact) IS NOT NULL
+                AND date(release_date_exact) = release_date_exact)),
+        release_window_start TEXT CHECK(release_window_start IS NULL OR
+            (length(release_window_start) = 10 AND date(release_window_start) IS NOT NULL
+                AND date(release_window_start) = release_window_start)),
+        release_window_end TEXT CHECK(release_window_end IS NULL OR
+            (length(release_window_end) = 10 AND date(release_window_end) IS NOT NULL
+                AND date(release_window_end) = release_window_end)),
+        release_status TEXT NOT NULL CHECK(release_status IN
+            ('exact_date_announced', 'approximate_date_announced', 'coming_soon', 'released', 'information_unavailable')),
+        followed_at_utc TEXT NOT NULL CHECK(
+            length(trim(followed_at_utc)) >= 20 AND substr(followed_at_utc, -1, 1) = 'Z'
+            AND julianday(followed_at_utc) IS NOT NULL),
+        last_successful_update_at_utc TEXT CHECK(last_successful_update_at_utc IS NULL OR
+            (length(trim(last_successful_update_at_utc)) >= 20
+            AND substr(last_successful_update_at_utc, -1, 1) = 'Z'
+            AND julianday(last_successful_update_at_utc) IS NOT NULL)),
+        last_attempted_update_at_utc TEXT CHECK(last_attempted_update_at_utc IS NULL OR
+            (length(trim(last_attempted_update_at_utc)) >= 20
+            AND substr(last_attempted_update_at_utc, -1, 1) = 'Z'
+            AND julianday(last_attempted_update_at_utc) IS NOT NULL)),
+        refresh_state TEXT NOT NULL CHECK(refresh_state IN ('never_attempted', 'succeeded', 'failed')),
+        refresh_error TEXT NOT NULL DEFAULT '' CHECK(length(refresh_error) <= 500),
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        CHECK((artwork_filename = '' AND artwork_mime_type = '' AND artwork_byte_size = 0)
+            OR (artwork_filename <> '' AND artwork_mime_type IN
+                ('image/jpeg', 'image/png', 'image/webp') AND artwork_byte_size > 0)),
+        CHECK((release_date_precision = 'exact_day' AND release_date_exact IS NOT NULL)
+            OR (release_date_precision <> 'exact_day' AND release_date_exact IS NULL)),
+        CHECK(release_date_precision <> 'exact_day'
+            OR (release_window_start IS NULL AND release_window_end IS NULL)),
+        CHECK(release_date_precision <> 'unknown'
+            OR (release_window_start IS NULL AND release_window_end IS NULL)),
+        CHECK(release_date_precision NOT IN ('month', 'year', 'quarter')
+            OR (release_window_start IS NOT NULL AND release_window_end IS NOT NULL)),
+        CHECK((release_window_start IS NULL AND release_window_end IS NULL)
+            OR (release_window_start IS NOT NULL AND release_window_end IS NOT NULL
+                AND release_window_start <= release_window_end)),
+        CHECK(release_status <> 'exact_date_announced'
+            OR (release_date_precision = 'exact_day' AND release_date_exact IS NOT NULL)),
+        CHECK(release_status <> 'approximate_date_announced'
+            OR release_date_precision IN ('month', 'year', 'quarter', 'season', 'range')),
+        CHECK(release_status NOT IN ('coming_soon', 'information_unavailable')
+            OR (release_date_precision = 'unknown' AND release_date_exact IS NULL)),
+        CHECK((refresh_state = 'never_attempted' AND last_attempted_update_at_utc IS NULL
+                AND last_successful_update_at_utc IS NULL AND refresh_error = '')
+            OR (refresh_state = 'succeeded' AND last_attempted_update_at_utc IS NOT NULL
+                AND last_successful_update_at_utc IS NOT NULL AND refresh_error = '')
+            OR (refresh_state = 'failed' AND last_attempted_update_at_utc IS NOT NULL
+                AND length(trim(refresh_error)) > 0))
+    ))SQL",
+    "CREATE INDEX idx_steam_release_follows_title ON steam_release_follows(title COLLATE NOCASE, steam_app_id)",
+    "CREATE INDEX idx_steam_release_follows_status_date ON steam_release_follows(release_status, release_date_exact, steam_app_id)",
+};
+
 constexpr const char *favoriteOrdering[] = {
     "DROP INDEX idx_favorite_categories_order",
     "CREATE INDEX idx_favorite_categories_order ON favorite_categories(source, display_order, name_normalized, id)",
@@ -417,6 +487,8 @@ constexpr std::array migrations{
               qsizetype(std::size(weatherComparison))},
     Migration{12, "Steam price observations", steamPriceObservations,
               qsizetype(std::size(steamPriceObservations))},
+    Migration{13, "Steam Release Radar", steamReleaseRadar,
+              qsizetype(std::size(steamReleaseRadar))},
 };
 
 bool fail(QString *diagnostic, const QString &message)
@@ -474,6 +546,7 @@ bool hasUnexpectedTables(const QSqlDatabase &database, QString *diagnostic, bool
         QStringLiteral("steam_game_settings"), QStringLiteral("steam_games"),
         QStringLiteral("steam_game_images"),
         QStringLiteral("steam_price_observations"), QStringLiteral("data_imports"),
+        QStringLiteral("steam_release_follows"),
         QStringLiteral("task_history"), QStringLiteral("task_schedules"),
         QStringLiteral("scheduling_preferences"),
         QStringLiteral("weather_comparison_cities")
