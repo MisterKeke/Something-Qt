@@ -322,8 +322,11 @@ int main(int argc, char *argv[])
             showCenteredOnLaunch(*mainWindow);
         } else if (mainWindow->windowState() == Qt::WindowMinimized) {
             mainWindow->showNormal();
-        } else {
-            mainWindow->show();
+        } else if (!mainWindow->isVisible()) {
+            // show() selects the normal window state and can restore an old
+            // smaller geometry. Revealing an existing window must retain its
+            // current size and maximized/full-screen state.
+            mainWindow->setVisible(true);
         }
         mainWindow->raise();
         mainWindow->requestActivate();

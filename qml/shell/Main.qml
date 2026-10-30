@@ -138,7 +138,10 @@ ApplicationWindow {
             return
         }
 
-        appController.requestFullWindow()
+        // Navigation inside the active window changes content only. Console
+        // navigation still presents/activates the main window when necessary.
+        if (!window.active)
+            appController.requestFullWindow()
         focusMainPage()
         if (routeId === currentRoute)
             return
