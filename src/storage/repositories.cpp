@@ -73,6 +73,14 @@ QString normalizedName(const QString &value)
     return value.trimmed().toCaseFolded();
 }
 
+QString normalizedApplicationCategoryName(const QString &value)
+{
+    // Treat canonically equivalent Unicode spellings as the same category name
+    // (for example, a precomposed character and its combining-mark form).
+    return value.trimmed().normalized(QString::NormalizationForm_C)
+        .toCaseFolded().normalized(QString::NormalizationForm_C);
+}
+
 QString sqlLikePattern(QString value)
 {
     value.replace(QLatin1Char('\\'), QStringLiteral("\\\\"));
@@ -1439,7 +1447,7 @@ RepositoryResult<DesktopApplicationCategory> DesktopApplicationsRepository::crea
         "INSERT INTO application_categories(name,name_normalized,description,color,icon_identifier,display_order) "
         "VALUES(?,?,?,?,?,?)"));
     insert.addBindValue(name);
-    insert.addBindValue(normalizedName(name));
+    insert.addBindValue(normalizedApplicationCategoryName(name));
     insert.addBindValue(nullableString(description));
     insert.addBindValue(nullableString(normalizedColor));
     insert.addBindValue(nullableString(iconIdentifier));
@@ -1469,7 +1477,7 @@ RepositoryResult<DesktopApplicationCategory> DesktopApplicationsRepository::upda
         "UPDATE application_categories SET name=?,name_normalized=?,description=?,color=?,"
         "icon_identifier=?,updated_at=CURRENT_TIMESTAMP WHERE id=?"));
     update.addBindValue(name);
-    update.addBindValue(normalizedName(name));
+    update.addBindValue(normalizedApplicationCategoryName(name));
     update.addBindValue(nullableString(description));
     update.addBindValue(nullableString(normalizedColor));
     update.addBindValue(nullableString(iconIdentifier));
