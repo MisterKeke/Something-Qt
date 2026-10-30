@@ -47,6 +47,7 @@ struct TaskHistoryPage final {
     QVector<domain::TaskHistoryEvent> events;
     TaskHistoryCursor nextCursor;
     bool hasMore{false};
+    int invalidEventsSkipped{0};
 };
 
 struct FavoriteCategory {

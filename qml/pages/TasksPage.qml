@@ -687,6 +687,16 @@ Item {
             Accessible.role: Accessible.AlertMessage
         }
 
+        Label {
+            Layout.fillWidth: true
+            visible: root.activeView === "history" && historyController.warningMessage.length > 0
+            text: historyController.warningMessage
+            color: ThemeModule.Theme.warning
+            wrapMode: Text.Wrap
+            font.family: ThemeModule.Theme.fontFamily
+            Accessible.role: Accessible.AlertMessage
+        }
+
         Shared.StatePanel {
             Layout.fillWidth: true
             visible: root.activeView === "history" && historyController.model.count === 0
@@ -694,10 +704,14 @@ Item {
                    : !historyController.ready || historyController.loading ? "loading" : "empty"
             title: historyController.errorMessage.length > 0
                    ? qsTr("History could not be loaded")
+                   : historyController.warningMessage.length > 0
+                     ? qsTr("Some history entries could not be read")
                    : historyController.ready ? qsTr("No matching task history")
                                              : qsTr("Starting task storage")
             message: historyController.errorMessage.length > 0
                      ? qsTr("Refresh this view after the storage issue is resolved.")
+                     : historyController.warningMessage.length > 0
+                       ? historyController.warningMessage
                      : historyController.ready
                        ? qsTr("Task changes will appear here as they are recorded.")
                        : qsTr("Please wait.")

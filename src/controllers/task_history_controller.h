@@ -19,6 +19,7 @@ class TaskHistoryController final : public QObject {
     Q_PROPERTY(bool loading READ loading NOTIFY stateChanged)
     Q_PROPERTY(bool hasMore READ hasMore NOTIFY stateChanged)
     Q_PROPERTY(QString errorMessage READ errorMessage NOTIFY stateChanged)
+    Q_PROPERTY(QString warningMessage READ warningMessage NOTIFY stateChanged)
 
 public:
     explicit TaskHistoryController(application::ApplicationServiceGraph *graph,
@@ -29,6 +30,7 @@ public:
     bool loading() const noexcept { return m_loading; }
     bool hasMore() const noexcept { return m_hasMore; }
     QString errorMessage() const { return m_errorMessage; }
+    QString warningMessage() const { return m_warningMessage; }
 
     Q_INVOKABLE void loadTaskHistory(qint64 taskId, const QString &eventType = {});
     Q_INVOKABLE void loadRecentHistory(const QString &taskTitleQuery = {},
@@ -56,6 +58,7 @@ private:
     quint64 m_operationId{0};
     QString m_taskTitleQuery;
     QString m_errorMessage;
+    QString m_warningMessage;
     bool m_taskScoped{false};
     bool m_hasQuery{false};
     bool m_ready{false};

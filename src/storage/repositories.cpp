@@ -780,34 +780,43 @@ RepositoryResult<TaskHistoryPage> TaskHistoryRepository::list(
     if (!query.exec()) return failure<TaskHistoryPage>(queryFailure(query));
 
     RepositoryResult<TaskHistoryPage> result;
+    int scanned = 0;
     while (query.next()) {
-        if (result.value.events.size() == pageSize) {
+        if (scanned == pageSize) {
             result.value.hasMore = true;
             break;
         }
+        ++scanned;
+        const qint64 eventId = query.value(0).toLongLong();
+        const qint64 taskIdValue = query.value(1).toLongLong();
+        const QString occurredAtUtc = query.value(3).toString();
+        if (eventId <= 0 || taskIdValue <= 0
+            || !occurredAtUtc.endsWith(QLatin1Char('Z'))
+            || !QDateTime::fromString(occurredAtUtc, Qt::ISODateWithMs).isValid()) {
+            return failure<TaskHistoryPage>(domain::ErrorCategory::InvalidResponse);
+        }
+        result.value.nextCursor = {occurredAtUtc, eventId};
+
         const auto type = domain::taskHistoryEventTypeFromName(query.value(2).toString());
         const int version = query.value(6).toInt();
         const auto changes = domain::deserializeTaskHistoryDiff(
             version, query.value(7).toString(), query.value(8).toString(),
             query.value(9).toString());
-        if (!type || !changes) {
-            return failure<TaskHistoryPage>(domain::ErrorCategory::InvalidResponse);
+        if (!type || !changes || changes->isEmpty()) {
+            ++result.value.invalidEventsSkipped;
+            continue;
         }
 
         domain::TaskHistoryEvent event;
-        event.eventId = query.value(0).toLongLong();
-        event.taskId = query.value(1).toLongLong();
+        event.eventId = eventId;
+        event.taskId = taskIdValue;
         event.type = *type;
-        event.occurredAtUtc = query.value(3).toString();
+        event.occurredAtUtc = occurredAtUtc;
         if (!query.isNull(4)) event.taskRevision = query.value(4).toLongLong();
         event.taskTitle = query.value(5).toString();
         event.serializationVersion = version;
         event.changes = *changes;
         result.value.events.push_back(std::move(event));
-    }
-    if (!result.value.events.isEmpty()) {
-        const auto &last = result.value.events.constLast();
-        result.value.nextCursor = {last.occurredAtUtc, last.eventId};
     }
     return result;
 }

@@ -55,9 +55,13 @@ Dialog {
             }
             Label {
                 Layout.fillWidth: true
-                text: root.historyController.errorMessage
-                visible: text.length > 0
-                color: ThemeModule.Theme.error
+                text: root.historyController.errorMessage.length > 0
+                      ? root.historyController.errorMessage
+                      : root.historyController.warningMessage
+                visible: root.historyController.errorMessage.length > 0
+                         || root.historyController.warningMessage.length > 0
+                color: root.historyController.errorMessage.length > 0
+                       ? ThemeModule.Theme.error : ThemeModule.Theme.warning
                 wrapMode: Text.Wrap
                 Accessible.role: Accessible.AlertMessage
             }
@@ -75,10 +79,14 @@ Dialog {
                    : root.historyController.loading || !root.historyController.ready ? "loading" : "empty"
             title: root.historyController.errorMessage.length > 0
                    ? qsTr("History could not be loaded")
+                   : root.historyController.warningMessage.length > 0
+                     ? qsTr("Some history entries could not be read")
                    : root.historyController.ready ? qsTr("No history recorded yet")
                                                   : qsTr("Starting task storage")
             message: root.historyController.errorMessage.length > 0
                      ? qsTr("Retry this timeline after storage is available.")
+                     : root.historyController.warningMessage.length > 0
+                       ? root.historyController.warningMessage
                      : qsTr("New task changes will appear here.")
         }
         ListView {

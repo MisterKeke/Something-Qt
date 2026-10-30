@@ -107,6 +107,10 @@ void TaskHistoryController::startLoad(bool append)
         m_cursor = {};
         m_hasMore = false;
         m_model.replace({});
+        if (!m_warningMessage.isEmpty()) {
+            m_warningMessage.clear();
+            emit stateChanged();
+        }
     }
 
     const auto operation = m_graph->beginOperation(
@@ -166,6 +170,10 @@ void TaskHistoryController::onStorageFinished(quint64 operationId, const QVarian
     const QVariantList events = values.value(QStringLiteral("events")).toList();
     if (append) m_model.appendOlder(events);
     else m_model.replace(events);
+    if (values.value(QStringLiteral("invalidEventsSkipped")).toInt() > 0) {
+        m_warningMessage = QStringLiteral(
+            "Some task history entries were skipped because their saved data could not be read.");
+    }
     m_hasMore = values.value(QStringLiteral("hasMore")).toBool();
     m_cursor.occurredAtUtc = values.value(QStringLiteral("nextOccurredAtUtc")).toString();
     m_cursor.eventId = values.value(QStringLiteral("nextEventId")).toLongLong();

@@ -24,6 +24,7 @@ storage::StorageReply pageReply(const storage::TaskHistoryPage &page)
     reply.values.insert(QStringLiteral("hasMore"), page.hasMore);
     reply.values.insert(QStringLiteral("nextOccurredAtUtc"), page.nextCursor.occurredAtUtc);
     reply.values.insert(QStringLiteral("nextEventId"), page.nextCursor.eventId);
+    reply.values.insert(QStringLiteral("invalidEventsSkipped"), page.invalidEventsSkipped);
     return reply;
 }
 
