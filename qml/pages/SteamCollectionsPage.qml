@@ -135,6 +135,29 @@ Item {
         return false
     }
 
+    function transferActions(game) {
+        const actions = []
+        if (!controller || !game || !game.memberships)
+            return actions
+        for (let sourceIndex = 0; sourceIndex < game.memberships.length; ++sourceIndex) {
+            const source = game.memberships[sourceIndex]
+            for (let targetIndex = 0; targetIndex < controller.collections.length; ++targetIndex) {
+                const target = controller.collections[targetIndex]
+                if (Number(source.collectionId) === Number(target.id)
+                        || hasMembership(game, target.id))
+                    continue
+                actions.push({
+                    appId: Number(game.appId),
+                    sourceCollectionId: Number(source.collectionId),
+                    sourceCollectionName: String(source.collectionName),
+                    targetCollectionId: Number(target.id),
+                    targetCollectionName: String(target.name)
+                })
+            }
+        }
+        return actions
+    }
+
     ColumnLayout {
         id: content
         anchors.left: parent.left
@@ -578,15 +601,34 @@ Item {
         }
         MenuSeparator { visible: root.controller && root.controller.collections.length > 0 }
         Repeater {
-            model: root.controller ? root.controller.collections : []
+            model: root.transferActions(gameActionMenu.game)
             delegate: MenuItem {
                 required property var modelData
-                text: qsTr("Add to %1").arg(modelData.name)
-                visible: !root.hasMembership(gameActionMenu.game, modelData.id)
+                text: qsTr("Copy from %1 to %2")
+                    .arg(modelData.sourceCollectionName)
+                    .arg(modelData.targetCollectionName)
                 onTriggered: if (root.controller)
-                    root.controller.addExistingGame(Number(gameActionMenu.game.appId),
-                                                     Number(modelData.id))
+                    root.controller.copyGame(Number(modelData.sourceCollectionId),
+                                             Number(modelData.targetCollectionId),
+                                             Number(modelData.appId))
             }
+        }
+        Repeater {
+            model: root.transferActions(gameActionMenu.game)
+            delegate: MenuItem {
+                required property var modelData
+                text: qsTr("Move from %1 to %2")
+                    .arg(modelData.sourceCollectionName)
+                    .arg(modelData.targetCollectionName)
+                onTriggered: if (root.controller)
+                    root.controller.moveGame(Number(modelData.sourceCollectionId),
+                                             Number(modelData.targetCollectionId),
+                                             Number(modelData.appId))
+            }
+        }
+        MenuSeparator {
+            visible: gameActionMenu.game && gameActionMenu.game.memberships
+                     && gameActionMenu.game.memberships.length > 0
         }
         Repeater {
             model: gameActionMenu.game && gameActionMenu.game.memberships
@@ -700,7 +742,7 @@ Item {
             spacing: 10
             Label {
                 Layout.fillWidth: true
-                text: qsTr("This removes the collection and its membership records. Games will remain in Steam and in any price tracking, release tracking, or Game Updates features.")
+                text: qsTr("This removes only the collection and its memberships. It will not delete games from Steam or remove price tracking, Release Radar, or Game Updates data.")
                 color: ThemeModule.Theme.textSecondary
                 wrapMode: Text.Wrap
             }

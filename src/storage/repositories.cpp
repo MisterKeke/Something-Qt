@@ -3899,6 +3899,113 @@ RepositoryResult<domain::SteamCollectionGameEntry> SteamCollectionsRepository::u
     return loadGame(collectionId, input.steamAppId);
 }
 
+RepositoryResult<domain::SteamCollectionGameEntry> SteamCollectionsRepository::moveGame(
+    qint64 sourceCollectionId, qint64 targetCollectionId, quint32 appId)
+{
+    Q_ASSERT(QThread::currentThread() == m_database.driver()->thread());
+    if (sourceCollectionId <= 0 || targetCollectionId <= 0
+        || sourceCollectionId == targetCollectionId || appId == 0) {
+        return failure<domain::SteamCollectionGameEntry>(domain::ErrorCategory::Validation);
+    }
+    Transaction transaction(m_database);
+    if (!transaction.active())
+        return failure<domain::SteamCollectionGameEntry>(domain::ErrorCategory::Storage);
+    const auto sourceCollection = load(sourceCollectionId);
+    if (!sourceCollection.succeeded())
+        return failure<domain::SteamCollectionGameEntry>(sourceCollection.error.category());
+    const auto targetCollection = load(targetCollectionId);
+    if (!targetCollection.succeeded())
+        return failure<domain::SteamCollectionGameEntry>(targetCollection.error.category());
+    const auto source = loadGame(sourceCollectionId, appId);
+    if (!source.succeeded())
+        return failure<domain::SteamCollectionGameEntry>(source.error.category());
+    const auto target = loadGame(targetCollectionId, appId);
+    if (target.succeeded())
+        return failure<domain::SteamCollectionGameEntry>(domain::ErrorCategory::Conflict);
+    if (target.error.category() != domain::ErrorCategory::NotFound)
+        return failure<domain::SteamCollectionGameEntry>(target.error.category());
+
+    QSqlQuery insert(m_database);
+    insert.prepare(QStringLiteral(
+        "INSERT INTO steam_collection_games(collection_id,steam_app_id,status,personal_rating,"
+        "personal_comment) VALUES(?,?,?,?,?)"));
+    insert.addBindValue(targetCollectionId);
+    insert.addBindValue(appId);
+    insert.addBindValue(source.value.status
+        ? QVariant(domain::steamCollectionGameStatusName(*source.value.status)) : QVariant());
+    insert.addBindValue(source.value.personalRating
+        ? QVariant(*source.value.personalRating) : QVariant());
+    insert.addBindValue(source.value.personalComment);
+    if (!insert.exec())
+        return failure<domain::SteamCollectionGameEntry>(queryFailure(insert));
+    insert.finish();
+
+    QSqlQuery remove(m_database);
+    remove.prepare(QStringLiteral(
+        "DELETE FROM steam_collection_games WHERE collection_id=? AND steam_app_id=?"));
+    remove.addBindValue(sourceCollectionId);
+    remove.addBindValue(appId);
+    if (!remove.exec())
+        return failure<domain::SteamCollectionGameEntry>(queryFailure(remove));
+    if (remove.numRowsAffected() != 1)
+        return failure<domain::SteamCollectionGameEntry>(domain::ErrorCategory::Conflict);
+    remove.finish();
+
+    const auto moved = loadGame(targetCollectionId, appId);
+    if (!moved.succeeded()) return moved;
+    if (!transaction.commit())
+        return failure<domain::SteamCollectionGameEntry>(domain::ErrorCategory::Storage);
+    return moved;
+}
+
+RepositoryResult<domain::SteamCollectionGameEntry> SteamCollectionsRepository::copyGame(
+    qint64 sourceCollectionId, qint64 targetCollectionId, quint32 appId)
+{
+    Q_ASSERT(QThread::currentThread() == m_database.driver()->thread());
+    if (sourceCollectionId <= 0 || targetCollectionId <= 0
+        || sourceCollectionId == targetCollectionId || appId == 0) {
+        return failure<domain::SteamCollectionGameEntry>(domain::ErrorCategory::Validation);
+    }
+    Transaction transaction(m_database);
+    if (!transaction.active())
+        return failure<domain::SteamCollectionGameEntry>(domain::ErrorCategory::Storage);
+    const auto sourceCollection = load(sourceCollectionId);
+    if (!sourceCollection.succeeded())
+        return failure<domain::SteamCollectionGameEntry>(sourceCollection.error.category());
+    const auto targetCollection = load(targetCollectionId);
+    if (!targetCollection.succeeded())
+        return failure<domain::SteamCollectionGameEntry>(targetCollection.error.category());
+    const auto source = loadGame(sourceCollectionId, appId);
+    if (!source.succeeded())
+        return failure<domain::SteamCollectionGameEntry>(source.error.category());
+    const auto target = loadGame(targetCollectionId, appId);
+    if (target.succeeded())
+        return failure<domain::SteamCollectionGameEntry>(domain::ErrorCategory::Conflict);
+    if (target.error.category() != domain::ErrorCategory::NotFound)
+        return failure<domain::SteamCollectionGameEntry>(target.error.category());
+
+    QSqlQuery insert(m_database);
+    insert.prepare(QStringLiteral(
+        "INSERT INTO steam_collection_games(collection_id,steam_app_id,status,personal_rating,"
+        "personal_comment) VALUES(?,?,?,?,?)"));
+    insert.addBindValue(targetCollectionId);
+    insert.addBindValue(appId);
+    insert.addBindValue(source.value.status
+        ? QVariant(domain::steamCollectionGameStatusName(*source.value.status)) : QVariant());
+    insert.addBindValue(source.value.personalRating
+        ? QVariant(*source.value.personalRating) : QVariant());
+    insert.addBindValue(source.value.personalComment);
+    if (!insert.exec())
+        return failure<domain::SteamCollectionGameEntry>(queryFailure(insert));
+    insert.finish();
+
+    const auto copied = loadGame(targetCollectionId, appId);
+    if (!copied.succeeded()) return copied;
+    if (!transaction.commit())
+        return failure<domain::SteamCollectionGameEntry>(domain::ErrorCategory::Storage);
+    return copied;
+}
+
 RepositoryResult<void> SteamCollectionsRepository::removeGame(
     qint64 collectionId, quint32 appId)
 {

@@ -43,6 +43,10 @@ QString safeMutationError(const QString &mutation, domain::AppError error)
         }
         if (mutation == QStringLiteral("game-added"))
             return QStringLiteral("That game is already in this collection.");
+        if (mutation == QStringLiteral("game-moved")
+            || mutation == QStringLiteral("game-copied"))
+            return QStringLiteral(
+                "The game is already in the destination collection; its existing membership was left unchanged.");
     }
     if (error.category() == domain::ErrorCategory::Validation)
         return QStringLiteral("The collection details are not valid.");
@@ -681,6 +685,64 @@ void SteamCollectionsController::removeGame(qint64 collectionId, quint32 appId)
     }
 }
 
+void SteamCollectionsController::moveGame(qint64 sourceCollectionId,
+                                           qint64 targetCollectionId,
+                                           quint32 appId)
+{
+    if (!m_ready || !m_snapshotLoaded || sourceCollectionId <= 0
+        || targetCollectionId <= 0 || sourceCollectionId == targetCollectionId
+        || appId == 0 || m_busy || m_addBusy) {
+        return;
+    }
+    if (!hasMembership(sourceCollectionId, appId)) {
+        m_errorMessage = QStringLiteral("That game is no longer in the source collection.");
+        emit stateChanged();
+        return;
+    }
+    if (hasMembership(targetCollectionId, appId)) {
+        m_errorMessage = QStringLiteral(
+            "The game is already in the destination collection; its existing membership was left unchanged.");
+        emit stateChanged();
+        return;
+    }
+    if (!submitMutation(services::SteamCollectionsService::moveGame(
+            m_graph->profileDirectory(), sourceCollectionId,
+            targetCollectionId, appId), QStringLiteral("game-moved"),
+            sourceCollectionId)) {
+        m_errorMessage = QStringLiteral("The game could not be moved between collections.");
+        emit stateChanged();
+    }
+}
+
+void SteamCollectionsController::copyGame(qint64 sourceCollectionId,
+                                           qint64 targetCollectionId,
+                                           quint32 appId)
+{
+    if (!m_ready || !m_snapshotLoaded || sourceCollectionId <= 0
+        || targetCollectionId <= 0 || sourceCollectionId == targetCollectionId
+        || appId == 0 || m_busy || m_addBusy) {
+        return;
+    }
+    if (!hasMembership(sourceCollectionId, appId)) {
+        m_errorMessage = QStringLiteral("That game is no longer in the source collection.");
+        emit stateChanged();
+        return;
+    }
+    if (hasMembership(targetCollectionId, appId)) {
+        m_errorMessage = QStringLiteral(
+            "The game is already in the destination collection; its existing membership was left unchanged.");
+        emit stateChanged();
+        return;
+    }
+    if (!submitMutation(services::SteamCollectionsService::copyGame(
+            m_graph->profileDirectory(), sourceCollectionId,
+            targetCollectionId, appId), QStringLiteral("game-copied"),
+            sourceCollectionId)) {
+        m_errorMessage = QStringLiteral("The game could not be copied to that collection.");
+        emit stateChanged();
+    }
+}
+
 QVariantList SteamCollectionsController::availableCatalogGames(
     qint64 collectionId) const
 {
@@ -848,6 +910,12 @@ void SteamCollectionsController::finishMutation(
         m_notification = QStringLiteral("Game details saved.");
     } else if (type == QStringLiteral("game-removed")) {
         m_notification = QStringLiteral("Removed the game from this collection.");
+    } else if (type == QStringLiteral("game-moved")) {
+        m_notification = QStringLiteral("Moved %1 to another collection.")
+            .arg(mutation.value(QStringLiteral("name")).toString());
+    } else if (type == QStringLiteral("game-copied")) {
+        m_notification = QStringLiteral("Copied %1 to another collection.")
+            .arg(mutation.value(QStringLiteral("name")).toString());
     }
     rebuildGames();
     emit stateChanged();

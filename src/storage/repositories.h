@@ -262,6 +262,10 @@ public:
         domain::SteamCollectionGameInput input);
     RepositoryResult<domain::SteamCollectionGameEntry> updateGame(
         qint64 collectionId, domain::SteamCollectionGameInput input);
+    RepositoryResult<domain::SteamCollectionGameEntry> copyGame(
+        qint64 sourceCollectionId, qint64 targetCollectionId, quint32 appId);
+    RepositoryResult<domain::SteamCollectionGameEntry> moveGame(
+        qint64 sourceCollectionId, qint64 targetCollectionId, quint32 appId);
     RepositoryResult<void> removeGame(qint64 collectionId, quint32 appId);
 
 private:

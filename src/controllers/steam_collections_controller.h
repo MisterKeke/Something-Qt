@@ -68,6 +68,10 @@ public:
     Q_INVOKABLE void updateGame(qint64 collectionId, quint32 appId,
                                 QString status, int rating, QString comment);
     Q_INVOKABLE void removeGame(qint64 collectionId, quint32 appId);
+    Q_INVOKABLE void copyGame(qint64 sourceCollectionId,
+                              qint64 targetCollectionId, quint32 appId);
+    Q_INVOKABLE void moveGame(qint64 sourceCollectionId,
+                              qint64 targetCollectionId, quint32 appId);
     Q_INVOKABLE QVariantList availableCatalogGames(qint64 collectionId) const;
     Q_INVOKABLE void openStore(quint32 appId);
     Q_INVOKABLE void retryLoad();

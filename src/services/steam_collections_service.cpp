@@ -324,6 +324,48 @@ storage::StorageCommand SteamCollectionsService::removeGame(
     };
 }
 
+storage::StorageCommand SteamCollectionsService::moveGame(
+    QString profileDirectory, qint64 sourceCollectionId,
+    qint64 targetCollectionId, quint32 appId)
+{
+    return [profileDirectory = std::move(profileDirectory), sourceCollectionId,
+            targetCollectionId, appId](
+               storage::StorageRepositories &repositories,
+               const std::function<bool()> &cancelled) {
+        if (cancelled()) return failed(domain::AppError::cancelled());
+        const auto moved = repositories.steamCollections.moveGame(
+            sourceCollectionId, targetCollectionId, appId);
+        if (!moved.succeeded()) return failed(moved.error);
+        return snapshotReply(profileDirectory, repositories, cancelled,
+            {{QStringLiteral("type"), QStringLiteral("game-moved")},
+             {QStringLiteral("sourceCollectionId"), sourceCollectionId},
+             {QStringLiteral("targetCollectionId"), targetCollectionId},
+             {QStringLiteral("appId"), appId},
+             {QStringLiteral("name"), moved.value.game.name}});
+    };
+}
+
+storage::StorageCommand SteamCollectionsService::copyGame(
+    QString profileDirectory, qint64 sourceCollectionId,
+    qint64 targetCollectionId, quint32 appId)
+{
+    return [profileDirectory = std::move(profileDirectory), sourceCollectionId,
+            targetCollectionId, appId](
+               storage::StorageRepositories &repositories,
+               const std::function<bool()> &cancelled) {
+        if (cancelled()) return failed(domain::AppError::cancelled());
+        const auto copied = repositories.steamCollections.copyGame(
+            sourceCollectionId, targetCollectionId, appId);
+        if (!copied.succeeded()) return failed(copied.error);
+        return snapshotReply(profileDirectory, repositories, cancelled,
+            {{QStringLiteral("type"), QStringLiteral("game-copied")},
+             {QStringLiteral("sourceCollectionId"), sourceCollectionId},
+             {QStringLiteral("targetCollectionId"), targetCollectionId},
+             {QStringLiteral("appId"), appId},
+             {QStringLiteral("name"), copied.value.game.name}});
+    };
+}
+
 storage::StorageCommand SteamCollectionsService::saveArtwork(
     QString profileDirectory, quint32 appId, QString expectedSourceUrl,
     StagedSteamArtwork artwork)

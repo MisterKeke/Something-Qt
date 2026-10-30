@@ -31,6 +31,12 @@ public:
         domain::SteamCollectionGameInput input);
     static storage::StorageCommand removeGame(
         QString profileDirectory, qint64 collectionId, quint32 appId);
+    static storage::StorageCommand copyGame(
+        QString profileDirectory, qint64 sourceCollectionId,
+        qint64 targetCollectionId, quint32 appId);
+    static storage::StorageCommand moveGame(
+        QString profileDirectory, qint64 sourceCollectionId,
+        qint64 targetCollectionId, quint32 appId);
     static storage::StorageCommand saveArtwork(
         QString profileDirectory, quint32 appId, QString expectedSourceUrl,
         StagedSteamArtwork artwork);
