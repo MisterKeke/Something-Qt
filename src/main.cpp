@@ -27,6 +27,7 @@
 #include "controllers/file_explorer_controller.h"
 #include "controllers/legacy_data_import_controller.h"
 #include "controllers/running_applications_controller.h"
+#include "controllers/scheduling_controller.h"
 #include "controllers/settings_controller.h"
 #include "controllers/setups_controller.h"
 #include "controllers/steam_games_controller.h"
@@ -132,6 +133,7 @@ int main(int argc, char *argv[])
     something::controllers::WallpaperController wallpaperController(&services,
                                                                      wallpaperImages);
     something::controllers::TasksController tasksController(&services, &clock, &mutationWorkflow);
+    something::controllers::SchedulingController schedulingController(&services, &clock);
     something::controllers::TaskHistoryController taskHistoryController(&services);
     something::controllers::TerminalController terminalController(&commandService);
     something::controllers::CalendarController calendarController(&services, &clock);
@@ -206,10 +208,14 @@ int main(int argc, char *argv[])
                      &calendarController, &something::controllers::CalendarController::onTaskMutation);
     QObject::connect(&tasksController, &something::controllers::TasksController::taskMutationCommitted,
                      &dashboardController, &something::controllers::DashboardController::onTaskMutation);
+    QObject::connect(&tasksController, &something::controllers::TasksController::taskMutationCommitted,
+                     &schedulingController, &something::controllers::SchedulingController::onTaskMutationCommitted);
     QObject::connect(&tasksController, &something::controllers::TasksController::taskMutationMayHaveCommitted,
                      &calendarController, &something::controllers::CalendarController::refreshSelectedDate);
     QObject::connect(&tasksController, &something::controllers::TasksController::taskMutationMayHaveCommitted,
                      &dashboardController, &something::controllers::DashboardController::refreshTaskSummaries);
+    QObject::connect(&tasksController, &something::controllers::TasksController::taskMutationMayHaveCommitted,
+                     &schedulingController, &something::controllers::SchedulingController::onTaskMutationMayHaveCommitted);
     QObject::connect(&favoritesController, &something::controllers::FavoritesController::newsChanged,
                      &dashboardController, &something::controllers::DashboardController::reloadFavoriteNews);
     QObject::connect(&settingsController, &something::controllers::SettingsController::weekStartChanged,
@@ -237,6 +243,8 @@ int main(int argc, char *argv[])
                                              &legacyDataImportController);
     engine.rootContext()->setContextProperty(QStringLiteral("taskController"),
                                              &tasksController);
+    engine.rootContext()->setContextProperty(QStringLiteral("schedulingController"),
+                                             &schedulingController);
     engine.rootContext()->setContextProperty(QStringLiteral("taskHistoryController"),
                                              &taskHistoryController);
     engine.rootContext()->setContextProperty(QStringLiteral("terminalController"),

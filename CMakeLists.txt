@@ -79,6 +79,7 @@ qt_add_executable(SomethingQt WIN32
     src/controllers/steam_games_controller.cpp
     src/controllers/favorites_controller.cpp
     src/controllers/running_applications_controller.cpp
+    src/controllers/scheduling_controller.cpp
     src/controllers/settings_controller.cpp
     src/controllers/tasks_controller.cpp
     src/controllers/task_history_controller.cpp
@@ -136,6 +137,7 @@ qt_add_executable(SomethingQt WIN32
     src/storage/schema_migrator.cpp
     src/storage/storage_worker.cpp
     src/models/tasks_model.cpp
+    src/models/scheduling_preview_model.cpp
     src/models/task_history_model.cpp
     src/models/terminal_output_model.cpp
     src/models/calendar_months_model.cpp

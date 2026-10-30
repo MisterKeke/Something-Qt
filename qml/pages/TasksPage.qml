@@ -246,6 +246,13 @@ Item {
                     onClicked: taskController.refresh()
                 }
                 Shared.AppButton {
+                    text: qsTr("Smart schedule")
+                    visible: root.activeView === "tasks"
+                    quiet: true
+                    enabled: taskController.ready && !schedulingController.loading
+                    onClicked: schedulingController.generatePreview()
+                }
+                Shared.AppButton {
                     text: qsTr("Add task")
                     visible: root.activeView === "tasks"
                     enabled: taskController.ready && !taskController.mutationBusy
@@ -368,6 +375,350 @@ Item {
                     onClicked: taskController.clearFilters()
                 }
             }
+            }
+        }
+
+        Shared.AppCard {
+            Layout.fillWidth: true
+            visible: root.activeView === "tasks" && schedulingController.previewVisible
+            padding: 16
+
+            ColumnLayout {
+                width: parent.width
+                spacing: 10
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    Label {
+                        text: qsTr("Smart schedule preview")
+                        color: ThemeModule.Theme.textPrimary
+                        font.family: ThemeModule.Theme.fontFamily
+                        font.pixelSize: ThemeModule.Theme.headingFontSize
+                        font.weight: Font.DemiBold
+                    }
+                    Item { Layout.fillWidth: true }
+                    BusyIndicator {
+                        visible: schedulingController.loading
+                        running: visible
+                        width: 24
+                        height: 24
+                        Accessible.name: qsTr("Calculating schedule recommendations")
+                    }
+                    Shared.AppButton {
+                        text: qsTr("Refresh preview")
+                        quiet: true
+                        enabled: taskController.ready && !schedulingController.loading
+                        onClicked: schedulingController.generatePreview()
+                    }
+                    Shared.AppButton {
+                        text: qsTr("Reject proposal")
+                        quiet: true
+                        onClicked: schedulingController.rejectProposal()
+                    }
+                }
+
+                Shared.StatePanel {
+                    Layout.fillWidth: true
+                    visible: schedulingController.loading
+                    state: "loading"
+                    title: qsTr("Preparing recommendations")
+                    message: qsTr("Loading incomplete tasks and saved scheduling preferences.")
+                }
+
+                Label {
+                    Layout.fillWidth: true
+                    visible: schedulingController.errorMessage.length > 0
+                    text: schedulingController.errorMessage
+                    color: ThemeModule.Theme.error
+                    wrapMode: Text.Wrap
+                    font.family: ThemeModule.Theme.fontFamily
+                    Accessible.role: Accessible.AlertMessage
+                }
+
+                Label {
+                    Layout.fillWidth: true
+                    visible: schedulingController.previewStale
+                    text: schedulingController.statusMessage
+                    color: ThemeModule.Theme.warning
+                    wrapMode: Text.Wrap
+                    font.family: ThemeModule.Theme.fontFamily
+                    Accessible.role: Accessible.AlertMessage
+                }
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    visible: schedulingController.previewAvailable
+                    Label {
+                        Layout.fillWidth: true
+                        text: qsTr("%1 of %2 valid recommendations accepted · choices are in memory and not saved yet")
+                              .arg(schedulingController.acceptedCount)
+                              .arg(schedulingController.validCount)
+                        color: ThemeModule.Theme.textSecondary
+                        wrapMode: Text.Wrap
+                        font.family: ThemeModule.Theme.fontFamily
+                    }
+                    Shared.AppButton {
+                        text: qsTr("Accept all valid")
+                        enabled: schedulingController.canStage
+                                 && schedulingController.validCount > 0
+                        onClicked: schedulingController.acceptAllValid()
+                    }
+                }
+
+                Label {
+                    Layout.fillWidth: true
+                    visible: schedulingController.statusMessage.length > 0
+                             && !schedulingController.previewStale
+                    text: schedulingController.statusMessage
+                    color: ThemeModule.Theme.accentCyanLight
+                    wrapMode: Text.Wrap
+                    font.family: ThemeModule.Theme.fontFamily
+                }
+
+                Label {
+                    Layout.fillWidth: true
+                    visible: schedulingController.previewAvailable
+                             && schedulingController.warnings.length > 0
+                    text: schedulingController.warnings.join("\n")
+                    color: ThemeModule.Theme.warning
+                    wrapMode: Text.Wrap
+                    font.family: ThemeModule.Theme.fontFamily
+                    Accessible.role: Accessible.AlertMessage
+                }
+
+                Label {
+                    Layout.fillWidth: true
+                    visible: schedulingController.previewAvailable
+                    text: qsTr("Recommendations")
+                    color: ThemeModule.Theme.textPrimary
+                    font.family: ThemeModule.Theme.fontFamily
+                    font.pixelSize: 16
+                    font.weight: Font.DemiBold
+                }
+
+                Shared.StatePanel {
+                    Layout.fillWidth: true
+                    visible: schedulingController.previewAvailable
+                             && schedulingController.recommendations.count === 0
+                    state: "empty"
+                    title: qsTr("No incomplete tasks to schedule")
+                    message: qsTr("There is no scheduling work in the current snapshot.")
+                }
+
+                ListView {
+                    id: scheduleRecommendationList
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: Math.min(430, Math.max(0, contentHeight))
+                    visible: schedulingController.previewAvailable
+                             && schedulingController.recommendations.count > 0
+                    clip: true
+                    spacing: 8
+                    boundsBehavior: Flickable.StopAtBounds
+                    Accessible.name: qsTr("Smart schedule recommendations")
+                    model: schedulingController.recommendations
+                    ScrollBar.vertical: ThemeModule.AppScrollBar { policy: ScrollBar.AsNeeded }
+
+                    delegate: Shared.AppCard {
+                        required property double taskId
+                        required property string title
+                        required property string dueDate
+                        required property string priority
+                        required property string difficulty
+                        required property int estimatedDurationMinutes
+                        required property string plannedDate
+                        required property string plannedStartTime
+                        required property string state
+                        required property bool overdue
+                        required property bool usedDefaultDuration
+                        required property bool retainedExistingSchedule
+                        required property bool hasConflict
+                        required property bool overloaded
+                        required property string reason
+                        required property var warnings
+                        required property bool canAccept
+                        required property bool accepted
+
+                        width: ListView.view.width
+                        height: implicitHeight
+                        padding: 12
+                        implicitHeight: recommendationContent.implicitHeight + padding * 2
+
+                        ColumnLayout {
+                            id: recommendationContent
+                            width: parent.width - parent.padding * 2
+                            spacing: 7
+
+                            RowLayout {
+                                Layout.fillWidth: true
+                                Label {
+                                    Layout.fillWidth: true
+                                    text: title
+                                    color: ThemeModule.Theme.textPrimary
+                                    font.family: ThemeModule.Theme.fontFamily
+                                    font.pixelSize: 15
+                                    font.weight: Font.DemiBold
+                                    wrapMode: Text.Wrap
+                                }
+                                Shared.StatusBadge {
+                                    text: state === "scheduled" ? qsTr("Scheduled") : qsTr("Unscheduled")
+                                    badgeColor: state === "scheduled"
+                                                ? ThemeModule.Theme.success : ThemeModule.Theme.error
+                                }
+                            }
+
+                            Label {
+                                Layout.fillWidth: true
+                                text: qsTr("Deadline: %1 · Priority: %2 · Difficulty: %3 · Estimate: %4 min%5")
+                                      .arg(dueDate.length > 0 ? dueDate : qsTr("none"))
+                                      .arg(priority)
+                                      .arg(difficulty.length > 0 ? difficulty : qsTr("not set"))
+                                      .arg(estimatedDurationMinutes)
+                                      .arg(usedDefaultDuration ? qsTr(" (default)") : "")
+                                color: overdue ? ThemeModule.Theme.error : ThemeModule.Theme.textSecondary
+                                wrapMode: Text.Wrap
+                                font.family: ThemeModule.Theme.fontFamily
+                                font.pixelSize: ThemeModule.Theme.metadataFontSize
+                            }
+
+                            Label {
+                                Layout.fillWidth: true
+                                text: state === "scheduled"
+                                      ? qsTr("Proposed: %1%2")
+                                        .arg(plannedDate)
+                                        .arg(plannedStartTime.length > 0
+                                             ? qsTr(" at %1").arg(plannedStartTime) : qsTr(" · start time unspecified"))
+                                      : qsTr("No available work block")
+                                color: state === "scheduled" ? ThemeModule.Theme.accentCyanLight
+                                                               : ThemeModule.Theme.error
+                                wrapMode: Text.Wrap
+                                font.family: ThemeModule.Theme.fontFamily
+                                font.weight: Font.DemiBold
+                            }
+
+                            Label {
+                                Layout.fillWidth: true
+                                text: reason
+                                visible: reason.length > 0
+                                color: ThemeModule.Theme.textSecondary
+                                wrapMode: Text.Wrap
+                                font.family: ThemeModule.Theme.fontFamily
+                                font.pixelSize: ThemeModule.Theme.metadataFontSize
+                            }
+
+                            Label {
+                                Layout.fillWidth: true
+                                visible: warnings && warnings.length > 0
+                                text: warnings ? warnings.join("\n") : ""
+                                color: hasConflict || overloaded || overdue
+                                       ? ThemeModule.Theme.warning : ThemeModule.Theme.textSecondary
+                                wrapMode: Text.Wrap
+                                font.family: ThemeModule.Theme.fontFamily
+                                font.pixelSize: ThemeModule.Theme.metadataFontSize
+                                Accessible.role: Accessible.AlertMessage
+                            }
+
+                            RowLayout {
+                                Layout.fillWidth: true
+                                Shared.StatusBadge {
+                                    visible: retainedExistingSchedule
+                                    text: qsTr("Existing plan kept")
+                                    badgeColor: ThemeModule.Theme.accentCyan
+                                }
+                                Shared.StatusBadge {
+                                    visible: hasConflict
+                                    text: qsTr("Conflict")
+                                    badgeColor: ThemeModule.Theme.error
+                                }
+                                Shared.StatusBadge {
+                                    visible: overloaded
+                                    text: qsTr("Over daily capacity")
+                                    badgeColor: ThemeModule.Theme.error
+                                }
+                                Item { Layout.fillWidth: true }
+                                Shared.AppButton {
+                                    text: accepted ? qsTr("Accepted") : qsTr("Accept")
+                                    quiet: accepted
+                                    enabled: schedulingController.canStage && canAccept
+                                    Accessible.name: accepted
+                                                    ? qsTr("Remove staged acceptance for %1").arg(title)
+                                                    : qsTr("Accept recommendation for %1").arg(title)
+                                    onClicked: schedulingController.setRecommendationAccepted(
+                                                   taskId, !accepted)
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Label {
+                    Layout.fillWidth: true
+                    visible: schedulingController.previewAvailable
+                    text: qsTr("Daily workload · local dates")
+                    color: ThemeModule.Theme.textPrimary
+                    font.family: ThemeModule.Theme.fontFamily
+                    font.pixelSize: 16
+                    font.weight: Font.DemiBold
+                }
+
+                GridView {
+                    id: scheduleDaySummaries
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: schedulingController.previewAvailable
+                                           ? Math.min(230, Math.max(84, contentHeight)) : 0
+                    visible: schedulingController.previewAvailable
+                    clip: true
+                    cellWidth: width > 840 ? width / 4 : width > 420 ? width / 2 : width
+                    cellHeight: 72
+                    model: schedulingController.daySummaries
+                    Accessible.name: qsTr("Daily scheduled workload and capacity")
+                    ScrollBar.vertical: ThemeModule.AppScrollBar { policy: ScrollBar.AsNeeded }
+
+                    delegate: Rectangle {
+                        required property var modelData
+                        width: scheduleDaySummaries.cellWidth - 6
+                        height: 64
+                        radius: ThemeModule.Theme.panelRadius
+                        color: Boolean(modelData.overloaded) ? ThemeModule.Theme.errorSurface
+                                                             : ThemeModule.Theme.insetSurface
+                        border.color: Boolean(modelData.overloaded) ? ThemeModule.Theme.error
+                                                                      : ThemeModule.Theme.borderColor
+                        border.width: ThemeModule.Theme.panelBorderWidth
+
+                        Column {
+                            anchors.fill: parent
+                            anchors.margins: 7
+                            spacing: 3
+                            Label {
+                                width: parent.width
+                                text: String(modelData.date || "")
+                                color: ThemeModule.Theme.textPrimary
+                                font.family: ThemeModule.Theme.fontFamily
+                                font.weight: Font.DemiBold
+                                font.pixelSize: ThemeModule.Theme.metadataFontSize
+                            }
+                            Label {
+                                width: parent.width
+                                text: qsTr("%1 / %2 min planned")
+                                      .arg(Number(modelData.plannedMinutes || 0))
+                                      .arg(Number(modelData.capacityMinutes || 0))
+                                color: Boolean(modelData.overloaded) ? ThemeModule.Theme.error
+                                                                     : ThemeModule.Theme.textSecondary
+                                font.family: ThemeModule.Theme.fontFamily
+                                font.pixelSize: ThemeModule.Theme.metadataFontSize
+                            }
+                            Label {
+                                width: parent.width
+                                visible: Boolean(modelData.hasUnspecifiedStartTime)
+                                         || Boolean(modelData.overloaded)
+                                text: Boolean(modelData.overloaded) ? qsTr("Over capacity")
+                                      : qsTr("Start time unspecified")
+                                color: ThemeModule.Theme.warning
+                                font.family: ThemeModule.Theme.fontFamily
+                                font.pixelSize: ThemeModule.Theme.metadataFontSize
+                            }
+                        }
+                    }
+                }
             }
         }
 
