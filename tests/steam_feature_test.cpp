@@ -198,7 +198,88 @@ private slots:
     void releasePersistenceCoversChangesFailuresCancellationAndIndependentDeletion();
     void calendarServiceProjectsOnlyExactReleaseEvents();
     void releaseRadarMigrationPreservesExistingPriceProfiles();
+    void unsupportedPriceMigrationPreservesChildrenAndRollsBackFailures();
 };
+
+void SteamFeatureTest::unsupportedPriceMigrationPreservesChildrenAndRollsBackFailures()
+{
+    QString connectionName;
+    QSqlDatabase database;
+    QVERIFY(openDatabase(&database, &connectionName));
+    qint64 gameId = 0;
+    qint64 retiredId = 0;
+    const QString artworkFilename = QStringLiteral("996001-")
+        + QString(64, QLatin1Char('a')) + QStringLiteral(".png");
+    {
+        storage::StorageRepositories repositories(database);
+        auto game = priceGame(996001, QStringLiteral("Migration game"), QStringLiteral("US"),
+            QStringLiteral("USD"), QStringLiteral("priced"), true, 1999, 999, 50,
+            QStringLiteral("2026-10-01T12:00:00Z"));
+        game.imageSourceUrl = QStringLiteral("https://shared.steamstatic.com/steam/apps/996001/header.jpg");
+        const auto saved = repositories.steam.add(game);
+        QVERIFY(saved.succeeded());
+        gameId = saved.value.id;
+        QVERIFY(repositories.steam.setArtwork(gameId,
+            {artworkFilename, QStringLiteral("image/png"), 100}).succeeded());
+        game.steamAppId = 996002;
+        game.storeUrl = QStringLiteral("https://store.steampowered.com/app/996002/");
+        const auto retired = repositories.steam.add(game);
+        QVERIFY(retired.succeeded());
+        retiredId = retired.value.id;
+        QVERIFY(repositories.steam.remove(retiredId).succeeded());
+    }
+    QSqlQuery query(database);
+    QVERIFY(query.exec(QStringLiteral("DELETE FROM schema_migrations WHERE version=19")));
+    QVERIFY(query.exec(QStringLiteral(
+        "CREATE TRIGGER reject_migration_artwork BEFORE INSERT ON steam_game_images "
+        "BEGIN SELECT RAISE(ABORT,'fixture restore failure'); END")));
+    QString diagnostic;
+    QVERIFY(!storage::SchemaMigrator::apply(database, &diagnostic));
+    QVERIFY(query.exec(QStringLiteral("SELECT MAX(version) FROM schema_migrations")));
+    QVERIFY(query.next());
+    QCOMPARE(query.value(0).toInt(), 18);
+    query.finish();
+    {
+        storage::StorageRepositories repositories(database);
+        const auto unchanged = repositories.steam.get(gameId);
+        QVERIFY(unchanged.succeeded());
+        QVERIFY(unchanged.value.artwork.has_value());
+        QCOMPARE(unchanged.value.artwork->filename, artworkFilename);
+    }
+    QVERIFY(query.exec(QStringLiteral("DROP TRIGGER reject_migration_artwork")));
+    QVERIFY2(storage::SchemaMigrator::apply(database, &diagnostic), qPrintable(diagnostic));
+    QVERIFY(query.exec(QStringLiteral("PRAGMA foreign_key_check")));
+    QVERIFY(!query.next());
+    query.finish();
+    {
+        storage::StorageRepositories repositories(database);
+        const auto preserved = repositories.steam.get(gameId);
+        QVERIFY(preserved.succeeded());
+        QCOMPARE(preserved.value.currentPriceMinor.value(), qint64(999));
+        QVERIFY(preserved.value.artwork.has_value());
+        QCOMPARE(preserved.value.artwork->filename, artworkFilename);
+        const auto history = repositories.steam.priceHistory(gameId, QStringLiteral("US"),
+            QStringLiteral("USD"), storage::SteamPriceHistoryRange::All);
+        QVERIFY(history.succeeded());
+        QCOMPARE(history.value.statistics.observationCount, qint64(1));
+        const auto next = addPriceGame(repositories.steam, 996003, QStringLiteral("Next game"),
+            QStringLiteral("US"), QStringLiteral("USD"), QStringLiteral("priced"),
+            true, 1999, 999, 50, QStringLiteral("2026-10-02T12:00:00Z"));
+        QVERIFY(next.succeeded());
+        QVERIFY(next.value.id > retiredId);
+        auto unsupported = preserved.value;
+        unsupported.priceStatus = QStringLiteral("unsupported");
+        unsupported.regularPriceMinor.reset();
+        unsupported.currentPriceMinor.reset();
+        unsupported.discountPercent = 0;
+        QVERIFY(refreshPriceGame(repositories.steam, unsupported,
+            QStringLiteral("2026-10-03T12:00:00Z")).succeeded());
+        QCOMPARE(repositories.steam.get(gameId).value.priceStatus, QStringLiteral("unsupported"));
+    }
+    database.close();
+    database = QSqlDatabase();
+    QSqlDatabase::removeDatabase(connectionName);
+}
 
 void SteamFeatureTest::storeUrlAndCountryRulesAreStrictAndCanonical()
 {
@@ -666,7 +747,7 @@ void SteamFeatureTest::releaseRadarMigrationPreservesExistingPriceProfiles()
 
     QString diagnostic;
     QVERIFY2(storage::SchemaMigrator::apply(database, &diagnostic), qPrintable(diagnostic));
-    QCOMPARE(storage::SchemaMigrator::latestVersion(), 18);
+    QCOMPARE(storage::SchemaMigrator::latestVersion(), 19);
     {
         storage::StorageRepositories repositories(database);
         const auto preserved = repositories.steam.get(priceGameId);
@@ -690,7 +771,7 @@ void SteamFeatureTest::releaseRadarMigrationPreservesExistingPriceProfiles()
         QVERIFY(migratedVersion.exec(QStringLiteral(
             "SELECT MAX(version) FROM schema_migrations")));
         QVERIFY(migratedVersion.next());
-        QCOMPARE(migratedVersion.value(0).toInt(), 18);
+    QCOMPARE(migratedVersion.value(0).toInt(), storage::SchemaMigrator::latestVersion());
     }
     closeDatabase(&database, connectionName);
 }
@@ -840,7 +921,7 @@ void SteamFeatureTest::steamPriceHistoryMigrationPreservesLegacyGamesWithoutFabr
 
     QString diagnostic;
     QVERIFY2(storage::SchemaMigrator::apply(database, &diagnostic), qPrintable(diagnostic));
-    QCOMPARE(storage::SchemaMigrator::latestVersion(), 18);
+    QCOMPARE(storage::SchemaMigrator::latestVersion(), 19);
 
     {
         storage::StorageRepositories repositories(database);

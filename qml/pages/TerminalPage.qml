@@ -8,6 +8,7 @@ Item {
     id: root
 
     required property var controller
+    property var lifecycleController: null
     property string returnRoute: "dashboard"
     property string returnTitle: qsTr("Main Page")
     property bool showReturnButton: true
@@ -284,6 +285,18 @@ Item {
             }
         }
 
+        Label {
+            Layout.fillWidth: true
+            visible: root.lifecycleController
+                     && root.lifecycleController.startupErrorMessage.length > 0
+            text: root.lifecycleController ? root.lifecycleController.startupErrorMessage : ""
+            textFormat: Text.PlainText
+            color: ThemeModule.Theme.error
+            font.family: root.monoFont
+            wrapMode: Text.Wrap
+            Accessible.role: Accessible.AlertMessage
+        }
+
         Item {
             Layout.fillWidth: true
             Layout.fillHeight: true
@@ -336,7 +349,12 @@ Item {
                         spacing: 8
                         Label {
                             Layout.fillWidth: true
-                            text: qsTr("Your application console is ready")
+                            text: !root.lifecycleController ? qsTr("Your application console is ready")
+                                  : root.lifecycleController.startupErrorMessage.length > 0
+                                    ? qsTr("Application startup failed")
+                                  : root.lifecycleController.lifecycleState === "running"
+                                    ? qsTr("Your application console is ready")
+                                    : qsTr("Starting the application…")
                             color: "#8bd7ff"
                             font.family: root.monoFont
                             font.pixelSize: 18

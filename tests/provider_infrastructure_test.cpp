@@ -52,7 +52,7 @@ public:
     {
         setRequest(request);
         setUrl(request.url());
-        setOperation(GetOperation);
+        setOperation(QNetworkAccessManager::GetOperation);
         setAttribute(QNetworkRequest::HttpStatusCodeAttribute, m_response.status);
         if (m_response.redirect.isValid()) {
             setAttribute(QNetworkRequest::RedirectionTargetAttribute, m_response.redirect);

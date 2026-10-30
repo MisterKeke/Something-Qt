@@ -9,6 +9,7 @@ ApplicationWindow {
     objectName: "consoleWindow"
 
     required property var controller
+    property var lifecycleController: null
     property string returnRoute: "dashboard"
     property string returnTitle: qsTr("Main Page")
     property bool interactionBlocked: false
@@ -56,6 +57,7 @@ ApplicationWindow {
         anchors.fill: parent
         clip: true
         controller: consoleWindow.controller
+        lifecycleController: consoleWindow.lifecycleController
         returnRoute: consoleWindow.returnRoute
         returnTitle: consoleWindow.returnTitle
         showReturnButton: consoleWindow.fullApplicationOpened

@@ -1,6 +1,6 @@
 # Something Qt
 
-Latest testing package: `out/portable/SomethingQt-0.1.0-win64-cursor-icon.zip`. Extract it and run `bin/SomethingQt.exe`. It adds styled currency removal buttons, hides the normal pointer while the blue cursor ring is active inside app content, and embeds the Something-v2 icon in the executable/window. It retains the wallpaper import fix, centered startup, dashboard/Explorer redesign and softer transitions. Build, deployment and static runtime/icon checks passed; earlier import fixture results remain unchanged. See [currency/cursor/icon changes](docs/currency-cursor-and-icon.md), [startup placement](docs/window-placement.md) and [portable build record](docs/portable-build.md).
+Latest portable build: `out/portable/SomethingQt-0.1.0-win64-reviewed-20261030.zip`. Extract the entire ZIP, run `bin/SomethingQt.exe`, and enter `run full` in Console to open the main window. This build fixes QML loading, optional-field database saves, offline Steam batches, artwork retries, import eligibility and startup error presentation. All 23 automated suites, the Release build, deployment and ZIP integrity checks passed. Visual and clean-machine acceptance remain pending. Profiles upgrade to schema 19; older builds cannot reopen an upgraded profile. See the [review report](docs/review-20261030.md) and [portable build record](docs/portable-build.md).
 
 An independent C++20 and Qt Quick rewrite of Something. The shell owns a lifecycle-managed service graph with per-profile locking, GUI-thread operation coordination, bounded CPU jobs, a dedicated SQLite worker, and a dedicated direct-HTTPS worker. Retained behavior is specified in [`docs/feature-parity.md`](docs/feature-parity.md).
 
@@ -50,7 +50,7 @@ The local database is SQLite through Qt's QSQLITE driver. On Windows the default
 
 Settings offers an explicit import of Something-v2 schema 24 or 25 into an empty Qt profile. Close Something-v2 completely before selecting its `database.db`; the importer snapshots the database and existing WAL sidecars using read-only file handles. It maps only retained rows/settings/assets, records skips and failures, and commits a completion marker with the target transaction. Successful import requires closing and restarting Something to hydrate feature models. See [`docs/data-import.md`](docs/data-import.md) for the exact supported contract, recovery behavior, and unrun acceptance checks. No import against real data has been performed or authorized.
 
-A Windows x64 Release build and portable deployment have succeeded. Extract `out/portable/SomethingQt-0.1.0-win64-startup-fixed.zip` and run `bin/SomethingQt.exe`. Packaged startup and normal shutdown now pass; see [`docs/startup-fix.md`](docs/startup-fix.md). See [`docs/portable-build.md`](docs/portable-build.md) for build evidence and known kit limits. Automated feature suites and clean-machine checks remain unrun; see [`docs/verification.md`](docs/verification.md).
+A Windows x64 Release build and portable deployment have succeeded. The latest review package passed all 23 automated suites using disposable fixtures. It was not launched interactively. See [`docs/review-20261030.md`](docs/review-20261030.md) for executed checks and [`docs/verification.md`](docs/verification.md) for the wider acceptance criteria that remain pending.
 
 ## Windows deployment
 

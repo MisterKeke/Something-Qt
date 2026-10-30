@@ -132,6 +132,7 @@ TaskHistoryValue TaskHistoryValue::fromJsonValue(QJsonValue value)
 std::optional<SerializedTaskHistoryDiff> serializeTaskHistoryDiff(
     const QVector<TaskHistoryChange> &changes)
 {
+    if (changes.isEmpty()) return std::nullopt;
     QJsonArray fields;
     QJsonObject previous;
     QJsonObject current;
@@ -173,6 +174,7 @@ std::optional<QVector<TaskHistoryChange>> deserializeTaskHistoryDiff(
     }
 
     const QJsonArray fields = fieldsDocument.array();
+    if (fields.isEmpty()) return std::nullopt;
     const QJsonObject previous = previousDocument.object();
     const QJsonObject current = newDocument.object();
     if (previous.size() != fields.size() || current.size() != fields.size()) return std::nullopt;

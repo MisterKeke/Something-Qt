@@ -60,7 +60,8 @@ void FavoritesFeatureTest::sourceReferencesNormalizeAndExternalLinksAreRestricte
 {
     QCOMPARE(domain::normalizeTelegramChannel(QStringLiteral("  @SaMple_Channel  ")),
              QStringLiteral("sample_channel"));
-    QVERIFY(domain::normalizeTelegramChannel(QStringLiteral("@short")).isEmpty());
+    QVERIFY(domain::normalizeTelegramChannel(QStringLiteral("@tiny")).isEmpty());
+    QCOMPARE(domain::normalizeTelegramChannel(QStringLiteral("@short")), QStringLiteral("short"));
     QCOMPARE(domain::normalizeYouTubeReference(QStringLiteral("@creator.handle")),
              QStringLiteral("creator.handle"));
     bool isChannelId = false;

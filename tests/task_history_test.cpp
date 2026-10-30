@@ -207,7 +207,7 @@ void TaskHistoryTest::taskCreationUpdatesNoOpsAndRevisionConflictsAreRecordedCor
     const auto *tagsChange = changeFor(*updatedEvent, QStringLiteral("tags"));
     QVERIFY(tagsChange);
     QCOMPARE(tagsChange->previous.value.toArray().size(), 2);
-    QCOMPARE(tagsChange->current.value.toArray().front().toString(), QStringLiteral("überarbeitet"));
+    QCOMPARE(tagsChange->current.value.toArray().at(0).toString(), QStringLiteral("überarbeitet"));
     QVERIFY(!changeFor(*updatedEvent, QStringLiteral("completed")));
 
     const auto *createdTitle = changeFor(*createdEvent, QStringLiteral("title"));
@@ -365,7 +365,7 @@ void TaskHistoryTest::singleFieldMutationsUseSpecificEventTypes()
         const auto *event = eventAtRevision(page.value, expected.first);
         QVERIFY(event);
         QCOMPARE(domain::taskHistoryEventTypeName(event->type), expected.second);
-        QCOMPARE(event->changes.size(), 1);
+        QCOMPARE(event->changes.size(), expected.first == 1 ? 8 : 1);
     }
 }
 
@@ -440,7 +440,7 @@ void TaskHistoryTest::subtaskLifecycleProducesOneReadableEventPerOperation()
     QVERIFY(removedEvent);
     const auto *removedSubtasks = changeFor(*removedEvent, QStringLiteral("subtasks"));
     QVERIFY(removedSubtasks);
-    QCOMPARE(removedSubtasks->previous.value.toArray().front().toObject()
+    QCOMPARE(removedSubtasks->previous.value.toArray().at(0).toObject()
                  .value(QStringLiteral("title")).toString(),
              QStringLiteral("Write user documentation"));
 }
@@ -601,7 +601,7 @@ void TaskHistoryTest::versionEightDatabaseMigratesWithoutFabricatedHistory()
     QString diagnostic;
     QVERIFY2(storage::SchemaMigrator::apply(fixture.database, &diagnostic),
              qPrintable(diagnostic));
-    QCOMPARE(storage::SchemaMigrator::latestVersion(), 18);
+    QCOMPARE(storage::SchemaMigrator::latestVersion(), 19);
 
     const auto preserved = repositories.tasks.get(legacyTask.value.id);
     QVERIFY(preserved.succeeded());

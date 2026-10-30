@@ -56,7 +56,7 @@ void StorageRepositoryTest::migrationsAreTransactionalIndependentAndRepeatable()
     QString connectionName;
     QSqlDatabase database;
     QVERIFY(openTestDatabase(&database, &connectionName));
-    QCOMPARE(storage::SchemaMigrator::latestVersion(), 18);
+    QCOMPARE(storage::SchemaMigrator::latestVersion(), 19);
     QVERIFY(storage::SchemaMigrator::apply(database));
 
     QSqlQuery history(database);
@@ -416,7 +416,7 @@ void StorageRepositoryTest::taskSearchFiltersPagesAndOmittedMetadata()
         created.value.id, completed.value.revision, metadataOnlyUpdate);
     QVERIFY(metadataPreserved.succeeded());
     QCOMPARE(metadataPreserved.value.difficulty, QStringLiteral("hard"));
-    QCOMPARE(metadataPreserved.value.tags, QStringList({QStringLiteral("Work"), QStringLiteral("Urgent")}));
+    QCOMPARE(metadataPreserved.value.tags, created.value.tags);
     QCOMPARE(metadataPreserved.value.subtasks.size(), 1);
     QCOMPARE(metadataPreserved.value.dueDate, hard.dueDate);
     QCOMPARE(metadataPreserved.value.priority, QStringLiteral("high"));
@@ -735,24 +735,24 @@ void StorageRepositoryTest::applicationCategoryMigrationPreservesExistingProfile
     database.setDatabaseName(QStringLiteral(":memory:"));
     QVERIFY(database.open());
 
+    QVERIFY(storage::SchemaMigrator::apply(database));
     QSqlQuery fixture(database);
-    QVERIFY(fixture.exec(QStringLiteral(
-        "CREATE TABLE schema_migrations(version INTEGER PRIMARY KEY, name TEXT NOT NULL, "
-        "applied_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)")));
-    const QStringList migrationNames{
-        QStringLiteral("core tasks currencies preferences"),
-        QStringLiteral("favorites and retained update news"),
-        QStringLiteral("saved weather location and cache"),
-        QStringLiteral("wallpapers desktop applications and setups"),
-        QStringLiteral("Steam tracking"),
-        QStringLiteral("favorite display ordering"),
-        QStringLiteral("one-time retained profile import ledger")};
-    for (int version = 1; version <= migrationNames.size(); ++version) {
-        fixture.prepare(QStringLiteral("INSERT INTO schema_migrations(version,name) VALUES(?,?)"));
-        fixture.addBindValue(version);
-        fixture.addBindValue(migrationNames.at(version - 1));
-        QVERIFY(fixture.exec());
-    }
+    // Retain the complete pre-category schema, including the preferences and
+    // Steam tables required by later migrations, then restore the old app tables.
+    const QStringList newerTables{
+        QStringLiteral("steam_collection_games"), QStringLiteral("steam_collections"),
+        QStringLiteral("steam_game_catalog"), QStringLiteral("steam_game_update_news_items"),
+        QStringLiteral("steam_game_update_follows"), QStringLiteral("steam_release_follows"),
+        QStringLiteral("steam_price_observations"), QStringLiteral("weather_comparison_cities"),
+        QStringLiteral("task_schedules"), QStringLiteral("scheduling_preferences"),
+        QStringLiteral("task_history"), QStringLiteral("setup_apps"),
+        QStringLiteral("setup_icons"), QStringLiteral("desktop_app_icons"),
+        QStringLiteral("setups"), QStringLiteral("desktop_apps"),
+        QStringLiteral("application_categories")};
+    for (const QString &table : newerTables)
+        QVERIFY(fixture.exec(QStringLiteral("DROP TABLE ") + table));
+    QVERIFY(fixture.exec(QStringLiteral("DELETE FROM schema_migrations WHERE version>=8")));
+    QVERIFY(fixture.exec(QStringLiteral("DELETE FROM preferences WHERE key='calendar.game_releases_visible'")));
     QVERIFY(fixture.exec(QStringLiteral(
         "CREATE TABLE desktop_apps(id INTEGER PRIMARY KEY AUTOINCREMENT, display_name TEXT NOT NULL, "
         "executable_path TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)")));

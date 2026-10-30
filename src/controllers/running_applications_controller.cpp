@@ -62,9 +62,9 @@ RunningApplicationsController::RunningApplicationsController(
             this, &RunningApplicationsController::onWorkerFinished);
     connect(&m_graph->lifecycle(), &application::ApplicationLifecycle::stateChanged,
             this, &RunningApplicationsController::onLifecycleChanged);
-    if (qGuiApp) {
-        m_applicationActive = qGuiApp->applicationState() == Qt::ApplicationActive;
-        connect(qGuiApp, &QGuiApplication::applicationStateChanged,
+    if (auto *guiApplication = qobject_cast<QGuiApplication *>(QCoreApplication::instance())) {
+        m_applicationActive = guiApplication->applicationState() == Qt::ApplicationActive;
+        connect(guiApplication, &QGuiApplication::applicationStateChanged,
                 this, &RunningApplicationsController::onApplicationStateChanged);
     } else {
         // QCoreApplication-only controller tests have no window activation

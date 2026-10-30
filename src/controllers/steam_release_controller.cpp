@@ -55,8 +55,9 @@ SteamReleaseController::SteamReleaseController(
     Q_ASSERT(QThread::currentThread() == thread());
     connect(m_graph, &application::ApplicationServiceGraph::storageOperationFinished,
             this, &SteamReleaseController::onStorageFinished);
+    // Admission can fail inline; handle replies after submission state settles.
     connect(m_graph, &application::ApplicationServiceGraph::httpsFinished,
-            this, &SteamReleaseController::onHttpsFinished);
+            this, &SteamReleaseController::onHttpsFinished, Qt::QueuedConnection);
     connect(m_graph, &application::ApplicationServiceGraph::expensiveValueJobFinished,
             this, &SteamReleaseController::onValueJobFinished);
     connect(&m_graph->lifecycle(), &application::ApplicationLifecycle::stateChanged,

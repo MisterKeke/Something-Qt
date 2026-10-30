@@ -86,6 +86,7 @@ ApplicationWindow {
         id: consoleWindow
         palette: window.palette
         controller: terminalController
+        lifecycleController: appController
         fullApplicationOpened: window.fullUiOpened
         returnRoute: window.currentRoute
         returnTitle: window.routeTitles[window.currentRoute] || qsTr("Main Page")

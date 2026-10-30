@@ -256,7 +256,7 @@ Item {
             id: applicationsContent
             Layout.fillWidth: true
             Layout.fillHeight: true
-            visible: root.controller.supported && root.controller.errorMessage.length === 0
+            visible: root.controller.supported
                      && !(root.controller.loading && root.controller.applications.count === 0)
             spacing: 12
 
@@ -496,6 +496,7 @@ Item {
                 }
             }
             }
+        }
         }
 
         Label {
