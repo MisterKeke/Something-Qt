@@ -16,6 +16,7 @@ enum class ProviderId {
     OpenMeteoGeocoding,
     Frankfurter,
     SteamStore,
+    SteamNews,
     SteamArtwork,
     TelegramMedia,
     YouTubeMedia,

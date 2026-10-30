@@ -82,6 +82,16 @@ ProviderPolicy providerPolicy(ProviderId provider)
         return commonPolicy({QStringLiteral("store.steampowered.com")},
                             {QStringLiteral("/api/appdetails")},
                             QByteArrayLiteral("application/json"), appAgent);
+    case ProviderId::SteamNews: {
+        auto policy = commonPolicy({QStringLiteral("api.steampowered.com")},
+                                   {QStringLiteral("/ISteamNews/GetNewsForApp/v2/")},
+                                   QByteArrayLiteral("application/json"), appAgent);
+        policy.timeoutMs = 15000;
+        policy.maximumResponseBytes = 2 * 1024 * 1024;
+        policy.maximumRedirects = 1;
+        policy.maximumConcurrentRequests = 3;
+        return policy;
+    }
     case ProviderId::SteamArtwork: {
         auto policy = commonPolicy({}, {},
                                    QByteArrayLiteral("image/avif,image/webp,image/png,image/jpeg,*/*;q=0.5"),
@@ -145,6 +155,7 @@ QString providerCachePartitionName(ProviderId provider)
     case ProviderId::OpenMeteoGeocoding: return QStringLiteral("open-meteo");
     case ProviderId::Frankfurter: return QStringLiteral("frankfurter");
     case ProviderId::SteamStore: return QStringLiteral("steam-store");
+    case ProviderId::SteamNews: return QStringLiteral("steam-news");
     case ProviderId::SteamArtwork: return QStringLiteral("steam-artwork");
     case ProviderId::TelegramMedia: return QStringLiteral("telegram-media");
     case ProviderId::YouTubeMedia: return QStringLiteral("youtube-media");

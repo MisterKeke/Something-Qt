@@ -109,12 +109,14 @@ qt_add_executable(SomethingQt WIN32
     src/providers/provider_response_cache.cpp
     src/providers/provider_parsers.cpp
     src/providers/feature_parsers.cpp
+    src/providers/steam_news_parser.cpp
     src/providers/provider_image_provider.cpp
     src/providers/wallpaper_image_provider.cpp
     src/providers/application_icon_image_provider.cpp
     src/providers/setup_icon_image_provider.cpp
     src/providers/steam_artwork_image_provider.cpp
     src/providers/steam_release_provider.cpp
+    src/providers/steam_news_provider.cpp
     src/services/bounded_worker_pool.cpp
     src/services/calendar_service.cpp
     src/services/dashboard_service.cpp

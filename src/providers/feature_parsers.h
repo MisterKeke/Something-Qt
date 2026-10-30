@@ -2,6 +2,7 @@
 
 #include "../domain/app_error.h"
 #include "../domain/steam_game.h"
+#include "../domain/steam_news.h"
 #include "../domain/steam_release.h"
 #include "../domain/weather_currency.h"
 
@@ -29,6 +30,8 @@ FeatureParseResult<something::domain::CurrencyRates> parseCurrencyRates(
 FeatureParseResult<something::domain::SteamGameDetails> parseSteamGameDetails(
     const QByteArray &body, quint32 expectedAppId);
 FeatureParseResult<something::domain::SteamReleaseDetails> parseSteamReleaseDetails(
+    const QByteArray &body, quint32 expectedAppId);
+FeatureParseResult<QVector<something::domain::SteamNewsArticle>> parseSteamNewsArticles(
     const QByteArray &body, quint32 expectedAppId);
 
 QByteArray serializeWeatherForecast(const something::domain::WeatherForecast &forecast);
