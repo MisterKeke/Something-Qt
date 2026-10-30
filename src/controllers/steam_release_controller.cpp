@@ -389,6 +389,20 @@ void SteamReleaseController::acknowledgeDateChange(quint32 appId)
     emit stateChanged();
 }
 
+void SteamReleaseController::openReleaseDetails(quint32 appId)
+{
+    if (appId == 0) return;
+    m_pendingReleaseDetailsAppId = appId;
+    emit stateChanged();
+}
+
+void SteamReleaseController::clearPendingReleaseDetailsRequest()
+{
+    if (m_pendingReleaseDetailsAppId == 0) return;
+    m_pendingReleaseDetailsAppId = 0;
+    emit stateChanged();
+}
+
 void SteamReleaseController::openStore(quint32 appId)
 {
     const int row = m_releases.rowForAppId(appId);
@@ -646,6 +660,7 @@ void SteamReleaseController::onStorageFinished(quint64 id, const QVariantMap &va
         } else {
             const QVariantMap release = values.value(QStringLiteral("release")).toMap();
             m_releases.append(release);
+            emit releaseCalendarDataChanged();
             m_addError.clear();
             m_errorMessage.clear();
             m_notification = QStringLiteral("Added %1 to Release Radar.")
@@ -659,6 +674,7 @@ void SteamReleaseController::onStorageFinished(quint64 id, const QVariantMap &va
             setSafeError(error, QStringLiteral("The release could not be removed."));
         } else {
             m_releases.removeByAppId(pending.appId);
+            emit releaseCalendarDataChanged();
             const QString filename = artworkFilename(pending.release);
             if (!filename.isEmpty()) emit artworkInvalidated(filename);
             m_errorMessage.clear();
@@ -709,6 +725,7 @@ void SteamReleaseController::onStorageFinished(quint64 id, const QVariantMap &va
                 if (oldFilename != newFilename) emit artworkInvalidated(oldFilename);
             }
             m_releases.replace(fresh);
+            emit releaseCalendarDataChanged();
         }
         m_refreshStatus = QStringLiteral("Updated %1; %2 failed of %3 releases.")
             .arg(m_refreshUpdatedCount).arg(m_refreshFailedCount).arg(m_refreshWork.size());

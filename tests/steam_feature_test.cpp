@@ -315,7 +315,7 @@ void SteamFeatureTest::steamPriceHistoryMigrationPreservesLegacyGamesWithoutFabr
 
     QString diagnostic;
     QVERIFY2(storage::SchemaMigrator::apply(database, &diagnostic), qPrintable(diagnostic));
-    QCOMPARE(storage::SchemaMigrator::latestVersion(), 14);
+    QCOMPARE(storage::SchemaMigrator::latestVersion(), 15);
 
     {
         storage::StorageRepositories repositories(database);

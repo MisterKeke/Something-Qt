@@ -25,11 +25,22 @@ Item {
 
     function restoreViewState(state) {
         savedViewState = state || {}
-        currentSection = savedViewState.section === "releases" ? "releases" : "prices"
+        currentSection = releaseController
+                         && Number(releaseController.pendingReleaseDetailsAppId) > 0
+                         ? "releases"
+                         : savedViewState.section === "releases" ? "releases" : "prices"
         Qt.callLater(function() {
             pricePanel.restoreViewState(root.savedViewState.prices || {})
             releasePanel.restoreViewState(root.savedViewState.releases || {})
+            root.focusPendingReleaseDetails()
         })
+    }
+
+    function focusPendingReleaseDetails() {
+        if (!releaseController
+                || Number(releaseController.pendingReleaseDetailsAppId) <= 0) return
+        currentSection = "releases"
+        Qt.callLater(function() { releasePanel.revealPendingCalendarRelease() })
     }
 
     ColumnLayout {
@@ -85,4 +96,10 @@ Item {
             }
         }
     }
+
+    Connections {
+        target: root.releaseController
+        function onStateChanged() { root.focusPendingReleaseDetails() }
+    }
+
 }

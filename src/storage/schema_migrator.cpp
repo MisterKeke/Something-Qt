@@ -335,6 +335,11 @@ constexpr const char *steamReleaseDateChangeNotice[] = {
     "INTEGER NOT NULL DEFAULT 0 CHECK(date_change_unacknowledged IN (0,1))",
 };
 
+constexpr const char *calendarGameReleaseVisibility[] = {
+    "INSERT INTO preferences(key,value) VALUES('calendar.game_releases_visible','1') "
+    "ON CONFLICT(key) DO NOTHING",
+};
+
 constexpr const char *favoriteOrdering[] = {
     "DROP INDEX idx_favorite_categories_order",
     "CREATE INDEX idx_favorite_categories_order ON favorite_categories(source, display_order, name_normalized, id)",
@@ -496,6 +501,8 @@ constexpr std::array migrations{
               qsizetype(std::size(steamReleaseRadar))},
     Migration{14, "Steam release date change acknowledgement", steamReleaseDateChangeNotice,
               qsizetype(std::size(steamReleaseDateChangeNotice))},
+    Migration{15, "calendar Steam release visibility", calendarGameReleaseVisibility,
+              qsizetype(std::size(calendarGameReleaseVisibility))},
 };
 
 bool fail(QString *diagnostic, const QString &message)

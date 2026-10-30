@@ -177,6 +177,10 @@ ApplicationWindow {
             controller: dashboardController
             navigationItems: window.navigationItems
             onNavigateRequested: function(routeId) { window.navigateTo(routeId) }
+            onSteamReleaseRequested: function(appId) {
+                steamReleaseController.openReleaseDetails(Number(appId))
+                window.navigateTo("steam")
+            }
         }
     }
 
@@ -191,6 +195,10 @@ ApplicationWindow {
         id: calendarPageComponent
         Pages.CalendarPage {
             controller: calendarController
+            onReleaseRequested: function(appId) {
+                steamReleaseController.openReleaseDetails(Number(appId))
+                window.navigateTo("steam")
+            }
         }
     }
 

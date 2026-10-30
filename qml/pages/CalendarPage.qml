@@ -11,6 +11,7 @@ Item {
     property var controller: calendarController
     property var taskActions: taskController
     property bool embedded: false
+    signal releaseRequested(var appId)
     implicitHeight: calendarColumn.implicitHeight
 
     function dateAccessibleName(day) {
@@ -21,6 +22,8 @@ Item {
             parts.push(qsTr("%1 planned work items").arg(Number(day.plannedWorkCount)))
         if (Number(day.completedTaskCount) > 0)
             parts.push(qsTr("%1 completed tasks").arg(Number(day.completedTaskCount)))
+        if (root.controller.showGameReleases && Number(day.gameReleaseCount) > 0)
+            parts.push(qsTr("%1 game releases").arg(Number(day.gameReleaseCount)))
         var activity = parts.length > 0 ? qsTr(". ") + parts.join(", ") : ""
         return (Boolean(day.selected) ? qsTr("Selected date, ") : "")
                + String(day.date) + activity
@@ -90,6 +93,31 @@ Item {
                 RowLayout {
                     Layout.fillWidth: true
                     spacing: 8
+                    Shared.AppCheckBox {
+                        Layout.fillWidth: true
+                        text: qsTr("Show exact-date game releases")
+                        accessibleLabel: qsTr("Show exact-date game releases in the calendar")
+                        checked: root.controller.showGameReleases
+                        enabled: root.controller.ready
+                                 && root.controller.releaseVisibilityLoaded
+                                 && !root.controller.releaseVisibilitySaving
+                        onToggled: root.controller.setShowGameReleases(checked)
+                    }
+                    Label {
+                        visible: root.controller.releaseVisibilityError.length > 0
+                        Layout.fillWidth: true
+                        text: root.controller.releaseVisibilityError
+                        color: ThemeModule.Theme.error
+                        font.family: ThemeModule.Theme.fontFamily
+                        font.pixelSize: 11
+                        wrapMode: Text.Wrap
+                        Accessible.role: Accessible.AlertMessage
+                    }
+                }
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 8
                     BusyIndicator {
                         visible: root.controller.markersLoading
                         running: visible
@@ -101,6 +129,17 @@ Item {
                         visible: root.controller.markerErrorMessage.length > 0
                         Layout.fillWidth: true
                         text: root.controller.markerErrorMessage
+                        color: ThemeModule.Theme.error
+                        font.family: ThemeModule.Theme.fontFamily
+                        font.pixelSize: 11
+                        wrapMode: Text.Wrap
+                        Accessible.role: Accessible.AlertMessage
+                    }
+                    Label {
+                        visible: root.controller.showGameReleases
+                                 && root.controller.releaseEventsErrorMessage.length > 0
+                        Layout.fillWidth: true
+                        text: root.controller.releaseEventsErrorMessage
                         color: ThemeModule.Theme.error
                         font.family: ThemeModule.Theme.fontFamily
                         font.pixelSize: 11
@@ -216,6 +255,12 @@ Item {
                                                             width: 5; height: 5; radius: 3
                                                             color: ThemeModule.Theme.success
                                                         }
+                                                        Rectangle {
+                                                            visible: root.controller.showGameReleases
+                                                                     && Number(modelData.gameReleaseCount) > 0
+                                                            width: 5; height: 5; radius: 3
+                                                            color: ThemeModule.Theme.accentViolet
+                                                        }
                                                     }
                                                 }
                                                 background: Rectangle {
@@ -248,10 +293,14 @@ Item {
                         model: [
                             { label: qsTr("Deadline"), color: ThemeModule.Theme.warning },
                             { label: qsTr("Planned work"), color: ThemeModule.Theme.accentCyan },
-                            { label: qsTr("Completed"), color: ThemeModule.Theme.success }
+                            { label: qsTr("Completed"), color: ThemeModule.Theme.success },
+                            { label: qsTr("Game release"), color: ThemeModule.Theme.accentViolet,
+                              gameRelease: true }
                         ]
                         delegate: RowLayout {
                             required property var modelData
+                            visible: !Boolean(modelData.gameRelease)
+                                     || root.controller.showGameReleases
                             spacing: 5
                             Rectangle {
                                 width: 7; height: 7; radius: 4
@@ -282,7 +331,7 @@ Item {
                     ColumnLayout {
                         Layout.fillWidth: true
                         Label {
-                            text: qsTr("Tasks for %1").arg(root.controller.selectedDateLabel)
+                            text: qsTr("Activity for %1").arg(root.controller.selectedDateLabel)
                             color: ThemeModule.Theme.textPrimary
                             font.family: ThemeModule.Theme.fontFamily
                             font.pixelSize: 17
@@ -321,6 +370,8 @@ Item {
                 Shared.StatePanel {
                     Layout.fillWidth: true
                     visible: root.controller.tasks.count === 0
+                             && (!root.controller.showGameReleases
+                                 || root.controller.selectedReleaseEvents.length === 0)
                     state: root.controller.errorMessage.length > 0 ? "error"
                            : root.controller.loading || !root.controller.ready
                              ? "loading" : "empty"
@@ -330,6 +381,65 @@ Item {
                              ? qsTr("The selected date is unchanged. Retry this card when storage is available.")
                              : qsTr("Choose another date above to inspect its deadlines and planned work.")
                 }
+                Repeater {
+                    model: root.controller.showGameReleases
+                           ? root.controller.selectedReleaseEvents : []
+                    delegate: Rectangle {
+                        required property var modelData
+                        Layout.fillWidth: true
+                        implicitHeight: releaseEventContent.implicitHeight + 18
+                        radius: ThemeModule.Theme.controlRadius
+                        color: ThemeModule.Theme.raisedSurface
+                        border.width: 1
+                        border.color: ThemeModule.Theme.accentViolet
+                        Accessible.name: qsTr("Game release: %1, exact date %2")
+                                         .arg(String(modelData.title), String(modelData.exactDate))
+
+                        RowLayout {
+                            id: releaseEventContent
+                            anchors.fill: parent
+                            anchors.margins: 9
+                            spacing: 10
+
+                            Rectangle {
+                                Layout.fillHeight: true
+                                Layout.preferredWidth: 4
+                                radius: 2
+                                color: ThemeModule.Theme.accentViolet
+                            }
+                            ColumnLayout {
+                                Layout.fillWidth: true
+                                Label {
+                                    Layout.fillWidth: true
+                                    text: String(modelData.title)
+                                    color: ThemeModule.Theme.textPrimary
+                                    font.family: ThemeModule.Theme.fontFamily
+                                    font.pixelSize: 13
+                                    font.weight: Font.DemiBold
+                                    textFormat: Text.PlainText
+                                    wrapMode: Text.Wrap
+                                }
+                                Label {
+                                    Layout.fillWidth: true
+                                    text: qsTr("Game release · exact Steam date: %1")
+                                          .arg(String(modelData.exactDate))
+                                    color: ThemeModule.Theme.textSecondary
+                                    font.family: ThemeModule.Theme.fontFamily
+                                    font.pixelSize: 11
+                                    wrapMode: Text.Wrap
+                                }
+                            }
+                            Shared.AppButton {
+                                text: qsTr("Open Release Radar")
+                                quiet: true
+                                Accessible.name: qsTr("Open Release Radar details for %1")
+                                                 .arg(String(modelData.title))
+                                onClicked: root.releaseRequested(modelData.appId)
+                            }
+                        }
+                    }
+                }
+
                 Repeater {
                     model: root.controller.tasks
                     delegate: Shared.TaskSummaryCard {

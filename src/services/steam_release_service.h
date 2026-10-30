@@ -4,6 +4,8 @@
 #include "../domain/steam_release.h"
 #include "../storage/storage_worker.h"
 
+#include <QDate>
+
 namespace something::services {
 
 class SteamReleaseService final {
@@ -19,6 +21,7 @@ public:
     static storage::StorageCommand saveArtwork(QString profileDirectory, quint32 appId,
                                                QString expectedSourceUrl,
                                                StagedSteamArtwork artwork);
+    static storage::StorageCommand calendarEvents(QDate startDate, QDate endDate);
 
     static QVariantMap releaseValue(const domain::SteamTrackedRelease &release,
                                     const QString &profileDirectory);

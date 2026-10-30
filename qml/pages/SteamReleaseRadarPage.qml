@@ -15,6 +15,8 @@ Item {
     property string statusFilter: "all"
     property string sortOrder: "release_asc"
     property int countdownDay: new Date().getDate()
+    property real calendarFocusedAppId: 0
+    property bool calendarRevealInProgress: false
 
     implicitHeight: content.implicitHeight + 8
     Accessible.name: qsTr("Steam Release Radar")
@@ -50,6 +52,28 @@ Item {
             return
         pendingAddUrl = storeUrlField.text
         controller.addRelease(storeUrlField.text)
+    }
+
+    function revealPendingCalendarRelease() {
+        if (!active || !controller || !controller.snapshotLoaded
+                || calendarRevealInProgress) return
+        const appId = Number(controller.pendingReleaseDetailsAppId)
+        if (appId <= 0) return
+
+        calendarRevealInProgress = true
+        statusFilter = "all"
+        searchField.text = ""
+        controller.setSearchText("")
+        controller.setStatusFilter("all")
+        Qt.callLater(function() {
+            const index = root.controller.releases.visibleRowForAppId(appId)
+            if (index >= 0) {
+                root.calendarFocusedAppId = appId
+                releasesList.positionViewAtIndex(index, ListView.Contain)
+            }
+            root.calendarRevealInProgress = false
+            root.controller.clearPendingReleaseDetailsRequest()
+        })
     }
 
     function formattedTimestamp(value) {
@@ -301,6 +325,10 @@ Item {
                     id: releaseCard
                     width: parent.width
                     padding: 12
+                    border.width: Number(delegateRoot.appId) === root.calendarFocusedAppId
+                                  ? 2 : ThemeModule.Theme.panelBorderWidth
+                    border.color: Number(delegateRoot.appId) === root.calendarFocusedAppId
+                                  ? ThemeModule.Theme.accentViolet : ThemeModule.Theme.borderColor
 
                     RowLayout {
                         width: parent.width
@@ -531,6 +559,7 @@ Item {
             }
             if (root.controller.addError.length > 0)
                 root.pendingAddUrl = ""
+            root.revealPendingCalendarRelease()
         }
     }
 

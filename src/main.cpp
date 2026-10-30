@@ -206,6 +206,10 @@ int main(int argc, char *argv[])
                      [steamArtworkImages](const QString &filename) {
         steamArtworkImages->invalidate(filename);
     });
+    QObject::connect(&steamReleaseController,
+                     &something::controllers::SteamReleaseController::releaseCalendarDataChanged,
+                     &calendarController,
+                     &something::controllers::CalendarController::refreshScheduleData);
     QObject::connect(&desktopApplicationsController,
                      &something::controllers::DesktopApplicationsController::mutationFinished,
                      &setupsController, [&setupsController](bool success) {

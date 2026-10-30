@@ -27,6 +27,7 @@ class SteamReleaseController final : public QObject {
     Q_PROPERTY(bool dateChangeAcknowledgeBusy READ dateChangeAcknowledgeBusy NOTIFY stateChanged)
     Q_PROPERTY(QString errorMessage READ errorMessage NOTIFY stateChanged)
     Q_PROPERTY(QString notification READ notification NOTIFY stateChanged)
+    Q_PROPERTY(quint32 pendingReleaseDetailsAppId READ pendingReleaseDetailsAppId NOTIFY stateChanged)
 
 public:
     explicit SteamReleaseController(application::ApplicationServiceGraph *graph,
@@ -43,11 +44,14 @@ public:
     bool dateChangeAcknowledgeBusy() const noexcept { return m_dateChangeAcknowledgeBusy; }
     QString errorMessage() const { return m_errorMessage; }
     QString notification() const { return m_notification; }
+    quint32 pendingReleaseDetailsAppId() const noexcept { return m_pendingReleaseDetailsAppId; }
 
     Q_INVOKABLE void addRelease(QString storeUrl);
     Q_INVOKABLE void refreshReleases();
     Q_INVOKABLE void removeRelease(quint32 appId);
     Q_INVOKABLE void acknowledgeDateChange(quint32 appId);
+    Q_INVOKABLE void openReleaseDetails(quint32 appId);
+    Q_INVOKABLE void clearPendingReleaseDetailsRequest();
     Q_INVOKABLE void openStore(quint32 appId);
     Q_INVOKABLE void retryLoad();
     Q_INVOKABLE void clearNotification();
@@ -59,6 +63,7 @@ public:
 signals:
     void stateChanged();
     void artworkInvalidated(const QString &filename);
+    void releaseCalendarDataChanged();
 
 private:
     enum class Kind { Snapshot, AddNetwork, AddParse, AddInsert, Delete,
@@ -123,6 +128,7 @@ private:
     QString m_errorMessage;
     QString m_notification;
     quint64 m_refreshGeneration{0};
+    quint32 m_pendingReleaseDetailsAppId{0};
     int m_nextRefreshIndex{0};
     int m_activeRefreshRequests{0};
     int m_refreshFinishedCount{0};

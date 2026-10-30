@@ -115,6 +115,7 @@ qt_add_executable(SomethingQt WIN32
     src/providers/steam_artwork_image_provider.cpp
     src/providers/steam_release_provider.cpp
     src/services/bounded_worker_pool.cpp
+    src/services/calendar_service.cpp
     src/services/dashboard_service.cpp
     src/services/desktop_app_icon_store.cpp
     src/services/desktop_applications_service.cpp

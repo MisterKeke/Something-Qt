@@ -2528,6 +2528,7 @@ RepositoryResult<QString> PreferencesRepository::get(QString key) const
     key = key.trimmed();
     static const QSet<QString> retainedKeys{
         QStringLiteral("tasks.week_start"), QStringLiteral("appearance.selected_wallpaper"),
+        QStringLiteral("calendar.game_releases_visible"),
         QStringLiteral("favorite_updates.previous_opened_at"),
         QStringLiteral("favorite_updates.current_opened_at"),
         QStringLiteral("favorite_updates.previous_refresh_at"),
@@ -2550,6 +2551,7 @@ RepositoryResult<void> PreferencesRepository::set(QString key, QString value)
     key = key.trimmed();
     static const QSet<QString> retainedKeys{
         QStringLiteral("tasks.week_start"), QStringLiteral("appearance.selected_wallpaper"),
+        QStringLiteral("calendar.game_releases_visible"),
         QStringLiteral("favorite_updates.previous_opened_at"),
         QStringLiteral("favorite_updates.current_opened_at"),
         QStringLiteral("favorite_updates.previous_refresh_at"),
@@ -2589,6 +2591,34 @@ RepositoryResult<void> PreferencesRepository::setWeekStart(int sundayZero)
 {
     if (sundayZero < 0 || sundayZero > 6) return failureVoid(domain::ErrorCategory::Validation);
     return set(QStringLiteral("tasks.week_start"), QString::number(sundayZero));
+}
+
+RepositoryResult<bool> PreferencesRepository::gameReleasesVisibleInCalendar() const
+{
+    const auto stored = get(QStringLiteral("calendar.game_releases_visible"));
+    if (stored.error.category() == domain::ErrorCategory::NotFound) {
+        RepositoryResult<bool> fallback;
+        fallback.value = true;
+        return fallback;
+    }
+    if (!stored.succeeded()) return failure<bool>(stored.error.category());
+    if (stored.value == QStringLiteral("1")) {
+        RepositoryResult<bool> visible;
+        visible.value = true;
+        return visible;
+    }
+    if (stored.value == QStringLiteral("0")) {
+        RepositoryResult<bool> hidden;
+        hidden.value = false;
+        return hidden;
+    }
+    return failure<bool>(domain::ErrorCategory::Storage);
+}
+
+RepositoryResult<void> PreferencesRepository::setGameReleasesVisibleInCalendar(bool visible)
+{
+    return set(QStringLiteral("calendar.game_releases_visible"),
+               visible ? QStringLiteral("1") : QStringLiteral("0"));
 }
 
 RepositoryResult<QString> PreferencesRepository::selectedWallpaper() const
@@ -3901,6 +3931,52 @@ RepositoryResult<QVector<domain::SteamTrackedRelease>> SteamReleaseRepository::l
         const auto release = load(appId);
         if (!release.succeeded())
             return failure<QVector<domain::SteamTrackedRelease>>(release.error.category());
+        result.value.push_back(release.value);
+    }
+    return result;
+}
+
+RepositoryResult<QVector<domain::SteamTrackedRelease>>
+SteamReleaseRepository::exactDateEvents(
+    QDate startDate, QDate endDate,
+    const std::function<bool()> &cancellationRequested) const
+{
+    Q_ASSERT(QThread::currentThread() == m_database.driver()->thread());
+    if (!startDate.isValid() || !endDate.isValid() || startDate > endDate)
+        return failure<QVector<domain::SteamTrackedRelease>>(domain::ErrorCategory::Validation);
+    if (cancellationRequested && cancellationRequested())
+        return failure<QVector<domain::SteamTrackedRelease>>(domain::ErrorCategory::Cancelled);
+
+    QSqlQuery query(m_database);
+    query.prepare(QStringLiteral(
+        "SELECT steam_app_id FROM steam_release_follows "
+        "WHERE release_date_precision='exact_day' "
+        "AND release_date_exact BETWEEN ? AND ? "
+        "ORDER BY release_date_exact,title COLLATE NOCASE,steam_app_id"));
+    query.addBindValue(startDate.toString(Qt::ISODate));
+    query.addBindValue(endDate.toString(Qt::ISODate));
+    if (!query.exec())
+        return failure<QVector<domain::SteamTrackedRelease>>(queryFailure(query));
+
+    QVector<quint32> appIds;
+    while (query.next()) {
+        if (cancellationRequested && cancellationRequested())
+            return failure<QVector<domain::SteamTrackedRelease>>(domain::ErrorCategory::Cancelled);
+        appIds.push_back(query.value(0).toUInt());
+    }
+    query.finish();
+
+    RepositoryResult<QVector<domain::SteamTrackedRelease>> result;
+    result.value.reserve(appIds.size());
+    for (quint32 appId : appIds) {
+        if (cancellationRequested && cancellationRequested())
+            return failure<QVector<domain::SteamTrackedRelease>>(domain::ErrorCategory::Cancelled);
+        const auto release = load(appId);
+        if (!release.succeeded())
+            return failure<QVector<domain::SteamTrackedRelease>>(release.error.category());
+        if (!release.value.releaseDate.hasExactDate()) {
+            return failure<QVector<domain::SteamTrackedRelease>>(domain::ErrorCategory::Storage);
+        }
         result.value.push_back(release.value);
     }
     return result;

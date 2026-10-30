@@ -3,6 +3,7 @@
 #include "repository_types.h"
 #include "data_import_repository.h"
 
+#include <QDate>
 #include <QSqlDatabase>
 
 #include <functional>
@@ -156,6 +157,8 @@ public:
     RepositoryResult<void> set(QString key, QString value);
     RepositoryResult<int> weekStart() const;
     RepositoryResult<void> setWeekStart(int sundayZero);
+    RepositoryResult<bool> gameReleasesVisibleInCalendar() const;
+    RepositoryResult<void> setGameReleasesVisibleInCalendar(bool visible);
     RepositoryResult<QString> selectedWallpaper() const;
     RepositoryResult<void> setSelectedWallpaper(QString wallpaperId);
 private:
@@ -258,6 +261,9 @@ class SteamReleaseRepository final {
 public:
     explicit SteamReleaseRepository(QSqlDatabase &database);
     RepositoryResult<QVector<domain::SteamTrackedRelease>> list() const;
+    RepositoryResult<QVector<domain::SteamTrackedRelease>> exactDateEvents(
+        QDate startDate, QDate endDate,
+        const std::function<bool()> &cancellationRequested = {}) const;
     RepositoryResult<domain::SteamTrackedRelease> get(quint32 appId) const;
     RepositoryResult<domain::SteamTrackedRelease> add(
         domain::SteamTrackedRelease release,

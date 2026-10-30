@@ -284,4 +284,34 @@ storage::StorageCommand SteamReleaseService::saveArtwork(
     };
 }
 
+storage::StorageCommand SteamReleaseService::calendarEvents(QDate startDate, QDate endDate)
+{
+    return [startDate, endDate](storage::StorageRepositories &repositories,
+                                const std::function<bool()> &cancelled) {
+        if (cancelled()) return failed(domain::AppError::cancelled());
+        const auto events = repositories.steamReleases.exactDateEvents(
+            startDate, endDate, cancelled);
+        if (!events.succeeded()) return failed(events.error);
+        QVariantList rows;
+        rows.reserve(events.value.size());
+        for (const domain::SteamTrackedRelease &release : events.value) {
+            if (!release.releaseDate.hasExactDate()) {
+                continue;
+            }
+            rows.push_back(QVariantMap{
+                {QStringLiteral("appId"), release.appId},
+                {QStringLiteral("title"), release.title},
+                {QStringLiteral("storeUrl"), release.canonicalStoreUrl},
+                {QStringLiteral("exactDate"), release.releaseDate.exactDate->toString(Qt::ISODate)},
+                {QStringLiteral("releaseDateText"), release.releaseDate.announcedText},
+                {QStringLiteral("datePrecision"),
+                 domain::steamReleaseDatePrecisionName(release.releaseDate.precision)},
+                {QStringLiteral("status"), domain::steamReleaseStatusName(release.status)}});
+        }
+        storage::StorageReply reply;
+        reply.values.insert(QStringLiteral("releases"), rows);
+        return reply;
+    };
+}
+
 } // namespace something::services

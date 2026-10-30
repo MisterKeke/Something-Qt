@@ -596,7 +596,7 @@ void TaskHistoryTest::versionEightDatabaseMigratesWithoutFabricatedHistory()
     QString diagnostic;
     QVERIFY2(storage::SchemaMigrator::apply(fixture.database, &diagnostic),
              qPrintable(diagnostic));
-    QCOMPARE(storage::SchemaMigrator::latestVersion(), 14);
+    QCOMPARE(storage::SchemaMigrator::latestVersion(), 15);
 
     const auto preserved = repositories.tasks.get(legacyTask.value.id);
     QVERIFY(preserved.succeeded());

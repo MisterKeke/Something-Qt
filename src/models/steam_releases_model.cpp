@@ -171,6 +171,13 @@ int SteamReleasesModel::rowForAppId(quint32 appId) const
     return -1;
 }
 
+int SteamReleasesModel::visibleRowForAppId(quint32 appId) const
+{
+    for (int row = 0; row < m_visible.size(); ++row)
+        if (m_visible.at(row).value(QStringLiteral("appId")).toUInt() == appId) return row;
+    return -1;
+}
+
 void SteamReleasesModel::replace(QVariantList releases)
 {
     const int oldCount = m_all.size();
