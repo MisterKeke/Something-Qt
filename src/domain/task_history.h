@@ -2,6 +2,7 @@
 
 #include <QJsonValue>
 #include <QString>
+#include <QtGlobal>
 #include <QVector>
 
 #include <optional>
@@ -26,6 +27,8 @@ enum class TaskHistoryEventType {
     SubtaskRemoved,
     TaskDeleted,
 };
+
+inline constexpr int taskHistorySerializationVersion = 1;
 
 QString taskHistoryEventTypeName(TaskHistoryEventType type);
 std::optional<TaskHistoryEventType> taskHistoryEventTypeFromName(const QString &name);
@@ -54,11 +57,12 @@ struct TaskHistoryEvent final {
     QString occurredAtUtc; // ISO 8601 timestamp in UTC, ending in Z
     std::optional<qint64> taskRevision;
     QString taskTitle;
+    int serializationVersion{taskHistorySerializationVersion};
     QVector<TaskHistoryChange> changes;
 };
 
 struct SerializedTaskHistoryDiff final {
-    static constexpr int currentVersion = 1;
+    static constexpr int currentVersion = taskHistorySerializationVersion;
 
     int version{currentVersion};
     QString changedFieldsJson;
@@ -68,8 +72,8 @@ struct SerializedTaskHistoryDiff final {
 
 // Version 1 stores field names as a JSON string array and each value map as a
 // JSON object. Canonical task fields are title, description, dueDate, priority,
-// difficulty, tags, and completed; subtask properties use
-// "subtasks.<id>.<property>". Values use {"state":"unset"},
+// difficulty, tags, and completed; full subtask-list changes use "subtasks",
+// and focused subtask properties use "subtasks.<id>.<property>". Values use {"state":"unset"},
 // {"state":"null"}, or {"state":"value","value":...}, so unset,
 // SQL NULL, and empty values remain distinct (including empty strings, arrays,
 // and objects).

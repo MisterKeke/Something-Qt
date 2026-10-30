@@ -1,9 +1,13 @@
 #include "repositories.h"
 
 #include "../domain/task_rules.h"
+#include "../domain/task_history.h"
 
 #include <QDate>
 #include <QDateTime>
+#include <QJsonArray>
+#include <QJsonObject>
+#include <QPair>
 #include <QRegularExpression>
 #include <QMap>
 #include <QSet>
@@ -122,6 +126,198 @@ QString placeholderList(int count)
 QVariant nullableString(const QString &value)
 {
     return value.isEmpty() ? QVariant() : QVariant(value);
+}
+
+domain::TaskHistoryValue historyValue(const QJsonValue &value)
+{
+    return domain::TaskHistoryValue::fromJsonValue(value);
+}
+
+domain::TaskHistoryValue historyString(const QString &value, bool nullable)
+{
+    if (nullable && value.isEmpty()) return domain::TaskHistoryValue::null();
+    return historyValue(QJsonValue(value));
+}
+
+QJsonArray taskTagsJson(const QStringList &tags)
+{
+    QJsonArray result;
+    for (const QString &tag : tags) result.push_back(tag);
+    return result;
+}
+
+QJsonArray taskSubtasksJson(const QVector<Subtask> &subtasks)
+{
+    QJsonArray result;
+    for (const Subtask &subtask : subtasks) {
+        result.push_back(QJsonObject{
+            {QStringLiteral("id"), QString::number(subtask.id)},
+            {QStringLiteral("title"), subtask.title},
+            {QStringLiteral("completed"), subtask.completed},
+            {QStringLiteral("position"), subtask.position},
+        });
+    }
+    return result;
+}
+
+void appendHistoryChange(QVector<domain::TaskHistoryChange> *changes,
+                         QString field, domain::TaskHistoryValue previous,
+                         domain::TaskHistoryValue current)
+{
+    changes->push_back({std::move(field), std::move(previous), std::move(current)});
+}
+
+QVector<domain::TaskHistoryChange> taskChanges(const Task &before, const Task &after)
+{
+    QVector<domain::TaskHistoryChange> changes;
+    if (before.title != after.title)
+        appendHistoryChange(&changes, QStringLiteral("title"), historyString(before.title, false),
+                           historyString(after.title, false));
+    if (before.description != after.description)
+        appendHistoryChange(&changes, QStringLiteral("description"), historyString(before.description, false),
+                           historyString(after.description, false));
+    if (before.dueDate != after.dueDate)
+        appendHistoryChange(&changes, QStringLiteral("dueDate"), historyString(before.dueDate, true),
+                           historyString(after.dueDate, true));
+    if (before.priority != after.priority)
+        appendHistoryChange(&changes, QStringLiteral("priority"), historyString(before.priority, false),
+                           historyString(after.priority, false));
+    if (before.difficulty != after.difficulty)
+        appendHistoryChange(&changes, QStringLiteral("difficulty"), historyString(before.difficulty, true),
+                           historyString(after.difficulty, true));
+    if (before.completed != after.completed)
+        appendHistoryChange(&changes, QStringLiteral("completed"),
+                           historyValue(QJsonValue(before.completed)),
+                           historyValue(QJsonValue(after.completed)));
+    if (before.tags != after.tags)
+        appendHistoryChange(&changes, QStringLiteral("tags"), historyValue(taskTagsJson(before.tags)),
+                           historyValue(taskTagsJson(after.tags)));
+    if (taskSubtasksJson(before.subtasks) != taskSubtasksJson(after.subtasks))
+        appendHistoryChange(&changes, QStringLiteral("subtasks"),
+                           historyValue(taskSubtasksJson(before.subtasks)),
+                           historyValue(taskSubtasksJson(after.subtasks)));
+    return changes;
+}
+
+QVector<domain::TaskHistoryChange> taskCreatedChanges(const Task &task)
+{
+    QVector<domain::TaskHistoryChange> changes;
+    changes.push_back({QStringLiteral("title"), domain::TaskHistoryValue::unset(),
+                       historyString(task.title, false)});
+    changes.push_back({QStringLiteral("description"), domain::TaskHistoryValue::unset(),
+                       historyString(task.description, false)});
+    changes.push_back({QStringLiteral("dueDate"), domain::TaskHistoryValue::unset(),
+                       historyString(task.dueDate, true)});
+    changes.push_back({QStringLiteral("priority"), domain::TaskHistoryValue::unset(),
+                       historyString(task.priority, false)});
+    changes.push_back({QStringLiteral("difficulty"), domain::TaskHistoryValue::unset(),
+                       historyString(task.difficulty, true)});
+    changes.push_back({QStringLiteral("completed"), domain::TaskHistoryValue::unset(),
+                       historyValue(QJsonValue(task.completed))});
+    changes.push_back({QStringLiteral("tags"), domain::TaskHistoryValue::unset(),
+                       historyValue(taskTagsJson(task.tags))});
+    changes.push_back({QStringLiteral("subtasks"), domain::TaskHistoryValue::unset(),
+                       historyValue(taskSubtasksJson(task.subtasks))});
+    return changes;
+}
+
+QVector<domain::TaskHistoryChange> taskDeletedChanges(const Task &task)
+{
+    QVector<domain::TaskHistoryChange> changes = taskCreatedChanges(task);
+    for (auto &change : changes) {
+        change.previous = std::move(change.current);
+        change.current = domain::TaskHistoryValue::unset();
+    }
+    return changes;
+}
+
+bool insertTaskHistory(QSqlDatabase &database, qint64 taskId,
+                       domain::TaskHistoryEventType type,
+                       std::optional<qint64> taskRevision,
+                       const QString &taskTitle,
+                       const QVector<domain::TaskHistoryChange> &changes,
+                       domain::AppError *error)
+{
+    if (changes.isEmpty()) return true;
+    const auto diff = domain::serializeTaskHistoryDiff(changes);
+    if (!diff) {
+        *error = domain::AppError(domain::ErrorCategory::Internal);
+        return false;
+    }
+
+    QSqlQuery query(database);
+    query.prepare(QStringLiteral(
+        "INSERT INTO task_history(task_id,event_type,occurred_at_utc,task_revision,task_title,"
+        "serialization_version,changed_fields_json,previous_values_json,new_values_json) "
+        "VALUES(?,?,?,?,?,?,?,?,?)"));
+    query.addBindValue(taskId);
+    query.addBindValue(domain::taskHistoryEventTypeName(type));
+    query.addBindValue(QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs));
+    query.addBindValue(taskRevision ? QVariant(*taskRevision) : QVariant());
+    query.addBindValue(taskTitle);
+    query.addBindValue(diff->version);
+    query.addBindValue(diff->changedFieldsJson);
+    query.addBindValue(diff->previousValuesJson);
+    query.addBindValue(diff->newValuesJson);
+    if (!query.exec()) {
+        *error = domain::AppError(queryFailure(query));
+        return false;
+    }
+    return true;
+}
+
+domain::TaskHistoryEventType taskUpdateEventType(
+    const Task &before, const Task &after,
+    const QVector<domain::TaskHistoryChange> &changes)
+{
+    if (changes.size() == 1) {
+        const QString &field = changes.front().field;
+        if (field == QStringLiteral("title")) return domain::TaskHistoryEventType::TaskTitleChanged;
+        if (field == QStringLiteral("description")) return domain::TaskHistoryEventType::DescriptionChanged;
+        if (field == QStringLiteral("dueDate")) return domain::TaskHistoryEventType::DueDateChanged;
+        if (field == QStringLiteral("priority")) return domain::TaskHistoryEventType::PriorityChanged;
+        if (field == QStringLiteral("difficulty")) return domain::TaskHistoryEventType::DifficultyChanged;
+        if (field == QStringLiteral("tags")) return domain::TaskHistoryEventType::TagsChanged;
+        if (field == QStringLiteral("subtasks")) {
+            QVector<const Subtask *> added;
+            QVector<const Subtask *> removed;
+            QVector<QPair<const Subtask *, const Subtask *>> modified;
+            for (const Subtask &oldSubtask : before.subtasks) {
+                const auto found = std::find_if(after.subtasks.cbegin(), after.subtasks.cend(),
+                    [&oldSubtask](const Subtask &candidate) { return candidate.id == oldSubtask.id; });
+                if (found == after.subtasks.cend()) {
+                    removed.push_back(&oldSubtask);
+                } else {
+                    if (oldSubtask.title != found->title || oldSubtask.completed != found->completed)
+                        modified.push_back({&oldSubtask, &*found});
+                }
+            }
+            for (const Subtask &newSubtask : after.subtasks) {
+                const auto found = std::find_if(before.subtasks.cbegin(), before.subtasks.cend(),
+                    [&newSubtask](const Subtask &candidate) { return candidate.id == newSubtask.id; });
+                if (found == before.subtasks.cend()) added.push_back(&newSubtask);
+            }
+            if (added.size() == 1 && removed.isEmpty() && modified.isEmpty())
+                return domain::TaskHistoryEventType::SubtaskCreated;
+            if (removed.size() == 1 && added.isEmpty() && modified.isEmpty())
+                return domain::TaskHistoryEventType::SubtaskRemoved;
+            if (added.isEmpty() && removed.isEmpty() && modified.size() == 1) {
+                const Subtask *oldSubtask = modified.front().first;
+                const Subtask *newSubtask = modified.front().second;
+                if (oldSubtask->title == newSubtask->title
+                    && oldSubtask->position == newSubtask->position
+                    && oldSubtask->completed != newSubtask->completed) {
+                    return newSubtask->completed
+                        ? domain::TaskHistoryEventType::SubtaskCompleted
+                        : domain::TaskHistoryEventType::SubtaskReopened;
+                }
+                return domain::TaskHistoryEventType::SubtaskUpdated;
+            }
+            if (added.isEmpty() && removed.isEmpty() && modified.isEmpty())
+                return domain::TaskHistoryEventType::SubtaskUpdated;
+        }
+    }
+    return domain::TaskHistoryEventType::TaskUpdated;
 }
 
 void bindAsset(QSqlQuery &query, int firstIndex, const AssetMetadata &asset)
@@ -338,8 +534,15 @@ RepositoryResult<Task> TaskRepository::create(const TaskInput &requested)
     domain::AppError error;
     if (input.tags && !replaceTags(id, *input.tags, &error)) return failure<Task>(error.category());
     if (input.subtasks && !replaceSubtasks(id, *input.subtasks, &error)) return failure<Task>(error.category());
+    const auto created = load(id);
+    if (!created.succeeded()) return failure<Task>(created.error.category());
+    if (!insertTaskHistory(m_database, id, domain::TaskHistoryEventType::TaskCreated,
+                           created.value.revision, created.value.title,
+                           taskCreatedChanges(created.value), &error)) {
+        return failure<Task>(error.category());
+    }
     if (!transaction.commit()) return failure<Task>(domain::ErrorCategory::Storage);
-    return load(id);
+    return created;
 }
 
 RepositoryResult<Task> TaskRepository::update(qint64 id, qint64 expectedRevision, const TaskInput &requested)
@@ -372,8 +575,17 @@ RepositoryResult<Task> TaskRepository::update(qint64 id, qint64 expectedRevision
     domain::AppError error;
     if (input.tags && !replaceTags(id, *input.tags, &error)) return failure<Task>(error.category());
     if (input.subtasks && !replaceSubtasks(id, *input.subtasks, &error)) return failure<Task>(error.category());
+    const auto updated = load(id);
+    if (!updated.succeeded()) return failure<Task>(updated.error.category());
+    const auto changes = taskChanges(current.value, updated.value);
+    if (!changes.isEmpty()
+        && !insertTaskHistory(m_database, id,
+                              taskUpdateEventType(current.value, updated.value, changes),
+                              updated.value.revision, updated.value.title, changes, &error)) {
+        return failure<Task>(error.category());
+    }
     if (!transaction.commit()) return failure<Task>(domain::ErrorCategory::Storage);
-    return load(id);
+    return updated;
 }
 
 RepositoryResult<Task> TaskRepository::setCompleted(qint64 id, qint64 expectedRevision, bool completed)
@@ -392,8 +604,22 @@ RepositoryResult<Task> TaskRepository::setCompleted(qint64 id, qint64 expectedRe
     query.addBindValue(expectedRevision);
     if (!query.exec()) return failure<Task>(queryFailure(query));
     if (query.numRowsAffected() != 1) return failure<Task>(domain::ErrorCategory::Conflict);
+    const auto updated = load(id);
+    if (!updated.succeeded()) return failure<Task>(updated.error.category());
+    if (current.value.completed != completed) {
+        const QVector<domain::TaskHistoryChange> changes{{
+            QStringLiteral("completed"), historyValue(QJsonValue(current.value.completed)),
+            historyValue(QJsonValue(completed))}};
+        const auto type = completed ? domain::TaskHistoryEventType::TaskCompleted
+                                    : domain::TaskHistoryEventType::TaskReopened;
+        domain::AppError error;
+        if (!insertTaskHistory(m_database, id, type, updated.value.revision,
+                               updated.value.title, changes, &error)) {
+            return failure<Task>(error.category());
+        }
+    }
     if (!transaction.commit()) return failure<Task>(domain::ErrorCategory::Storage);
-    return load(id);
+    return updated;
 }
 
 RepositoryResult<Task> TaskRepository::setSubtaskCompleted(qint64 id, qint64 subtaskId,
@@ -407,6 +633,13 @@ RepositoryResult<Task> TaskRepository::setSubtaskCompleted(qint64 id, qint64 sub
     if (!task.succeeded()) return failure<Task>(task.error.category());
     if (task.value.revision != expectedRevision) return failure<Task>(domain::ErrorCategory::Conflict);
     if (task.value.difficulty != QStringLiteral("hard")) return failure<Task>(domain::ErrorCategory::Validation);
+    const Subtask *previousSubtask = nullptr;
+    for (const Subtask &candidate : task.value.subtasks) {
+        if (candidate.id == subtaskId) {
+            previousSubtask = &candidate;
+            break;
+        }
+    }
     QSqlQuery subtask(m_database);
     subtask.prepare(QStringLiteral("UPDATE task_subtasks SET is_completed=? WHERE task_id=? AND id=?"));
     subtask.addBindValue(completed);
@@ -420,26 +653,47 @@ RepositoryResult<Task> TaskRepository::setSubtaskCompleted(qint64 id, qint64 sub
     parent.addBindValue(expectedRevision);
     if (!parent.exec()) return failure<Task>(queryFailure(parent));
     if (parent.numRowsAffected() != 1) return failure<Task>(domain::ErrorCategory::Conflict);
+    const auto updated = load(id);
+    if (!updated.succeeded()) return failure<Task>(updated.error.category());
+    if (previousSubtask && previousSubtask->completed != completed) {
+        const QString field = QStringLiteral("subtasks.%1.completed").arg(subtaskId);
+        const QVector<domain::TaskHistoryChange> changes{{
+            field, historyValue(QJsonValue(previousSubtask->completed)),
+            historyValue(QJsonValue(completed))}};
+        const auto type = completed ? domain::TaskHistoryEventType::SubtaskCompleted
+                                    : domain::TaskHistoryEventType::SubtaskReopened;
+        domain::AppError error;
+        if (!insertTaskHistory(m_database, id, type, updated.value.revision,
+                               updated.value.title, changes, &error)) {
+            return failure<Task>(error.category());
+        }
+    }
     if (!transaction.commit()) return failure<Task>(domain::ErrorCategory::Storage);
-    return load(id);
+    return updated;
 }
 
 RepositoryResult<void> TaskRepository::remove(qint64 id, qint64 expectedRevision)
 {
     Q_ASSERT(QThread::currentThread() == m_database.driver()->thread());
     if (id <= 0 || expectedRevision <= 0) return failureVoid(domain::ErrorCategory::Validation);
+    Transaction transaction(m_database);
+    if (!transaction.active()) return failureVoid(domain::ErrorCategory::Storage);
+    const auto task = load(id);
+    if (!task.succeeded()) return failureVoid(task.error.category());
+    if (task.value.revision != expectedRevision) return failureVoid(domain::ErrorCategory::Conflict);
     QSqlQuery query(m_database);
     query.prepare(QStringLiteral("DELETE FROM tasks WHERE id=? AND revision=?"));
     query.addBindValue(id);
     query.addBindValue(expectedRevision);
     if (!query.exec()) return failureVoid(queryFailure(query));
-    if (query.numRowsAffected() != 1) {
-        QSqlQuery exists(m_database);
-        exists.prepare(QStringLiteral("SELECT 1 FROM tasks WHERE id=?"));
-        exists.addBindValue(id);
-        if (!exists.exec()) return failureVoid(queryFailure(exists));
-        return failureVoid(exists.next() ? domain::ErrorCategory::Conflict : domain::ErrorCategory::NotFound);
+    if (query.numRowsAffected() != 1) return failureVoid(domain::ErrorCategory::Conflict);
+    domain::AppError error;
+    if (!insertTaskHistory(m_database, id, domain::TaskHistoryEventType::TaskDeleted,
+                           task.value.revision, task.value.title,
+                           taskDeletedChanges(task.value), &error)) {
+        return failureVoid(error.category());
     }
+    if (!transaction.commit()) return failureVoid(domain::ErrorCategory::Storage);
     return {};
 }
 
