@@ -60,7 +60,7 @@ QUrl forecastUrl(double latitude, double longitude)
     query.addQueryItem(QStringLiteral("latitude"), QString::number(latitude, 'f', 6));
     query.addQueryItem(QStringLiteral("longitude"), QString::number(longitude, 'f', 6));
     query.addQueryItem(QStringLiteral("current"), QStringLiteral("temperature_2m,apparent_temperature,weather_code,wind_speed_10m"));
-    query.addQueryItem(QStringLiteral("daily"), QStringLiteral("weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max"));
+    query.addQueryItem(QStringLiteral("daily"), QStringLiteral("weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max,sunrise,sunset,daylight_duration"));
     query.addQueryItem(QStringLiteral("timezone"), QStringLiteral("auto"));
     query.addQueryItem(QStringLiteral("forecast_days"), QStringLiteral("6"));
     url.setQuery(query);
