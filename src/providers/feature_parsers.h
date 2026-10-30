@@ -19,6 +19,8 @@ FeatureParseResult<something::domain::WeatherForecast> parseWeatherForecast(
     const QByteArray &body);
 FeatureParseResult<something::domain::WeatherCity> parseWeatherCitySearch(
     const QByteArray &body);
+FeatureParseResult<QVector<something::domain::WeatherCity>> parseWeatherCitySearchResults(
+    const QByteArray &body);
 FeatureParseResult<something::domain::CurrencyRate> parseCurrencyRate(
     const QByteArray &body, const QString &expectedBase, const QString &expectedQuote);
 FeatureParseResult<something::domain::CurrencyRates> parseCurrencyRates(

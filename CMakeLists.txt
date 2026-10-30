@@ -150,6 +150,7 @@ qt_add_executable(SomethingQt WIN32
     src/models/provider_items_model.cpp
     src/models/running_windows_model.cpp
     src/models/weather_forecast_model.cpp
+    src/models/weather_comparison_model.cpp
     src/models/steam_games_model.cpp
 )
 
@@ -178,6 +179,7 @@ qt_add_qml_module(SomethingQt
         qml/components/StatePanel.qml
         qml/components/NotificationToast.qml
         qml/components/WeatherSummaryCard.qml
+        qml/components/WeatherSolarSection.qml
         qml/components/OrbitNavigation.qml
         qml/dialogs/ConfirmationDialog.qml
         qml/dialogs/TaskEditorDialog.qml

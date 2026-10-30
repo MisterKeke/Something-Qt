@@ -345,6 +345,28 @@ constexpr const char *taskScheduling[] = {
     "INSERT INTO scheduling_preferences(id) VALUES(1)",
 };
 
+constexpr const char *weatherComparison[] = {
+    R"SQL(CREATE TABLE weather_comparison_cities (
+        identity TEXT PRIMARY KEY CHECK(length(trim(identity)) BETWEEN 1 AND 80),
+        geocoding_id INTEGER CHECK(geocoding_id IS NULL OR geocoding_id > 0),
+        display_name TEXT NOT NULL CHECK(length(trim(display_name)) BETWEEN 1 AND 120),
+        administrative_area TEXT NOT NULL DEFAULT '' CHECK(length(administrative_area) <= 120),
+        country TEXT NOT NULL DEFAULT '' CHECK(length(country) <= 120),
+        timezone TEXT NOT NULL DEFAULT '' CHECK(length(timezone) <= 100),
+        latitude REAL NOT NULL CHECK(latitude BETWEEN -90 AND 90),
+        longitude REAL NOT NULL CHECK(longitude BETWEEN -180 AND 180),
+        display_order INTEGER NOT NULL CHECK(typeof(display_order) = 'integer' AND display_order BETWEEN 0 AND 3),
+        forecast_json TEXT,
+        forecast_updated_at TEXT,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        CHECK((forecast_json IS NULL AND forecast_updated_at IS NULL)
+            OR (forecast_json IS NOT NULL AND length(forecast_json) > 0
+                AND forecast_updated_at IS NOT NULL AND length(trim(forecast_updated_at)) > 0))
+    ))SQL",
+    "CREATE INDEX idx_weather_comparison_order ON weather_comparison_cities(display_order, identity)",
+};
+
 constexpr std::array migrations{
     Migration{1, "core tasks currencies preferences", core, qsizetype(std::size(core))},
     Migration{2, "favorites and retained update news", favorites, qsizetype(std::size(favorites))},
@@ -360,6 +382,8 @@ constexpr std::array migrations{
               qsizetype(std::size(taskHistory))},
     Migration{10, "task scheduling data and preferences", taskScheduling,
               qsizetype(std::size(taskScheduling))},
+    Migration{11, "weather comparison cities and forecast cache", weatherComparison,
+              qsizetype(std::size(weatherComparison))},
 };
 
 bool fail(QString *diagnostic, const QString &message)
@@ -417,7 +441,8 @@ bool hasUnexpectedTables(const QSqlDatabase &database, QString *diagnostic, bool
         QStringLiteral("steam_game_settings"), QStringLiteral("steam_games"),
         QStringLiteral("steam_game_images"), QStringLiteral("data_imports"),
         QStringLiteral("task_history"), QStringLiteral("task_schedules"),
-        QStringLiteral("scheduling_preferences")
+        QStringLiteral("scheduling_preferences"),
+        QStringLiteral("weather_comparison_cities")
     };
     QSqlQuery query(database);
     if (!query.exec(QStringLiteral("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"))) {

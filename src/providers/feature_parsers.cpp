@@ -1,6 +1,7 @@
 #include "feature_parsers.h"
 
 #include <QDate>
+#include <QDateTime>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -8,6 +9,8 @@
 #include <QJsonValue>
 #include <QHash>
 #include <QRegularExpression>
+#include <QTime>
+#include <QTimeZone>
 
 #include <algorithm>
 #include <cmath>
@@ -99,10 +102,99 @@ bool optionalInteger(const QJsonObject &object, const QString &key,
     return true;
 }
 
+bool optionalInteger64(const QJsonObject &object, const QString &key, qint64 *value)
+{
+    if (!value) return false;
+    const QJsonValue field = object.value(key);
+    if (field.isUndefined() || field.isNull()) {
+        *value = 0;
+        return true;
+    }
+    constexpr double maximumExactJsonInteger = 9007199254740991.0;
+    if (!field.isDouble() || !std::isfinite(field.toDouble())
+        || std::floor(field.toDouble()) != field.toDouble()
+        || field.toDouble() < 0.0
+        || field.toDouble() > maximumExactJsonInteger) {
+        return false;
+    }
+    *value = static_cast<qint64>(field.toDouble());
+    return true;
+}
+
 bool validDate(const QString &value)
 {
     const QDate date = QDate::fromString(value, Qt::ISODate);
     return date.isValid() && date.toString(Qt::ISODate) == value;
+}
+
+bool parseUnixTimestamp(const QJsonValue &value, QDateTime *output)
+{
+    if (!output || !value.isDouble() || !std::isfinite(value.toDouble())) return false;
+    const double seconds = value.toDouble();
+    constexpr double minimumSeconds = -62135596800.0;
+    constexpr double maximumSeconds = 253402300799.0;
+    if (seconds < minimumSeconds || seconds > maximumSeconds) return false;
+    const qint64 milliseconds = static_cast<qint64>(std::llround(seconds * 1000.0));
+    *output = QDateTime::fromMSecsSinceEpoch(milliseconds, Qt::UTC);
+    return output->isValid();
+}
+
+bool parseProviderDate(const QJsonValue &value, const QTimeZone &timeZone, QString *output)
+{
+    if (!output) return false;
+    if (value.isString()) {
+        if (!validDate(value.toString())) return false;
+        *output = value.toString();
+        return true;
+    }
+
+    QDateTime timestamp;
+    if (!timeZone.isValid() || !parseUnixTimestamp(value, &timestamp)) return false;
+    *output = timestamp.toTimeZone(timeZone).date().toString(Qt::ISODate);
+    return !output->isEmpty();
+}
+
+bool parseSolarTimestamp(const QJsonValue &value, const QTimeZone &timeZone,
+                         QDateTime *output)
+{
+    if (!output) return false;
+    if (value.isDouble()) return parseUnixTimestamp(value, output);
+    if (!value.isString() || !timeZone.isValid()) return false;
+
+    // Older cached Open-Meteo responses contain local ISO wall times. Their
+    // fixed request-time offset can be stale across DST, so use the wall clock
+    // components with the saved IANA timezone instead of applying that offset.
+    static const QRegularExpression pattern(QStringLiteral(
+        R"(^([0-9]{4}-[0-9]{2}-[0-9]{2})T([0-9]{2}):([0-9]{2})(?::([0-9]{2})(?:\.[0-9]{1,9})?)?(?:[Zz]|([+-])([0-9]{2}):([0-9]{2}))?$)"));
+    const QRegularExpressionMatch match = pattern.match(value.toString());
+    if (!match.hasMatch() || !validDate(match.captured(1))) return false;
+
+    bool hourOk = false;
+    bool minuteOk = false;
+    const int hour = match.captured(2).toInt(&hourOk);
+    const int minute = match.captured(3).toInt(&minuteOk);
+    if (!hourOk || !minuteOk || hour > 23 || minute > 59) return false;
+    int second = 0;
+    if (!match.captured(4).isEmpty()) {
+        bool secondOk = false;
+        second = match.captured(4).toInt(&secondOk);
+        if (!secondOk || second > 59) return false;
+    }
+    if (!match.captured(5).isEmpty()) {
+        bool offsetHourOk = false;
+        bool offsetMinuteOk = false;
+        const int offsetHour = match.captured(6).toInt(&offsetHourOk);
+        const int offsetMinute = match.captured(7).toInt(&offsetMinuteOk);
+        if (!offsetHourOk || !offsetMinuteOk || offsetHour > 23 || offsetMinute > 59)
+            return false;
+    }
+
+    const QDate date = QDate::fromString(match.captured(1), Qt::ISODate);
+    const QTime time(hour, minute, second);
+    const QDateTime localTime(date, time, timeZone);
+    if (!localTime.isValid()) return false;
+    *output = localTime.toUTC();
+    return true;
 }
 
 template<typename T, typename Convert>
@@ -117,6 +209,24 @@ bool parseArray(const QJsonValue &value, QVector<T> *output, Convert convert)
         output->push_back(std::move(result));
     }
     return true;
+}
+
+template<typename T, typename Convert>
+QVector<std::optional<T>> parseOptionalSolarArray(const QJsonValue &value,
+                                                  qsizetype expectedCount,
+                                                  Convert convert)
+{
+    QVector<std::optional<T>> output(expectedCount);
+    if (!value.isArray()) return output;
+    const QJsonArray array = value.toArray();
+    const qsizetype count = std::min(array.size(), expectedCount);
+    for (qsizetype i = 0; i < count; ++i) {
+        const QJsonValue item = array.at(i);
+        if (item.isNull() || item.isUndefined()) continue;
+        T parsed{};
+        if (convert(item, &parsed)) output[i] = std::move(parsed);
+    }
+    return output;
 }
 
 bool parseDailyNumber(const QJsonValue &value, double *out)
@@ -192,6 +302,7 @@ FeatureParseResult<WeatherForecast> parseWeatherForecast(const QByteArray &body)
         result.error = invalidResponse();
         return result;
     }
+    const QTimeZone locationTimeZone(result.value.timezone.toUtf8());
 
     QVector<QString> dates;
     QVector<int> codes;
@@ -199,9 +310,8 @@ FeatureParseResult<WeatherForecast> parseWeatherForecast(const QByteArray &body)
     QVector<double> lows;
     QVector<double> precipitation;
     const bool parsed = parseArray<QString>(daily.value(QStringLiteral("time")), &dates,
-        [](const QJsonValue &v, QString *out) {
-            if (!v.isString() || !validDate(v.toString())) return false;
-            *out = v.toString(); return true;
+        [&locationTimeZone](const QJsonValue &v, QString *out) {
+            return parseProviderDate(v, locationTimeZone, out);
         })
         && parseArray<int>(daily.value(QStringLiteral("weather_code")), &codes, parseDailyCode)
         && parseArray<double>(daily.value(QStringLiteral("temperature_2m_max")), &highs, parseDailyNumber)
@@ -214,10 +324,38 @@ FeatureParseResult<WeatherForecast> parseWeatherForecast(const QByteArray &body)
         result.error = invalidResponse();
         return result;
     }
+
+    const auto sunrises = parseOptionalSolarArray<QDateTime>(
+        daily.value(QStringLiteral("sunrise")), count,
+        [&locationTimeZone](const QJsonValue &value, QDateTime *out) {
+            return parseSolarTimestamp(value, locationTimeZone, out);
+        });
+    const auto sunsets = parseOptionalSolarArray<QDateTime>(
+        daily.value(QStringLiteral("sunset")), count,
+        [&locationTimeZone](const QJsonValue &value, QDateTime *out) {
+            return parseSolarTimestamp(value, locationTimeZone, out);
+        });
+    const auto daylightDurations = parseOptionalSolarArray<double>(
+        daily.value(QStringLiteral("daylight_duration")), count,
+        [](const QJsonValue &value, double *out) {
+            if (!value.isDouble() || !std::isfinite(value.toDouble())
+                || value.toDouble() < 0.0 || value.toDouble() > 86400.0) return false;
+            *out = value.toDouble();
+            return true;
+        });
     result.value.days.reserve(count);
     for (qsizetype i = 0; i < count; ++i) {
-        result.value.days.push_back({dates.at(i), codes.at(i), highs.at(i), lows.at(i),
-                                     precipitation.at(i)});
+        WeatherDay day{dates.at(i), codes.at(i), highs.at(i), lows.at(i),
+                       precipitation.at(i)};
+        const QDate localDate = QDate::fromString(dates.at(i), Qt::ISODate);
+        if (sunrises.at(i) && locationTimeZone.isValid()
+            && sunrises.at(i)->toTimeZone(locationTimeZone).date() == localDate)
+            day.sunriseUtc = sunrises.at(i)->toUTC();
+        if (sunsets.at(i) && locationTimeZone.isValid()
+            && sunsets.at(i)->toTimeZone(locationTimeZone).date() == localDate)
+            day.sunsetUtc = sunsets.at(i)->toUTC();
+        day.daylightDurationSeconds = daylightDurations.at(i);
+        result.value.days.push_back(std::move(day));
     }
     return result;
 }
@@ -225,6 +363,19 @@ FeatureParseResult<WeatherForecast> parseWeatherForecast(const QByteArray &body)
 FeatureParseResult<WeatherCity> parseWeatherCitySearch(const QByteArray &body)
 {
     FeatureParseResult<WeatherCity> result;
+    const auto candidates = parseWeatherCitySearchResults(body);
+    if (!candidates.succeeded()) {
+        result.error = candidates.error;
+        return result;
+    }
+    if (!candidates.value.isEmpty()) result.value = candidates.value.first();
+    return result;
+}
+
+FeatureParseResult<QVector<WeatherCity>> parseWeatherCitySearchResults(
+    const QByteArray &body)
+{
+    FeatureParseResult<QVector<WeatherCity>> result;
     QJsonObject root;
     if (!parseObject(body, &root)) {
         result.error = invalidResponse();
@@ -237,24 +388,48 @@ FeatureParseResult<WeatherCity> parseWeatherCitySearch(const QByteArray &body)
         return result;
     }
     const QJsonArray results = resultsValue.toArray();
-    if (results.isEmpty()) return result;
-    if (!results.first().isObject()) {
+    if (results.size() > 10) {
         result.error = invalidResponse();
         return result;
     }
-    const QJsonObject first = results.first().toObject();
-    WeatherCity city;
-    if (!requiredString(first, QStringLiteral("name"), &city.name)
-        || !requiredNumber(first, QStringLiteral("latitude"), &city.latitude)
-        || !requiredNumber(first, QStringLiteral("longitude"), &city.longitude)
-        || !optionalString(first, QStringLiteral("admin1"), &city.administrativeArea)
-        || !optionalString(first, QStringLiteral("country"), &city.country)
-        || !something::domain::isValidWeatherCoordinates(city.latitude, city.longitude)) {
-        result.error = invalidResponse();
-        return result;
+    result.value.reserve(results.size());
+    for (const QJsonValue &value : results) {
+        if (!value.isObject()) {
+            result.error = invalidResponse();
+            result.value.clear();
+            return result;
+        }
+        const QJsonObject object = value.toObject();
+        WeatherCity city;
+        QString secondaryAdministrativeArea;
+        if (!optionalInteger64(object, QStringLiteral("id"), &city.geocodingId)
+            || !requiredString(object, QStringLiteral("name"), &city.name)
+            || !requiredNumber(object, QStringLiteral("latitude"), &city.latitude)
+            || !requiredNumber(object, QStringLiteral("longitude"), &city.longitude)
+            || !optionalString(object, QStringLiteral("admin1"), &city.administrativeArea)
+            || !optionalString(object, QStringLiteral("admin2"), &secondaryAdministrativeArea)
+            || !optionalString(object, QStringLiteral("country"), &city.country)
+            || !optionalString(object, QStringLiteral("timezone"), &city.timezone)
+            || city.name.trimmed().isEmpty()
+            || !something::domain::isValidWeatherCoordinates(city.latitude, city.longitude)) {
+            result.error = invalidResponse();
+            result.value.clear();
+            return result;
+        }
+        city.name = city.name.trimmed();
+        city.administrativeArea = city.administrativeArea.trimmed();
+        secondaryAdministrativeArea = secondaryAdministrativeArea.trimmed();
+        if (city.administrativeArea.isEmpty())
+            city.administrativeArea = std::move(secondaryAdministrativeArea);
+        city.country = city.country.trimmed();
+        city.timezone = city.timezone.trimmed();
+        city.found = true;
+        const bool duplicate = std::any_of(result.value.cbegin(), result.value.cend(),
+            [&city](const WeatherCity &existing) {
+                return something::domain::isSameWeatherLocation(existing, city);
+            });
+        if (!duplicate) result.value.push_back(std::move(city));
     }
-    result.value = std::move(city);
-    result.value.found = true;
     return result;
 }
 
@@ -348,20 +523,45 @@ QByteArray serializeWeatherForecast(const WeatherForecast &forecast)
     if (forecast.current.windKmh)
         current.insert(QStringLiteral("wind_speed_10m"), *forecast.current.windKmh);
     QJsonArray time, code, maximum, minimum, precipitation;
+    QJsonArray sunrise, sunset, daylightDuration;
+    bool hasSunrise = false;
+    bool hasSunset = false;
+    bool hasDaylightDuration = false;
     for (const WeatherDay &day : forecast.days) {
         time.push_back(day.date);
         code.push_back(day.weatherCode);
         maximum.push_back(day.maximumCelsius);
         minimum.push_back(day.minimumCelsius);
         precipitation.push_back(day.precipitationProbability);
+        if (day.sunriseUtc && day.sunriseUtc->isValid()) {
+            sunrise.push_back(static_cast<double>(day.sunriseUtc->toMSecsSinceEpoch()) / 1000.0);
+            hasSunrise = true;
+        } else {
+            sunrise.push_back(QJsonValue(QJsonValue::Null));
+        }
+        if (day.sunsetUtc && day.sunsetUtc->isValid()) {
+            sunset.push_back(static_cast<double>(day.sunsetUtc->toMSecsSinceEpoch()) / 1000.0);
+            hasSunset = true;
+        } else {
+            sunset.push_back(QJsonValue(QJsonValue::Null));
+        }
+        if (day.daylightDurationSeconds) {
+            daylightDuration.push_back(*day.daylightDurationSeconds);
+            hasDaylightDuration = true;
+        } else {
+            daylightDuration.push_back(QJsonValue(QJsonValue::Null));
+        }
     }
-    const QJsonObject daily{
+    QJsonObject daily{
         {QStringLiteral("time"), time},
         {QStringLiteral("weather_code"), code},
         {QStringLiteral("temperature_2m_max"), maximum},
         {QStringLiteral("temperature_2m_min"), minimum},
         {QStringLiteral("precipitation_probability_max"), precipitation},
     };
+    if (hasSunrise) daily.insert(QStringLiteral("sunrise"), sunrise);
+    if (hasSunset) daily.insert(QStringLiteral("sunset"), sunset);
+    if (hasDaylightDuration) daily.insert(QStringLiteral("daylight_duration"), daylightDuration);
     const QJsonObject root{{QStringLiteral("current"), current},
                            {QStringLiteral("daily"), daily},
                            {QStringLiteral("timezone"), forecast.timezone}};

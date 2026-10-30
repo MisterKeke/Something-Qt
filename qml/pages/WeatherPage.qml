@@ -8,6 +8,7 @@ Item {
     id: root
     property var controller: weatherController
     property string cityQuery: ""
+    property bool showComparisonTable: false
     implicitHeight: pageColumn.implicitHeight
 
     function captureViewState() {
@@ -28,6 +29,50 @@ Item {
     function temperature(value, available) {
         return available ? Math.round(Number(value)) + "°" : "—"
     }
+    function celsius(value, available) {
+        return available ? Math.round(Number(value)) + "°C" : "—"
+    }
+    function windSpeed(value, available) {
+        return available ? Math.round(Number(value)) + " km/h" : "—"
+    }
+    function selectedForecastDay(forecast, date) {
+        const days = forecast && forecast.days ? forecast.days : []
+        for (let index = 0; index < days.length; ++index) {
+            if (days[index].date === date) return days[index]
+        }
+        return null
+    }
+    function comparisonMetricLabel(key) {
+        if (key === "temperature") return qsTr("Current temperature")
+        if (key === "feelsLike") return qsTr("Feels like")
+        if (key === "maximum") return qsTr("Maximum temperature")
+        if (key === "minimum") return qsTr("Minimum temperature")
+        if (key === "wind") return qsTr("Wind speed")
+        if (key === "precipitation") return qsTr("Precipitation probability")
+        if (key === "condition") return qsTr("Current condition")
+        return key
+    }
+    function comparisonCardDateText(hasSelectedDay, hasForecast, loading, date) {
+        if (hasSelectedDay) return qsTr("Forecast for %1").arg(formatDate(date))
+        if (!hasForecast && loading) {
+            return date.length > 0
+                ? qsTr("Loading forecast for %1").arg(formatDate(date))
+                : qsTr("Loading forecast…")
+        }
+        return date.length > 0
+            ? qsTr("Forecast unavailable for %1").arg(formatDate(date))
+            : qsTr("Waiting for forecast date")
+    }
+    function comparisonTableDateText(dateAvailable, loading, hasForecast, date) {
+        if (dateAvailable) return qsTr("Forecast · %1").arg(formatDate(date))
+        if (date.length > 0 && loading && !hasForecast)
+            return qsTr("Loading · %1").arg(formatDate(date))
+        return date.length > 0
+            ? qsTr("Selected date unavailable · %1").arg(formatDate(date))
+            : qsTr("Forecast date unavailable")
+    }
+    Component.onCompleted: controller.updateSolarInfo()
+    onVisibleChanged: if (visible) controller.updateSolarInfo()
 
     Flickable {
         id: pageScroll
@@ -174,6 +219,14 @@ Item {
                         }
                     }
 
+                    Shared.WeatherSolarSection {
+                        Layout.fillWidth: true
+                        visible: controller.primaryForecast.count > 0
+                        solarInfo: controller.primarySolar
+                        dayLabel: controller.primarySolar.date
+                                   ? root.formatDate(controller.primarySolar.date) : ""
+                    }
+
                     GridLayout {
                         Layout.fillWidth: true
                         visible: controller.primaryForecast.count > 0
@@ -182,7 +235,7 @@ Item {
                         columnSpacing: 8
                         Repeater {
                             model: controller.primaryForecast
-                            delegate: Rectangle {
+                            delegate: Button {
                                 required property string date
                                 required property string icon
                                 required property string condition
@@ -192,10 +245,18 @@ Item {
                                 required property int index
                                 Layout.fillWidth: true
                                 Layout.preferredHeight: 146
-                                radius: ThemeModule.Theme.panelRadius
-                                color: index === 0 ? ThemeModule.Theme.selectionBlue : ThemeModule.Theme.raisedSurface
-                                border.color: index === 0 ? ThemeModule.Theme.accentCyan : ThemeModule.Theme.borderColor
-                                ColumnLayout {
+                                padding: 0
+                                Accessible.role: Accessible.Button
+                                Accessible.name: qsTr("Select forecast for %1").arg(root.formatDate(date))
+                                onClicked: root.controller.selectPrimaryForecastDate(date)
+                                background: Rectangle {
+                                    radius: ThemeModule.Theme.panelRadius
+                                    color: date === root.controller.primarySelectedDate
+                                           ? ThemeModule.Theme.selectionBlue : ThemeModule.Theme.raisedSurface
+                                    border.color: date === root.controller.primarySelectedDate || parent.activeFocus
+                                                  ? ThemeModule.Theme.accentCyan : ThemeModule.Theme.borderColor
+                                }
+                                contentItem: ColumnLayout {
                                     anchors.fill: parent
                                     anchors.margins: 10
                                     spacing: 4
@@ -208,6 +269,7 @@ Item {
                             }
                         }
                     }
+
                 }
             }
 
@@ -253,9 +315,72 @@ Item {
                         width: 28
                         height: 28
                     }
+                    Label {
+                        Layout.fillWidth: true
+                        visible: controller.cityCandidates.length > 1
+                        text: qsTr("Choose the location that matches your search.")
+                        color: ThemeModule.Theme.textSecondary
+                        font.family: ThemeModule.Theme.fontFamily
+                        font.pixelSize: 12
+                        wrapMode: Text.Wrap
+                    }
+                    Repeater {
+                        model: controller.cityCandidates
+                        delegate: Shared.AppCard {
+                            required property var modelData
+                            required property int index
+                            Layout.fillWidth: true
+                            visible: controller.cityCandidates.length > 1
+                            padding: 10
+                            RowLayout {
+                                width: parent.width
+                                spacing: 10
+                                ColumnLayout {
+                                    Layout.fillWidth: true
+                                    spacing: 3
+                                    Label {
+                                        Layout.fillWidth: true
+                                        text: modelData.name
+                                        color: ThemeModule.Theme.textPrimary
+                                        font.family: ThemeModule.Theme.fontFamily
+                                        font.pixelSize: 14
+                                        font.weight: Font.DemiBold
+                                        wrapMode: Text.Wrap
+                                    }
+                                    Label {
+                                        Layout.fillWidth: true
+                                        text: [modelData.administrativeArea, modelData.country]
+                                            .filter(function(part) { return String(part).length > 0 })
+                                            .join(", ")
+                                        color: ThemeModule.Theme.textSecondary
+                                        font.family: ThemeModule.Theme.fontFamily
+                                        font.pixelSize: 11
+                                        wrapMode: Text.Wrap
+                                    }
+                                    Label {
+                                        Layout.fillWidth: true
+                                        text: qsTr("%1, %2").arg(Number(modelData.latitude).toFixed(4))
+                                            .arg(Number(modelData.longitude).toFixed(4))
+                                        color: ThemeModule.Theme.textSecondary
+                                        font.family: ThemeModule.Theme.fontFamily
+                                        font.pixelSize: 10
+                                    }
+                                }
+                                Shared.AppButton {
+                                    text: qsTr("Choose")
+                                    Accessible.name: qsTr("Choose %1 at %2, %3")
+                                        .arg(modelData.name)
+                                        .arg(Number(modelData.latitude).toFixed(4))
+                                        .arg(Number(modelData.longitude).toFixed(4))
+                                    onClicked: controller.selectCityCandidate(index)
+                                }
+                            }
+                        }
+                    }
                     Shared.StatePanel {
                         Layout.fillWidth: true
                         visible: controller.cityForecast.count === 0 && !controller.citySearching
+                                 && controller.cityCandidates.length === 0
                         height: visible ? implicitHeight : 0
                         state: controller.cityError.length ? "error" : "empty"
                         title: controller.cityError.length ? qsTr("City forecast unavailable") : qsTr("Search for a city")
@@ -282,6 +407,42 @@ Item {
                         }
                         Label { text: controller.cityCurrent.condition || qsTr("Weather unavailable"); color: ThemeModule.Theme.textSecondary; font.pixelSize: 12 }
                     }
+                    RowLayout {
+                        Layout.fillWidth: true
+                        visible: controller.cityForecast.count > 0
+                        Shared.AppButton {
+                            text: controller.comparisonMutationPending
+                                  ? qsTr("Saving comparison…")
+                                  : controller.comparisonStorageLoading
+                                    ? qsTr("Loading saved cities…")
+                                    : controller.searchedCityAlreadyAdded
+                                      ? qsTr("Already in comparison")
+                                      : controller.comparisonCityCount >= 4
+                                        ? (controller.canReplaceSearchedCity
+                                           ? qsTr("Choose a city below to replace")
+                                           : qsTr("Comparison list full"))
+                                        : qsTr("Add to comparison")
+                            enabled: controller.canAddSearchedCity
+                            Accessible.name: qsTr("Add %1 to city comparison").arg(controller.cityLocation)
+                            onClicked: controller.addSearchedCityToComparison()
+                        }
+                        Label {
+                            Layout.fillWidth: true
+                            visible: controller.cityUpdatedAt.length > 0
+                            text: qsTr("Updated %1").arg(controller.cityUpdatedAt)
+                            color: ThemeModule.Theme.textSecondary
+                            font.family: ThemeModule.Theme.fontFamily
+                            font.pixelSize: 11
+                            wrapMode: Text.Wrap
+                        }
+                    }
+                    Shared.WeatherSolarSection {
+                        Layout.fillWidth: true
+                        visible: controller.cityForecast.count > 0
+                        solarInfo: controller.citySolar
+                        dayLabel: controller.citySolar.date
+                                   ? root.formatDate(controller.citySolar.date) : ""
+                    }
                     GridLayout {
                         Layout.fillWidth: true
                         visible: controller.cityForecast.count > 0
@@ -290,7 +451,7 @@ Item {
                         columnSpacing: 6
                         Repeater {
                             model: controller.cityForecast
-                            delegate: Rectangle {
+                            delegate: Button {
                                 required property string date
                                 required property string icon
                                 required property string condition
@@ -299,10 +460,18 @@ Item {
                                 required property int index
                                 Layout.fillWidth: true
                                 Layout.preferredHeight: 92
-                                radius: ThemeModule.Theme.panelRadius
-                                color: ThemeModule.Theme.raisedSurface
-                                border.color: ThemeModule.Theme.borderColor
-                                Column {
+                                padding: 0
+                                Accessible.role: Accessible.Button
+                                Accessible.name: qsTr("Select forecast for %1").arg(root.formatDate(date))
+                                onClicked: root.controller.selectCityForecastDate(date)
+                                background: Rectangle {
+                                    radius: ThemeModule.Theme.panelRadius
+                                    color: date === root.controller.citySelectedDate
+                                           ? ThemeModule.Theme.selectionBlue : ThemeModule.Theme.raisedSurface
+                                    border.color: date === root.controller.citySelectedDate || parent.activeFocus
+                                                  ? ThemeModule.Theme.accentCyan : ThemeModule.Theme.borderColor
+                                }
+                                contentItem: Column {
                                     anchors.centerIn: parent
                                     spacing: 3
                                     Label { anchors.horizontalCenter: parent.horizontalCenter; text: root.formatDate(date); color: ThemeModule.Theme.textPrimary; font.pixelSize: 11 }
@@ -314,6 +483,594 @@ Item {
                     }
                 }
             }
+
+            Shared.AppCard {
+                Layout.fillWidth: true
+                visible: controller.comparisonCityCount > 0
+                         || controller.comparisonStorageError.length > 0
+                padding: 18
+                ColumnLayout {
+                    width: parent.width
+                    spacing: 10
+                    RowLayout {
+                        Layout.fillWidth: true
+                        Label {
+                            Layout.fillWidth: true
+                            text: qsTr("Comparison cities · %1 of 4").arg(controller.comparisonCityCount)
+                            color: ThemeModule.Theme.textPrimary
+                            font.family: ThemeModule.Theme.fontFamily
+                            font.pixelSize: 18
+                            font.weight: Font.DemiBold
+                        }
+                        Shared.AppButton {
+                            text: qsTr("Refresh all")
+                            quiet: true
+                            enabled: controller.comparisonCityCount > 0
+                            onClicked: controller.refreshAllComparisonCities()
+                        }
+                        Shared.AppButton {
+                            text: root.showComparisonTable
+                                  ? qsTr("Hide table") : qsTr("Detailed comparison")
+                            quiet: true
+                            enabled: controller.comparisonCityCount > 0
+                            onClicked: root.showComparisonTable = !root.showComparisonTable
+                        }
+                    }
+                    Label {
+                        Layout.fillWidth: true
+                        text: controller.comparisonCityCount < 2
+                              ? qsTr("Add one more city to compare forecasts.")
+                              : qsTr("Saved comparison cities stay separate from your primary location.")
+                        color: ThemeModule.Theme.textSecondary
+                        font.family: ThemeModule.Theme.fontFamily
+                        font.pixelSize: 12
+                        wrapMode: Text.Wrap
+                    }
+                    Label {
+                        Layout.fillWidth: true
+                        visible: controller.comparisonStorageLoading
+                        text: qsTr("Restoring saved cities and cached forecasts…")
+                        color: ThemeModule.Theme.textSecondary
+                        font.family: ThemeModule.Theme.fontFamily
+                        font.pixelSize: 12
+                    }
+                    Label {
+                        Layout.fillWidth: true
+                        visible: controller.comparisonMutationPending
+                        text: qsTr("Saving comparison changes…")
+                        color: ThemeModule.Theme.textSecondary
+                        font.family: ThemeModule.Theme.fontFamily
+                        font.pixelSize: 12
+                    }
+                    Label {
+                        Layout.fillWidth: true
+                        visible: controller.comparisonStorageError.length > 0
+                        text: controller.comparisonStorageError
+                        color: ThemeModule.Theme.warning
+                        font.family: ThemeModule.Theme.fontFamily
+                        font.pixelSize: 12
+                        wrapMode: Text.Wrap
+                    }
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        visible: controller.comparisonDateOptions.length > 0
+                        spacing: 5
+                        Label {
+                            Layout.fillWidth: true
+                            text: qsTr("Shared provider-local forecast date")
+                            color: ThemeModule.Theme.textPrimary
+                            font.family: ThemeModule.Theme.fontFamily
+                            font.pixelSize: 12
+                            font.weight: Font.DemiBold
+                        }
+                        Label {
+                            Layout.fillWidth: true
+                            text: qsTr("All cities use this calendar date. Cities without it show unavailable.")
+                            color: ThemeModule.Theme.textSecondary
+                            font.family: ThemeModule.Theme.fontFamily
+                            font.pixelSize: 11
+                            wrapMode: Text.Wrap
+                        }
+                        Flow {
+                            Layout.fillWidth: true
+                            spacing: 5
+                            Repeater {
+                                model: controller.comparisonDateOptions
+                                delegate: Button {
+                                    required property var modelData
+                                    readonly property string dayDate: String(modelData.date || "")
+                                    text: qsTr("%1 · %2/%3")
+                                        .arg(root.formatDate(dayDate))
+                                        .arg(modelData.availableCount)
+                                        .arg(modelData.cityCount)
+                                    checkable: true
+                                    checked: dayDate === controller.comparisonSelectedDate
+                                    implicitWidth: Math.max(112, dateLabel.implicitWidth + 18)
+                                    implicitHeight: 34
+                                    padding: 5
+                                    Accessible.name: qsTr("Compare forecast date %1, available for %2 of %3 cities")
+                                        .arg(root.formatDate(dayDate))
+                                        .arg(modelData.availableCount)
+                                        .arg(modelData.cityCount)
+                                    onClicked: controller.selectComparisonForecastDate(dayDate)
+                                    contentItem: Text {
+                                        id: dateLabel
+                                        text: parent.text
+                                        color: parent.checked ? ThemeModule.Theme.textPrimary
+                                                             : ThemeModule.Theme.textSecondary
+                                        font.family: ThemeModule.Theme.fontFamily
+                                        font.pixelSize: 10
+                                        horizontalAlignment: Text.AlignHCenter
+                                        verticalAlignment: Text.AlignVCenter
+                                        elide: Text.ElideRight
+                                    }
+                                    background: Rectangle {
+                                        radius: ThemeModule.Theme.controlRadius
+                                        color: parent.checked ? ThemeModule.Theme.selectionBlue
+                                                              : ThemeModule.Theme.raisedSurface
+                                        border.color: parent.checked ? ThemeModule.Theme.accentCyan
+                                                                    : ThemeModule.Theme.borderColor
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    Label {
+                        Layout.fillWidth: true
+                        visible: controller.comparisonCityCount > 0
+                                 && controller.comparisonDateOptions.length === 0
+                        text: qsTr("Waiting for forecast dates from selected cities…")
+                        color: ThemeModule.Theme.textSecondary
+                        font.family: ThemeModule.Theme.fontFamily
+                        font.pixelSize: 11
+                    }
+                    GridLayout {
+                        id: comparisonGrid
+                        Layout.fillWidth: true
+                        columns: width >= 900 ? 2 : 1
+                        rowSpacing: 12
+                        columnSpacing: 12
+
+                        Repeater {
+                            model: controller.comparisonCities
+                            delegate: Shared.AppCard {
+                                required property string identity
+                                required property string name
+                                required property string administrativeArea
+                                required property string country
+                                required property string timezone
+                                required property string localDateTime
+                                required property string lastSuccessfulRefresh
+                                required property bool loading
+                                required property string error
+                                required property bool hasForecast
+                                required property string selectedForecastDate
+                                required property var forecast
+                                required property int index
+
+                                readonly property var selectedDay:
+                                    root.selectedForecastDay(forecast, selectedForecastDate)
+
+                                Layout.fillWidth: true
+                                Layout.minimumWidth: comparisonGrid.columns === 2 ? 360 : 0
+                                padding: 14
+
+                                ColumnLayout {
+                                    width: parent.width
+                                    spacing: 9
+
+                                    Label {
+                                        Layout.fillWidth: true
+                                        text: [name, administrativeArea, country]
+                                            .filter(function(part) { return String(part).length > 0 })
+                                            .join(", ")
+                                        color: ThemeModule.Theme.textPrimary
+                                        font.family: ThemeModule.Theme.fontFamily
+                                        font.pixelSize: 16
+                                        font.weight: Font.DemiBold
+                                        wrapMode: Text.Wrap
+                                    }
+                                    Label {
+                                        Layout.fillWidth: true
+                                        text: localDateTime.length > 0
+                                              ? qsTr("Local time · %1 (%2)").arg(localDateTime).arg(timezone)
+                                              : timezone.length > 0
+                                                ? qsTr("Local time unavailable · %1").arg(timezone)
+                                                : qsTr("Local time unavailable")
+                                        color: ThemeModule.Theme.textSecondary
+                                        font.family: ThemeModule.Theme.fontFamily
+                                        font.pixelSize: 11
+                                        wrapMode: Text.Wrap
+                                    }
+
+                                    Label {
+                                        Layout.fillWidth: true
+                                        text: qsTr("Current")
+                                        color: ThemeModule.Theme.textSecondary
+                                        font.family: ThemeModule.Theme.fontFamily
+                                        font.pixelSize: 11
+                                        font.weight: Font.DemiBold
+                                    }
+                                    RowLayout {
+                                        Layout.fillWidth: true
+                                        spacing: 10
+                                        Label {
+                                            text: forecast.current && forecast.current.icon
+                                                  ? forecast.current.icon : "🌡️"
+                                            color: ThemeModule.Theme.textPrimary
+                                            font.pixelSize: 34
+                                        }
+                                        ColumnLayout {
+                                            Layout.fillWidth: true
+                                            spacing: 2
+                                            RowLayout {
+                                                Layout.fillWidth: true
+                                                Label {
+                                                    text: root.celsius(
+                                                        forecast.current ? forecast.current.temperature : 0,
+                                                        forecast.current && forecast.current.hasTemperature === true)
+                                                    color: ThemeModule.Theme.textPrimary
+                                                    font.family: ThemeModule.Theme.fontFamily
+                                                    font.pixelSize: 29
+                                                    font.weight: Font.Bold
+                                                }
+                                                Label {
+                                                    Layout.fillWidth: true
+                                                    text: forecast.current && forecast.current.condition
+                                                          ? forecast.current.condition
+                                                          : qsTr("Condition unavailable")
+                                                    color: ThemeModule.Theme.textSecondary
+                                                    font.family: ThemeModule.Theme.fontFamily
+                                                    font.pixelSize: 12
+                                                    wrapMode: Text.Wrap
+                                                }
+                                            }
+                                            Label {
+                                                Layout.fillWidth: true
+                                                text: qsTr("Feels like %1 · Wind %2")
+                                                    .arg(root.celsius(
+                                                        forecast.current ? forecast.current.feelsLike : 0,
+                                                        forecast.current && forecast.current.hasFeelsLike === true))
+                                                    .arg(root.windSpeed(
+                                                        forecast.current ? forecast.current.wind : 0,
+                                                        forecast.current && forecast.current.hasWind === true))
+                                                color: ThemeModule.Theme.textSecondary
+                                                font.family: ThemeModule.Theme.fontFamily
+                                                font.pixelSize: 11
+                                                wrapMode: Text.Wrap
+                                            }
+                                        }
+                                    }
+
+                                    Label {
+                                        Layout.fillWidth: true
+                                        text: root.comparisonCardDateText(
+                                            selectedDay !== null, hasForecast, loading,
+                                            controller.comparisonSelectedDate)
+                                        color: ThemeModule.Theme.textPrimary
+                                        font.family: ThemeModule.Theme.fontFamily
+                                        font.pixelSize: 12
+                                        font.weight: Font.DemiBold
+                                    }
+                                    GridLayout {
+                                        Layout.fillWidth: true
+                                        columns: 3
+                                        columnSpacing: 8
+                                        visible: controller.comparisonSelectedDate.length > 0
+                                        ColumnLayout {
+                                            Layout.fillWidth: true
+                                            spacing: 2
+                                            Label {
+                                                text: qsTr("High")
+                                                color: ThemeModule.Theme.textSecondary
+                                                font.pixelSize: 10
+                                            }
+                                            Label {
+                                                text: selectedDay
+                                                      ? root.celsius(selectedDay.maximum,
+                                                          selectedDay.maximum !== undefined
+                                                          && selectedDay.maximum !== null)
+                                                      : "—"
+                                                color: ThemeModule.Theme.textPrimary
+                                                font.family: ThemeModule.Theme.fontFamily
+                                                font.pixelSize: 14
+                                                font.weight: Font.DemiBold
+                                            }
+                                        }
+                                        ColumnLayout {
+                                            Layout.fillWidth: true
+                                            spacing: 2
+                                            Label {
+                                                text: qsTr("Low")
+                                                color: ThemeModule.Theme.textSecondary
+                                                font.pixelSize: 10
+                                            }
+                                            Label {
+                                                text: selectedDay
+                                                      ? root.celsius(selectedDay.minimum,
+                                                          selectedDay.minimum !== undefined
+                                                          && selectedDay.minimum !== null)
+                                                      : "—"
+                                                color: ThemeModule.Theme.textPrimary
+                                                font.family: ThemeModule.Theme.fontFamily
+                                                font.pixelSize: 14
+                                                font.weight: Font.DemiBold
+                                            }
+                                        }
+                                        ColumnLayout {
+                                            Layout.fillWidth: true
+                                            spacing: 2
+                                            Label {
+                                                text: qsTr("Precipitation")
+                                                color: ThemeModule.Theme.textSecondary
+                                                font.pixelSize: 10
+                                            }
+                                            Label {
+                                                text: selectedDay
+                                                      && selectedDay.precipitationProbability !== undefined
+                                                      && selectedDay.precipitationProbability !== null
+                                                      ? qsTr("%1%").arg(Math.round(selectedDay.precipitationProbability))
+                                                      : "—"
+                                                color: ThemeModule.Theme.textPrimary
+                                                font.family: ThemeModule.Theme.fontFamily
+                                                font.pixelSize: 14
+                                                font.weight: Font.DemiBold
+                                            }
+                                        }
+                                    }
+
+                                    Label {
+                                        Layout.fillWidth: true
+                                        visible: loading || error.length > 0
+                                        text: error.length > 0 ? error
+                                              : hasForecast ? qsTr("Refreshing · showing saved forecast")
+                                              : qsTr("Loading forecast…")
+                                        color: error.length > 0 ? ThemeModule.Theme.warning
+                                              : ThemeModule.Theme.textSecondary
+                                        font.family: ThemeModule.Theme.fontFamily
+                                        font.pixelSize: 11
+                                        wrapMode: Text.Wrap
+                                    }
+                                    Label {
+                                        Layout.fillWidth: true
+                                        visible: lastSuccessfulRefresh.length > 0
+                                        text: qsTr("Last successful update %1")
+                                            .arg(new Date(lastSuccessfulRefresh).toLocaleString())
+                                        color: ThemeModule.Theme.textSecondary
+                                        font.family: ThemeModule.Theme.fontFamily
+                                        font.pixelSize: 10
+                                        wrapMode: Text.Wrap
+                                    }
+
+                                    Shared.AppButton {
+                                        Layout.fillWidth: true
+                                        visible: controller.canReplaceSearchedCity
+                                        quiet: true
+                                        text: qsTr("Replace with %1").arg(controller.cityLocation)
+                                        Accessible.name: qsTr("Replace %1 with %2")
+                                            .arg(name).arg(controller.cityLocation)
+                                        enabled: !controller.comparisonMutationPending
+                                        onClicked: controller.replaceComparisonCity(identity)
+                                    }
+
+                                    RowLayout {
+                                        Layout.fillWidth: true
+                                        spacing: 6
+                                        Shared.AppButton {
+                                            Layout.fillWidth: true
+                                            quiet: true
+                                            text: loading ? qsTr("Cancel refresh") : qsTr("Refresh")
+                                            Accessible.name: loading
+                                                ? qsTr("Cancel refresh for %1").arg(name)
+                                                : qsTr("Refresh forecast for %1").arg(name)
+                                            onClicked: loading
+                                                ? controller.cancelComparisonCityRefresh(identity)
+                                                : controller.refreshComparisonCity(identity)
+                                        }
+                                        Shared.AppButton {
+                                            text: qsTr("↑")
+                                            quiet: true
+                                            implicitWidth: 40
+                                            Layout.preferredWidth: 40
+                                            enabled: index > 0 && !controller.comparisonMutationPending
+                                            Accessible.name: qsTr("Move %1 earlier").arg(name)
+                                            onClicked: controller.moveComparisonCity(identity, -1)
+                                        }
+                                        Shared.AppButton {
+                                            text: qsTr("↓")
+                                            quiet: true
+                                            implicitWidth: 40
+                                            Layout.preferredWidth: 40
+                                            enabled: index < controller.comparisonCityCount - 1
+                                                     && !controller.comparisonMutationPending
+                                            Accessible.name: qsTr("Move %1 later").arg(name)
+                                            onClicked: controller.moveComparisonCity(identity, 1)
+                                        }
+                                        Shared.AppButton {
+                                            text: qsTr("×")
+                                            quiet: true
+                                            implicitWidth: 40
+                                            Layout.preferredWidth: 40
+                                            Accessible.name: qsTr("Remove %1 from comparison").arg(name)
+                                            enabled: !controller.comparisonMutationPending
+                                            onClicked: controller.removeComparisonCity(identity)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        visible: root.showComparisonTable && controller.comparisonCityCount > 0
+                        spacing: 7
+                        Label {
+                            Layout.fillWidth: true
+                            text: qsTr("Daily rows use the shared provider-local calendar date; unavailable cities are marked.")
+                            color: ThemeModule.Theme.textSecondary
+                            font.family: ThemeModule.Theme.fontFamily
+                            font.pixelSize: 11
+                            wrapMode: Text.Wrap
+                        }
+                        Flickable {
+                            id: comparisonTableFlick
+                            property int metricColumnWidth: 154
+                            property int minimumCityColumnWidth: 176
+                            Layout.fillWidth: true
+                            Layout.preferredHeight: comparisonTableColumn.implicitHeight + 12
+                            implicitHeight: comparisonTableColumn.implicitHeight + 12
+                            clip: true
+                            contentWidth: Math.max(width,
+                                metricColumnWidth + controller.comparisonCityCount * minimumCityColumnWidth)
+                            contentHeight: comparisonTableColumn.implicitHeight
+                            flickableDirection: Flickable.HorizontalFlick
+                            boundsBehavior: Flickable.StopAtBounds
+                            ScrollBar.horizontal: ThemeModule.AppScrollBar {
+                                policy: ScrollBar.AsNeeded
+                            }
+
+                            ColumnLayout {
+                                id: comparisonTableColumn
+                                x: 0
+                                y: 0
+                                width: comparisonTableFlick.contentWidth
+                                spacing: 0
+
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    spacing: 0
+                                    Rectangle {
+                                        Layout.preferredWidth: comparisonTableFlick.metricColumnWidth
+                                        Layout.minimumWidth: comparisonTableFlick.metricColumnWidth
+                                        Layout.preferredHeight: 88
+                                        color: ThemeModule.Theme.selectionBlue
+                                        border.color: ThemeModule.Theme.borderColor
+                                        Label {
+                                            anchors.fill: parent
+                                            anchors.margins: 8
+                                            text: qsTr("Metric")
+                                            color: ThemeModule.Theme.textPrimary
+                                            font.family: ThemeModule.Theme.fontFamily
+                                            font.pixelSize: 12
+                                            font.weight: Font.DemiBold
+                                            verticalAlignment: Text.AlignVCenter
+                                        }
+                                    }
+                                    Repeater {
+                                        model: controller.comparisonTableHeaders
+                                        delegate: Rectangle {
+                                            required property var modelData
+                                            Layout.fillWidth: true
+                                            Layout.minimumWidth: comparisonTableFlick.minimumCityColumnWidth
+                                            Layout.preferredWidth: (comparisonTableFlick.contentWidth
+                                                - comparisonTableFlick.metricColumnWidth)
+                                                / Math.max(1, controller.comparisonCityCount)
+                                            Layout.preferredHeight: 88
+                                            color: ThemeModule.Theme.selectionBlue
+                                            border.color: ThemeModule.Theme.borderColor
+                                            Accessible.name: modelData.name
+                                            ColumnLayout {
+                                                anchors.fill: parent
+                                                anchors.margins: 7
+                                                spacing: 3
+                                                Label {
+                                                    Layout.fillWidth: true
+                                                    text: modelData.name
+                                                    color: ThemeModule.Theme.textPrimary
+                                                    font.family: ThemeModule.Theme.fontFamily
+                                                    font.pixelSize: 11
+                                                    font.weight: Font.DemiBold
+                                                    wrapMode: Text.Wrap
+                                                }
+                                                Label {
+                                                    Layout.fillWidth: true
+                                                    text: root.comparisonTableDateText(
+                                                        modelData.dateAvailable, modelData.loading,
+                                                        modelData.hasForecast, modelData.date)
+                                                    color: ThemeModule.Theme.textSecondary
+                                                    font.family: ThemeModule.Theme.fontFamily
+                                                    font.pixelSize: 10
+                                                    wrapMode: Text.Wrap
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+
+                                Repeater {
+                                    model: controller.comparisonTableRows
+                                    delegate: RowLayout {
+                                        id: metricRow
+                                        required property var modelData
+                                        required property int index
+                                        readonly property string metricKey: modelData.key
+                                        Layout.fillWidth: true
+                                        spacing: 0
+
+                                        Rectangle {
+                                            Layout.preferredWidth: comparisonTableFlick.metricColumnWidth
+                                            Layout.minimumWidth: comparisonTableFlick.metricColumnWidth
+                                            Layout.preferredHeight: 48
+                                            color: ThemeModule.Theme.insetSurface
+                                            border.color: ThemeModule.Theme.borderColor
+                                            Label {
+                                                anchors.fill: parent
+                                                anchors.margins: 8
+                                                text: root.comparisonMetricLabel(metricRow.metricKey)
+                                                color: ThemeModule.Theme.textSecondary
+                                                font.family: ThemeModule.Theme.fontFamily
+                                                font.pixelSize: 11
+                                                wrapMode: Text.Wrap
+                                                verticalAlignment: Text.AlignVCenter
+                                            }
+                                        }
+                                        Repeater {
+                                            model: modelData.values
+                                            delegate: Rectangle {
+                                                required property var modelData
+                                                Layout.fillWidth: true
+                                                Layout.minimumWidth: comparisonTableFlick.minimumCityColumnWidth
+                                                Layout.preferredWidth: (comparisonTableFlick.contentWidth
+                                                    - comparisonTableFlick.metricColumnWidth)
+                                                    / Math.max(1, controller.comparisonCityCount)
+                                                Layout.preferredHeight: 48
+                                                color: metricRow.index % 2 === 0
+                                                       ? ThemeModule.Theme.raisedSurface
+                                                       : ThemeModule.Theme.insetSurface
+                                                border.color: ThemeModule.Theme.borderColor
+                                                Label {
+                                                    anchors.fill: parent
+                                                    anchors.margins: 8
+                                                    text: modelData.text
+                                                    color: modelData.text === "—"
+                                                          ? ThemeModule.Theme.textDisabled
+                                                          : ThemeModule.Theme.textPrimary
+                                                    font.family: ThemeModule.Theme.fontFamily
+                                                    font.pixelSize: 11
+                                                    wrapMode: Text.Wrap
+                                                    verticalAlignment: Text.AlignVCenter
+                                                    Accessible.name: qsTr("%1 for %2")
+                                                        .arg(root.comparisonMetricLabel(metricRow.metricKey))
+                                                        .arg(modelData.city)
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
+    }
+
+    Timer {
+        interval: 60 * 1000
+        repeat: true
+        running: root.visible
+                 && (controller.primaryForecast.count > 0 || controller.cityForecast.count > 0
+                     || controller.comparisonCityCount > 0)
+        onTriggered: controller.updateSolarInfo()
     }
 }

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <QDateTime>
 #include <QVector>
 #include <QString>
 
@@ -20,6 +21,9 @@ struct WeatherDay final {
     double maximumCelsius{0.0};
     double minimumCelsius{0.0};
     double precipitationProbability{0.0};
+    std::optional<QDateTime> sunriseUtc;
+    std::optional<QDateTime> sunsetUtc;
+    std::optional<double> daylightDurationSeconds;
 };
 
 struct WeatherForecast final {
@@ -29,12 +33,24 @@ struct WeatherForecast final {
 };
 
 struct WeatherCity final {
+    qint64 geocodingId{0};
     QString name;
     QString administrativeArea;
     QString country;
+    QString timezone;
     double latitude{0.0};
     double longitude{0.0};
     bool found{false};
+};
+
+struct WeatherComparisonCity final {
+    WeatherCity city;
+    WeatherForecast forecast;
+    QString lastSuccessfulRefresh;
+    QString selectedForecastDate;
+    QString localDateTime;
+    QString error;
+    bool loading{false};
 };
 
 struct CurrencyRate final {
@@ -61,5 +77,7 @@ bool isValidCurrencyCode(const QString &value);
 bool isValidCurrencyAmount(double amount) noexcept;
 std::optional<CurrencyPairCode> parseCurrencyPair(QString value);
 bool isValidWeatherCoordinates(double latitude, double longitude) noexcept;
+QString stableWeatherCityIdentity(const WeatherCity &city);
+bool isSameWeatherLocation(const WeatherCity &left, const WeatherCity &right) noexcept;
 
 } // namespace something::domain

@@ -2,12 +2,14 @@
 
 #include "../application/application_service_graph.h"
 #include "../domain/clock.h"
+#include "../models/weather_comparison_model.h"
 #include "../models/weather_forecast_model.h"
 #include "../platform/location_provider.h"
 
 #include <QObject>
 #include <QHash>
 #include <QString>
+#include <QVariantList>
 #include <QVariantMap>
 
 namespace something::controllers {
@@ -16,19 +18,37 @@ class WeatherController final : public QObject {
     Q_OBJECT
     Q_PROPERTY(something::models::WeatherForecastModel *primaryForecast READ primaryForecast CONSTANT)
     Q_PROPERTY(something::models::WeatherForecastModel *cityForecast READ cityForecast CONSTANT)
+    Q_PROPERTY(something::models::WeatherComparisonModel *comparisonCities READ comparisonCities CONSTANT)
     Q_PROPERTY(QVariantMap primaryCurrent READ primaryCurrent NOTIFY primaryChanged)
     Q_PROPERTY(QVariantMap primaryToday READ primaryToday NOTIFY primaryChanged)
+    Q_PROPERTY(QVariantMap primarySolar READ primarySolar NOTIFY primaryChanged)
+    Q_PROPERTY(QString primarySelectedDate READ primarySelectedDate NOTIFY primaryChanged)
     Q_PROPERTY(QVariantMap cityCurrent READ cityCurrent NOTIFY cityChanged)
+    Q_PROPERTY(QVariantMap citySolar READ citySolar NOTIFY cityChanged)
+    Q_PROPERTY(QString citySelectedDate READ citySelectedDate NOTIFY cityChanged)
     Q_PROPERTY(QString primaryLocation READ primaryLocation NOTIFY primaryChanged)
     Q_PROPERTY(QString primaryUpdatedAt READ primaryUpdatedAt NOTIFY primaryChanged)
     Q_PROPERTY(QString primaryStatus READ primaryStatus NOTIFY primaryChanged)
     Q_PROPERTY(QString primaryError READ primaryError NOTIFY primaryChanged)
     Q_PROPERTY(QString cityLocation READ cityLocation NOTIFY cityChanged)
+    Q_PROPERTY(QString cityUpdatedAt READ cityUpdatedAt NOTIFY cityChanged)
     Q_PROPERTY(QString cityError READ cityError NOTIFY cityChanged)
+    Q_PROPERTY(QVariantList cityCandidates READ cityCandidates NOTIFY cityChanged)
+    Q_PROPERTY(int comparisonCityCount READ comparisonCityCount NOTIFY comparisonChanged)
+    Q_PROPERTY(QVariantList comparisonTableHeaders READ comparisonTableHeaders NOTIFY comparisonChanged)
+    Q_PROPERTY(QVariantList comparisonTableRows READ comparisonTableRows NOTIFY comparisonChanged)
+    Q_PROPERTY(QVariantList comparisonDateOptions READ comparisonDateOptions NOTIFY comparisonChanged)
+    Q_PROPERTY(QString comparisonSelectedDate READ comparisonSelectedDate NOTIFY comparisonChanged)
+    Q_PROPERTY(bool canAddSearchedCity READ canAddSearchedCity NOTIFY comparisonChanged)
+    Q_PROPERTY(bool canReplaceSearchedCity READ canReplaceSearchedCity NOTIFY comparisonChanged)
+    Q_PROPERTY(bool searchedCityAlreadyAdded READ searchedCityAlreadyAdded NOTIFY comparisonChanged)
     Q_PROPERTY(bool primaryLoading READ primaryLoading NOTIFY primaryChanged)
     Q_PROPERTY(bool primaryRefreshing READ primaryRefreshing NOTIFY primaryChanged)
     Q_PROPERTY(bool citySearching READ citySearching NOTIFY cityChanged)
     Q_PROPERTY(bool locationAvailable READ locationAvailable NOTIFY primaryChanged)
+    Q_PROPERTY(bool comparisonStorageLoading READ comparisonStorageLoading NOTIFY comparisonChanged)
+    Q_PROPERTY(bool comparisonMutationPending READ comparisonMutationPending NOTIFY comparisonChanged)
+    Q_PROPERTY(QString comparisonStorageError READ comparisonStorageError NOTIFY comparisonChanged)
 
 public:
     WeatherController(application::ApplicationServiceGraph *graph,
@@ -38,33 +58,67 @@ public:
 
     models::WeatherForecastModel *primaryForecast() noexcept { return &m_primaryForecast; }
     models::WeatherForecastModel *cityForecast() noexcept { return &m_cityForecast; }
+    models::WeatherComparisonModel *comparisonCities() noexcept { return &m_comparisonCities; }
     QVariantMap primaryCurrent() const { return m_primaryCurrent; }
     QVariantMap primaryToday() const { return m_primaryToday; }
+    QVariantMap primarySolar() const { return m_primarySolar; }
+    QString primarySelectedDate() const { return m_primarySelectedDate; }
     QVariantMap cityCurrent() const { return m_cityCurrent; }
+    QVariantMap citySolar() const { return m_citySolar; }
+    QString citySelectedDate() const { return m_citySelectedDate; }
     QString primaryLocation() const { return m_primaryLocation; }
     QString primaryUpdatedAt() const { return m_primaryUpdatedAt; }
     QString primaryStatus() const { return m_primaryStatus; }
     QString primaryError() const { return m_primaryError; }
     QString cityLocation() const { return m_cityLocation; }
+    QString cityUpdatedAt() const { return m_cityUpdatedAt; }
     QString cityError() const { return m_cityError; }
+    QVariantList cityCandidates() const;
+    int comparisonCityCount() const noexcept { return m_comparisonCities.count(); }
+    QVariantList comparisonTableHeaders() const;
+    QVariantList comparisonTableRows() const;
+    QVariantList comparisonDateOptions() const;
+    QString comparisonSelectedDate() const { return m_comparisonSelectedDate; }
+    bool canAddSearchedCity() const noexcept;
+    bool canReplaceSearchedCity() const noexcept;
+    bool searchedCityAlreadyAdded() const noexcept;
     bool primaryLoading() const noexcept { return m_primaryLoading; }
     bool primaryRefreshing() const noexcept { return m_primaryRefreshing; }
     bool citySearching() const noexcept { return m_citySearching; }
     bool locationAvailable() const noexcept { return m_locationAvailable; }
+    bool comparisonStorageLoading() const noexcept { return !m_comparisonLoaded; }
+    bool comparisonMutationPending() const noexcept { return m_comparisonMutationPending; }
+    QString comparisonStorageError() const { return m_comparisonStorageError; }
 
     Q_INVOKABLE void refreshPrimary();
     Q_INVOKABLE void requestDeviceLocation();
     Q_INVOKABLE void searchCity(QString city);
     Q_INVOKABLE void cancelCitySearch();
+    Q_INVOKABLE void selectCityCandidate(int candidateIndex);
+    Q_INVOKABLE bool addSearchedCityToComparison();
+    Q_INVOKABLE void replaceComparisonCity(QString identity);
+    Q_INVOKABLE void removeComparisonCity(QString identity);
+    Q_INVOKABLE void moveComparisonCity(QString identity, int offset);
+    Q_INVOKABLE void refreshComparisonCity(QString identity);
+    Q_INVOKABLE void refreshAllComparisonCities();
+    Q_INVOKABLE void cancelComparisonCityRefresh(QString identity);
+    Q_INVOKABLE void selectComparisonForecastDate(QString date);
+    Q_INVOKABLE void updateSolarInfo();
+    Q_INVOKABLE void selectPrimaryForecastDate(QString date);
+    Q_INVOKABLE void selectCityForecastDate(QString date);
 
 signals:
     void primaryChanged();
     void cityChanged();
+    void comparisonChanged();
 
 private:
     enum class Kind { LoadPrimary, NativeLocation, PrimaryForecast, PrimaryParse,
                       PrimarySave, CityGeocode, CityGeocodeParse,
-                      CityForecast, CityForecastParse };
+                      CityForecast, CityForecastParse,
+                      LoadComparison, AddComparisonCity, RemoveComparisonCity,
+                      ReplaceComparisonCity, ReorderComparisonCities, SaveComparisonForecast,
+                      ComparisonForecast, ComparisonForecastParse };
     struct Pending final {
         Kind kind{Kind::LoadPrimary};
         quint64 generation{0};
@@ -73,6 +127,9 @@ private:
         bool saveLocation{false};
         domain::WeatherCity city;
         QString updatedAt;
+        domain::WeatherForecast forecast;
+        QString identity;
+        int destinationRow{-1};
     };
 
     void onLifecycleState(application::ApplicationLifecycle::State state);
@@ -94,10 +151,14 @@ private:
     void cancelPending(quint64 id);
     void cancelPrimaryOperations();
     void cancelCityOperations();
+    void cancelComparisonCityOperations(const QString &identity);
+    void cancelComparisonOperations();
     void beginPrimaryLoad();
+    void beginComparisonLoad();
     void beginPrimaryForecast(double latitude, double longitude,
                               bool saveLocation, quint64 generation);
     void beginCityForecast(const domain::WeatherCity &city, quint64 generation);
+    void beginComparisonForecast(const domain::WeatherCity &city, quint64 generation);
     void savePrimaryForecast(const domain::WeatherForecast &forecast,
                              double latitude, double longitude,
                              bool saveLocation, quint64 generation);
@@ -105,6 +166,8 @@ private:
                         bool fromCache);
     void publishCity(const domain::WeatherCity &city,
                      const domain::WeatherForecast &forecast);
+    void updateComparisonLocalTimes();
+    void reconcileComparisonDate();
     void setPrimaryError(domain::AppError error, const QString &fallback);
     void setCityError(domain::AppError error, const QString &fallback);
     void requestNativeLocation(quint64 generation);
@@ -114,17 +177,30 @@ private:
     platform::LocationProvider *m_locationProvider{nullptr};
     models::WeatherForecastModel m_primaryForecast;
     models::WeatherForecastModel m_cityForecast;
+    models::WeatherComparisonModel m_comparisonCities;
+    QVector<domain::WeatherCity> m_cityCandidates;
     QHash<quint64, Pending> m_pending;
     QHash<quint64, domain::WeatherForecast> m_stagedPrimary;
+    QHash<QString, quint64> m_comparisonGenerations;
     QVariantMap m_primaryCurrent;
     QVariantMap m_primaryToday;
+    QVariantMap m_primarySolar;
+    QString m_primarySelectedDate;
     QVariantMap m_cityCurrent;
+    QVariantMap m_citySolar;
+    QString m_citySelectedDate;
+    domain::WeatherForecast m_primarySolarForecast;
+    domain::WeatherForecast m_citySolarForecast;
     QString m_primaryLocation{QStringLiteral("Your location")};
     QString m_primaryUpdatedAt;
     QString m_primaryStatus;
     QString m_primaryError;
     QString m_cityLocation;
+    QString m_cityUpdatedAt;
+    QString m_cityUpdatedAtUtc;
     QString m_cityError;
+    QString m_cityGeocodeQueryKey;
+    domain::WeatherCity m_searchedCity;
     quint64 m_primaryGeneration{0};
     quint64 m_cityGeneration{0};
     quint64 m_locationOperation{0};
@@ -136,6 +212,13 @@ private:
     bool m_primaryLoading{false};
     bool m_primaryRefreshing{false};
     bool m_citySearching{false};
+    bool m_cityGeocoding{false};
+    bool m_hasSearchedCity{false};
+    bool m_comparisonLoaded{false};
+    bool m_comparisonMutationPending{false};
+    bool m_comparisonDateUserSelected{false};
+    QString m_comparisonSelectedDate;
+    QString m_comparisonStorageError;
 };
 
 } // namespace something::controllers
