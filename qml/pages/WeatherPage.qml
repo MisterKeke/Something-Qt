@@ -270,9 +270,72 @@ Item {
                         width: 28
                         height: 28
                     }
+                    Label {
+                        Layout.fillWidth: true
+                        visible: controller.cityCandidates.length > 1
+                        text: qsTr("Choose the location that matches your search.")
+                        color: ThemeModule.Theme.textSecondary
+                        font.family: ThemeModule.Theme.fontFamily
+                        font.pixelSize: 12
+                        wrapMode: Text.Wrap
+                    }
+                    Repeater {
+                        model: controller.cityCandidates
+                        delegate: Shared.AppCard {
+                            required property var modelData
+                            required property int index
+                            Layout.fillWidth: true
+                            visible: controller.cityCandidates.length > 1
+                            padding: 10
+                            RowLayout {
+                                width: parent.width
+                                spacing: 10
+                                ColumnLayout {
+                                    Layout.fillWidth: true
+                                    spacing: 3
+                                    Label {
+                                        Layout.fillWidth: true
+                                        text: modelData.name
+                                        color: ThemeModule.Theme.textPrimary
+                                        font.family: ThemeModule.Theme.fontFamily
+                                        font.pixelSize: 14
+                                        font.weight: Font.DemiBold
+                                        wrapMode: Text.Wrap
+                                    }
+                                    Label {
+                                        Layout.fillWidth: true
+                                        text: [modelData.administrativeArea, modelData.country]
+                                            .filter(function(part) { return String(part).length > 0 })
+                                            .join(", ")
+                                        color: ThemeModule.Theme.textSecondary
+                                        font.family: ThemeModule.Theme.fontFamily
+                                        font.pixelSize: 11
+                                        wrapMode: Text.Wrap
+                                    }
+                                    Label {
+                                        Layout.fillWidth: true
+                                        text: qsTr("%1, %2").arg(Number(modelData.latitude).toFixed(4))
+                                            .arg(Number(modelData.longitude).toFixed(4))
+                                        color: ThemeModule.Theme.textSecondary
+                                        font.family: ThemeModule.Theme.fontFamily
+                                        font.pixelSize: 10
+                                    }
+                                }
+                                Shared.AppButton {
+                                    text: qsTr("Choose")
+                                    Accessible.name: qsTr("Choose %1 at %2, %3")
+                                        .arg(modelData.name)
+                                        .arg(Number(modelData.latitude).toFixed(4))
+                                        .arg(Number(modelData.longitude).toFixed(4))
+                                    onClicked: controller.selectCityCandidate(index)
+                                }
+                            }
+                        }
+                    }
                     Shared.StatePanel {
                         Layout.fillWidth: true
                         visible: controller.cityForecast.count === 0 && !controller.citySearching
+                                 && controller.cityCandidates.length === 0
                         height: visible ? implicitHeight : 0
                         state: controller.cityError.length ? "error" : "empty"
                         title: controller.cityError.length ? qsTr("City forecast unavailable") : qsTr("Search for a city")
@@ -298,6 +361,28 @@ Item {
                             font.weight: Font.Bold
                         }
                         Label { text: controller.cityCurrent.condition || qsTr("Weather unavailable"); color: ThemeModule.Theme.textSecondary; font.pixelSize: 12 }
+                    }
+                    RowLayout {
+                        Layout.fillWidth: true
+                        visible: controller.cityForecast.count > 0
+                        Shared.AppButton {
+                            text: controller.searchedCityAlreadyAdded
+                                  ? qsTr("Already in comparison")
+                                  : controller.comparisonCityCount >= 4
+                                    ? qsTr("Comparison list full") : qsTr("Add to comparison")
+                            enabled: controller.canAddSearchedCity
+                            Accessible.name: qsTr("Add %1 to city comparison").arg(controller.cityLocation)
+                            onClicked: controller.addSearchedCityToComparison()
+                        }
+                        Label {
+                            Layout.fillWidth: true
+                            visible: controller.cityUpdatedAt.length > 0
+                            text: qsTr("Updated %1").arg(controller.cityUpdatedAt)
+                            color: ThemeModule.Theme.textSecondary
+                            font.family: ThemeModule.Theme.fontFamily
+                            font.pixelSize: 11
+                            wrapMode: Text.Wrap
+                        }
                     }
                     Shared.WeatherSolarSection {
                         Layout.fillWidth: true
@@ -340,6 +425,116 @@ Item {
                                     Label { anchors.horizontalCenter: parent.horizontalCenter; text: root.formatDate(date); color: ThemeModule.Theme.textPrimary; font.pixelSize: 11 }
                                     Label { anchors.horizontalCenter: parent.horizontalCenter; text: icon; color: ThemeModule.Theme.textPrimary; font.pixelSize: 17 }
                                     Label { anchors.horizontalCenter: parent.horizontalCenter; text: qsTr("%1° / %2°").arg(Math.round(maximum)).arg(Math.round(minimum)); color: ThemeModule.Theme.textSecondary; font.pixelSize: ThemeModule.Theme.metadataFontSize }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            Shared.AppCard {
+                Layout.fillWidth: true
+                visible: controller.comparisonCityCount > 0
+                padding: 18
+                ColumnLayout {
+                    width: parent.width
+                    spacing: 10
+                    RowLayout {
+                        Layout.fillWidth: true
+                        Label {
+                            Layout.fillWidth: true
+                            text: qsTr("Comparison cities · %1 of 4").arg(controller.comparisonCityCount)
+                            color: ThemeModule.Theme.textPrimary
+                            font.family: ThemeModule.Theme.fontFamily
+                            font.pixelSize: 18
+                            font.weight: Font.DemiBold
+                        }
+                    }
+                    Label {
+                        Layout.fillWidth: true
+                        text: controller.comparisonCityCount < 2
+                              ? qsTr("Add one more city to compare forecasts.")
+                              : qsTr("These selections are separate from your saved primary location.")
+                        color: ThemeModule.Theme.textSecondary
+                        font.family: ThemeModule.Theme.fontFamily
+                        font.pixelSize: 12
+                        wrapMode: Text.Wrap
+                    }
+                    Repeater {
+                        model: controller.comparisonCities
+                        delegate: Rectangle {
+                            required property string identity
+                            required property string name
+                            required property string administrativeArea
+                            required property string country
+                            required property string timezone
+                            required property bool loading
+                            required property string error
+                            required property bool hasForecast
+                            required property int index
+                            Layout.fillWidth: true
+                            implicitHeight: cityRow.implicitHeight + 18
+                            radius: ThemeModule.Theme.panelRadius
+                            color: ThemeModule.Theme.raisedSurface
+                            border.color: ThemeModule.Theme.borderColor
+                            RowLayout {
+                                id: cityRow
+                                anchors.fill: parent
+                                anchors.margins: 9
+                                spacing: 8
+                                ColumnLayout {
+                                    Layout.fillWidth: true
+                                    spacing: 3
+                                    Label {
+                                        Layout.fillWidth: true
+                                        text: [name, administrativeArea, country]
+                                            .filter(function(part) { return String(part).length > 0 })
+                                            .join(", ")
+                                        color: ThemeModule.Theme.textPrimary
+                                        font.family: ThemeModule.Theme.fontFamily
+                                        font.pixelSize: 13
+                                        font.weight: Font.DemiBold
+                                        wrapMode: Text.Wrap
+                                    }
+                                    Label {
+                                        Layout.fillWidth: true
+                                        text: loading ? qsTr("Loading forecast…")
+                                              : error.length > 0 ? error
+                                              : hasForecast ? qsTr("Forecast available")
+                                              : qsTr("Waiting for forecast")
+                                        color: error.length > 0 ? ThemeModule.Theme.warning
+                                              : ThemeModule.Theme.textSecondary
+                                        font.family: ThemeModule.Theme.fontFamily
+                                        font.pixelSize: 11
+                                        wrapMode: Text.Wrap
+                                    }
+                                    Label {
+                                        Layout.fillWidth: true
+                                        text: timezone.length > 0 ? timezone : qsTr("Timezone unavailable")
+                                        color: ThemeModule.Theme.textSecondary
+                                        font.family: ThemeModule.Theme.fontFamily
+                                        font.pixelSize: 10
+                                    }
+                                }
+                                Shared.AppButton {
+                                    text: qsTr("↑")
+                                    quiet: true
+                                    enabled: index > 0
+                                    Accessible.name: qsTr("Move %1 earlier").arg(name)
+                                    onClicked: controller.moveComparisonCity(identity, -1)
+                                }
+                                Shared.AppButton {
+                                    text: qsTr("↓")
+                                    quiet: true
+                                    enabled: index < controller.comparisonCityCount - 1
+                                    Accessible.name: qsTr("Move %1 later").arg(name)
+                                    onClicked: controller.moveComparisonCity(identity, 1)
+                                }
+                                Shared.AppButton {
+                                    text: qsTr("Remove")
+                                    quiet: true
+                                    Accessible.name: qsTr("Remove %1 from comparison").arg(name)
+                                    onClicked: controller.removeComparisonCity(identity)
                                 }
                             }
                         }

@@ -167,6 +167,32 @@ QVariantMap currentMap(const domain::WeatherCurrent &current)
     return result;
 }
 
+QVariantMap weatherCityMap(const domain::WeatherCity &city)
+{
+    return {{QStringLiteral("identity"), domain::stableWeatherCityIdentity(city)},
+            {QStringLiteral("geocodingId"), city.geocodingId},
+            {QStringLiteral("name"), city.name},
+            {QStringLiteral("administrativeArea"), city.administrativeArea},
+            {QStringLiteral("country"), city.country},
+            {QStringLiteral("timezone"), city.timezone},
+            {QStringLiteral("latitude"), city.latitude},
+            {QStringLiteral("longitude"), city.longitude}};
+}
+
+domain::WeatherCity weatherCityFromMap(const QVariantMap &values)
+{
+    domain::WeatherCity city;
+    city.geocodingId = values.value(QStringLiteral("geocodingId")).toLongLong();
+    city.name = values.value(QStringLiteral("name")).toString();
+    city.administrativeArea = values.value(QStringLiteral("administrativeArea")).toString();
+    city.country = values.value(QStringLiteral("country")).toString();
+    city.timezone = values.value(QStringLiteral("timezone")).toString();
+    city.latitude = values.value(QStringLiteral("latitude")).toDouble();
+    city.longitude = values.value(QStringLiteral("longitude")).toDouble();
+    city.found = true;
+    return city;
+}
+
 QUrl forecastUrl(double latitude, double longitude)
 {
     QUrl url(QStringLiteral("https://api.open-meteo.com/v1/forecast"));
@@ -187,7 +213,7 @@ QUrl geocodingUrl(const QString &city)
     QUrl url(QStringLiteral("https://geocoding-api.open-meteo.com/v1/search"));
     QUrlQuery query;
     query.addQueryItem(QStringLiteral("name"), city);
-    query.addQueryItem(QStringLiteral("count"), QStringLiteral("1"));
+    query.addQueryItem(QStringLiteral("count"), QStringLiteral("10"));
     query.addQueryItem(QStringLiteral("language"), QStringLiteral("en"));
     query.addQueryItem(QStringLiteral("format"), QStringLiteral("json"));
     url.setQuery(query);
@@ -256,6 +282,7 @@ WeatherController::WeatherController(application::ApplicationServiceGraph *graph
     , m_locationProvider(locationProvider)
     , m_primaryForecast(this)
     , m_cityForecast(this)
+    , m_comparisonCities(this)
     , m_locationAvailable(locationProvider && locationProvider->available())
 {
     Q_ASSERT(m_graph && m_clock && m_locationProvider);
@@ -268,6 +295,8 @@ WeatherController::WeatherController(application::ApplicationServiceGraph *graph
             this, &WeatherController::onValueJobFinished);
     connect(m_locationProvider, &platform::LocationProvider::positionReady,
             this, &WeatherController::onNativeLocationReady);
+    connect(&m_comparisonCities, &models::WeatherComparisonModel::contentsChanged,
+            this, &WeatherController::comparisonChanged);
     connect(&m_graph->lifecycle(), &application::ApplicationLifecycle::stateChanged,
             this, [this](application::ApplicationLifecycle::State state) { onLifecycleState(state); });
     connect(&m_graph->operations(), &application::OperationCoordinator::cancellationRequested,
@@ -301,8 +330,10 @@ void WeatherController::onLifecycleState(application::ApplicationLifecycle::Stat
         m_primaryLoading = false;
         m_primaryRefreshing = false;
         m_citySearching = false;
+        m_cityCandidates.clear();
         emit primaryChanged();
         emit cityChanged();
+        emit comparisonChanged();
     }
 }
 
@@ -355,15 +386,14 @@ quint64 WeatherController::submitParse(Kind kind, QByteArray body, QString fresh
                 return result;
             }
             if (kind == Kind::CityGeocodeParse) {
-                const auto parsed = providers::parseWeatherCitySearch(body);
+                const auto parsed = providers::parseWeatherCitySearchResults(body);
                 if (!parsed.succeeded()) result.error = parsed.error;
                 else {
-                    result.values.insert(QStringLiteral("found"), parsed.value.found);
-                    result.values.insert(QStringLiteral("name"), parsed.value.name);
-                    result.values.insert(QStringLiteral("administrativeArea"), parsed.value.administrativeArea);
-                    result.values.insert(QStringLiteral("country"), parsed.value.country);
-                    result.values.insert(QStringLiteral("latitude"), parsed.value.latitude);
-                    result.values.insert(QStringLiteral("longitude"), parsed.value.longitude);
+                    QVariantList candidates;
+                    candidates.reserve(parsed.value.size());
+                    for (const domain::WeatherCity &city : parsed.value)
+                        candidates.push_back(weatherCityMap(city));
+                    result.values.insert(QStringLiteral("candidates"), candidates);
                 }
                 return result;
             }
@@ -493,6 +523,11 @@ void WeatherController::searchCity(QString city)
     if (!m_ready) return;
     cancelCityOperations();
     const quint64 generation = ++m_cityGeneration;
+    m_cityCandidates.clear();
+    m_searchedCity = {};
+    m_hasSearchedCity = false;
+    m_cityUpdatedAt.clear();
+    m_cityUpdatedAtUtc.clear();
     m_cityForecast.clear();
     m_citySolarForecast = {};
     m_citySelectedDate.clear();
@@ -505,10 +540,12 @@ void WeatherController::searchCity(QString city)
     if (codePoints < 1 || codePoints > 100) {
         m_cityError = QStringLiteral("Enter a city name between 1 and 100 characters.");
         emit cityChanged();
+        emit comparisonChanged();
         return;
     }
     m_citySearching = true;
     emit cityChanged();
+    emit comparisonChanged();
     providers::ProviderRequest request;
     request.provider = providers::ProviderId::OpenMeteoGeocoding;
     request.url = geocodingUrl(city);
@@ -518,12 +555,80 @@ void WeatherController::searchCity(QString city)
                           QStringLiteral("City search is unavailable right now."));
 }
 
+void WeatherController::selectCityCandidate(int candidateIndex)
+{
+    if (!m_ready || candidateIndex < 0 || candidateIndex >= m_cityCandidates.size()) return;
+    const domain::WeatherCity city = m_cityCandidates.at(candidateIndex);
+    const quint64 generation = m_cityGeneration;
+    m_cityCandidates.clear();
+    m_searchedCity = city;
+    m_hasSearchedCity = true;
+    m_cityLocation = cityLabel(city);
+    m_cityUpdatedAt.clear();
+    m_cityUpdatedAtUtc.clear();
+    m_cityError.clear();
+    m_citySearching = true;
+    emit cityChanged();
+    emit comparisonChanged();
+    beginCityForecast(city, generation);
+}
+
+bool WeatherController::canAddSearchedCity() const noexcept
+{
+    return m_hasSearchedCity && !m_citySolarForecast.days.isEmpty()
+        && m_comparisonCities.count() < models::WeatherComparisonModel::maximumCities()
+        && !m_comparisonCities.containsCity(m_searchedCity);
+}
+
+bool WeatherController::searchedCityAlreadyAdded() const noexcept
+{
+    return m_hasSearchedCity && m_comparisonCities.containsCity(m_searchedCity);
+}
+
+QVariantList WeatherController::cityCandidates() const
+{
+    QVariantList result;
+    result.reserve(m_cityCandidates.size());
+    for (const domain::WeatherCity &city : m_cityCandidates)
+        result.push_back(weatherCityMap(city));
+    return result;
+}
+
+bool WeatherController::addSearchedCityToComparison()
+{
+    if (!canAddSearchedCity()) return false;
+    const bool added = m_comparisonCities.addCity(
+        m_searchedCity, m_citySolarForecast, m_cityUpdatedAtUtc);
+    if (added) {
+        emit comparisonChanged();
+        emit cityChanged();
+    }
+    return added;
+}
+
+void WeatherController::removeComparisonCity(QString identity)
+{
+    m_comparisonCities.removeCity(identity);
+}
+
+void WeatherController::moveComparisonCity(QString identity, int offset)
+{
+    if (offset != -1 && offset != 1) return;
+    const int sourceRow = m_comparisonCities.indexOfIdentity(identity);
+    if (sourceRow < 0) return;
+    const int destinationRow = sourceRow + offset;
+    if (destinationRow < 0 || destinationRow >= m_comparisonCities.count()) return;
+    m_comparisonCities.moveCity(identity, destinationRow);
+}
+
 void WeatherController::cancelCitySearch()
 {
     cancelCityOperations();
     ++m_cityGeneration;
+    m_cityCandidates.clear();
     m_citySearching = false;
     emit cityChanged();
+    emit comparisonChanged();
 }
 
 void WeatherController::beginPrimaryForecast(double latitude, double longitude,
@@ -705,20 +810,24 @@ void WeatherController::onValueJobFinished(quint64 id, const QVariantMap &values
             setCityError(error, QStringLiteral("City search could not be completed."));
             return;
         }
-        if (!values.value(QStringLiteral("found")).toBool()) {
+        m_cityCandidates.clear();
+        for (const QVariant &value : values.value(QStringLiteral("candidates")).toList())
+            m_cityCandidates.push_back(weatherCityFromMap(value.toMap()));
+        if (m_cityCandidates.isEmpty()) {
             m_citySearching = false;
             m_cityError = QStringLiteral("No matching city was found.");
             emit cityChanged();
+            emit comparisonChanged();
             return;
         }
-        domain::WeatherCity city;
-        city.name = values.value(QStringLiteral("name")).toString();
-        city.administrativeArea = values.value(QStringLiteral("administrativeArea")).toString();
-        city.country = values.value(QStringLiteral("country")).toString();
-        city.latitude = values.value(QStringLiteral("latitude")).toDouble();
-        city.longitude = values.value(QStringLiteral("longitude")).toDouble();
-        city.found = true;
-        beginCityForecast(city, pending.generation);
+        if (m_cityCandidates.size() == 1) {
+            selectCityCandidate(0);
+            return;
+        }
+        m_citySearching = false;
+        m_cityError.clear();
+        emit cityChanged();
+        emit comparisonChanged();
         return;
     }
     if (pending.kind == Kind::CityForecastParse) {
@@ -838,6 +947,11 @@ void WeatherController::publishCity(const domain::WeatherCity &city,
                                     const domain::WeatherForecast &forecast)
 {
     m_citySolarForecast = forecast;
+    m_searchedCity = city;
+    if (!forecast.timezone.isEmpty()) m_searchedCity.timezone = forecast.timezone;
+    m_hasSearchedCity = true;
+    m_cityUpdatedAtUtc = m_clock->nowUtc().toUTC().toString(Qt::ISODateWithMs);
+    m_cityUpdatedAt = updatedAtText(m_cityUpdatedAtUtc);
     m_citySelectedDate = availableForecastDate(forecast, m_citySelectedDate);
     m_citySolar = solarInfoForForecast(forecast, m_citySelectedDate, m_clock->nowUtc());
     m_cityForecast.replace(forecast.days, forecast.timezone);
@@ -846,6 +960,7 @@ void WeatherController::publishCity(const domain::WeatherCity &city,
     m_cityError.clear();
     m_citySearching = false;
     emit cityChanged();
+    emit comparisonChanged();
 }
 
 void WeatherController::updateSolarInfo()
@@ -924,7 +1039,11 @@ void WeatherController::setCityError(domain::AppError error, const QString &fall
     m_cityCurrent.clear();
     m_citySolar.clear();
     m_cityLocation.clear();
+    m_cityUpdatedAt.clear();
+    m_cityUpdatedAtUtc.clear();
+    m_cityCandidates.clear();
     emit cityChanged();
+    emit comparisonChanged();
 }
 
 } // namespace something::controllers

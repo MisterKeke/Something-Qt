@@ -2,12 +2,14 @@
 
 #include "../application/application_service_graph.h"
 #include "../domain/clock.h"
+#include "../models/weather_comparison_model.h"
 #include "../models/weather_forecast_model.h"
 #include "../platform/location_provider.h"
 
 #include <QObject>
 #include <QHash>
 #include <QString>
+#include <QVariantList>
 #include <QVariantMap>
 
 namespace something::controllers {
@@ -16,6 +18,7 @@ class WeatherController final : public QObject {
     Q_OBJECT
     Q_PROPERTY(something::models::WeatherForecastModel *primaryForecast READ primaryForecast CONSTANT)
     Q_PROPERTY(something::models::WeatherForecastModel *cityForecast READ cityForecast CONSTANT)
+    Q_PROPERTY(something::models::WeatherComparisonModel *comparisonCities READ comparisonCities CONSTANT)
     Q_PROPERTY(QVariantMap primaryCurrent READ primaryCurrent NOTIFY primaryChanged)
     Q_PROPERTY(QVariantMap primaryToday READ primaryToday NOTIFY primaryChanged)
     Q_PROPERTY(QVariantMap primarySolar READ primarySolar NOTIFY primaryChanged)
@@ -28,7 +31,12 @@ class WeatherController final : public QObject {
     Q_PROPERTY(QString primaryStatus READ primaryStatus NOTIFY primaryChanged)
     Q_PROPERTY(QString primaryError READ primaryError NOTIFY primaryChanged)
     Q_PROPERTY(QString cityLocation READ cityLocation NOTIFY cityChanged)
+    Q_PROPERTY(QString cityUpdatedAt READ cityUpdatedAt NOTIFY cityChanged)
     Q_PROPERTY(QString cityError READ cityError NOTIFY cityChanged)
+    Q_PROPERTY(QVariantList cityCandidates READ cityCandidates NOTIFY cityChanged)
+    Q_PROPERTY(int comparisonCityCount READ comparisonCityCount NOTIFY comparisonChanged)
+    Q_PROPERTY(bool canAddSearchedCity READ canAddSearchedCity NOTIFY comparisonChanged)
+    Q_PROPERTY(bool searchedCityAlreadyAdded READ searchedCityAlreadyAdded NOTIFY comparisonChanged)
     Q_PROPERTY(bool primaryLoading READ primaryLoading NOTIFY primaryChanged)
     Q_PROPERTY(bool primaryRefreshing READ primaryRefreshing NOTIFY primaryChanged)
     Q_PROPERTY(bool citySearching READ citySearching NOTIFY cityChanged)
@@ -42,6 +50,7 @@ public:
 
     models::WeatherForecastModel *primaryForecast() noexcept { return &m_primaryForecast; }
     models::WeatherForecastModel *cityForecast() noexcept { return &m_cityForecast; }
+    models::WeatherComparisonModel *comparisonCities() noexcept { return &m_comparisonCities; }
     QVariantMap primaryCurrent() const { return m_primaryCurrent; }
     QVariantMap primaryToday() const { return m_primaryToday; }
     QVariantMap primarySolar() const { return m_primarySolar; }
@@ -54,7 +63,12 @@ public:
     QString primaryStatus() const { return m_primaryStatus; }
     QString primaryError() const { return m_primaryError; }
     QString cityLocation() const { return m_cityLocation; }
+    QString cityUpdatedAt() const { return m_cityUpdatedAt; }
     QString cityError() const { return m_cityError; }
+    QVariantList cityCandidates() const;
+    int comparisonCityCount() const noexcept { return m_comparisonCities.count(); }
+    bool canAddSearchedCity() const noexcept;
+    bool searchedCityAlreadyAdded() const noexcept;
     bool primaryLoading() const noexcept { return m_primaryLoading; }
     bool primaryRefreshing() const noexcept { return m_primaryRefreshing; }
     bool citySearching() const noexcept { return m_citySearching; }
@@ -64,6 +78,10 @@ public:
     Q_INVOKABLE void requestDeviceLocation();
     Q_INVOKABLE void searchCity(QString city);
     Q_INVOKABLE void cancelCitySearch();
+    Q_INVOKABLE void selectCityCandidate(int candidateIndex);
+    Q_INVOKABLE bool addSearchedCityToComparison();
+    Q_INVOKABLE void removeComparisonCity(QString identity);
+    Q_INVOKABLE void moveComparisonCity(QString identity, int offset);
     Q_INVOKABLE void updateSolarInfo();
     Q_INVOKABLE void selectPrimaryForecastDate(QString date);
     Q_INVOKABLE void selectCityForecastDate(QString date);
@@ -71,6 +89,7 @@ public:
 signals:
     void primaryChanged();
     void cityChanged();
+    void comparisonChanged();
 
 private:
     enum class Kind { LoadPrimary, NativeLocation, PrimaryForecast, PrimaryParse,
@@ -125,6 +144,8 @@ private:
     platform::LocationProvider *m_locationProvider{nullptr};
     models::WeatherForecastModel m_primaryForecast;
     models::WeatherForecastModel m_cityForecast;
+    models::WeatherComparisonModel m_comparisonCities;
+    QVector<domain::WeatherCity> m_cityCandidates;
     QHash<quint64, Pending> m_pending;
     QHash<quint64, domain::WeatherForecast> m_stagedPrimary;
     QVariantMap m_primaryCurrent;
@@ -141,7 +162,10 @@ private:
     QString m_primaryStatus;
     QString m_primaryError;
     QString m_cityLocation;
+    QString m_cityUpdatedAt;
+    QString m_cityUpdatedAtUtc;
     QString m_cityError;
+    domain::WeatherCity m_searchedCity;
     quint64 m_primaryGeneration{0};
     quint64 m_cityGeneration{0};
     quint64 m_locationOperation{0};
@@ -153,6 +177,7 @@ private:
     bool m_primaryLoading{false};
     bool m_primaryRefreshing{false};
     bool m_citySearching{false};
+    bool m_hasSearchedCity{false};
 };
 
 } // namespace something::controllers

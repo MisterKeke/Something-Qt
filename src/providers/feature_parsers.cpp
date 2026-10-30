@@ -102,6 +102,25 @@ bool optionalInteger(const QJsonObject &object, const QString &key,
     return true;
 }
 
+bool optionalInteger64(const QJsonObject &object, const QString &key, qint64 *value)
+{
+    if (!value) return false;
+    const QJsonValue field = object.value(key);
+    if (field.isUndefined() || field.isNull()) {
+        *value = 0;
+        return true;
+    }
+    constexpr double maximumExactJsonInteger = 9007199254740991.0;
+    if (!field.isDouble() || !std::isfinite(field.toDouble())
+        || std::floor(field.toDouble()) != field.toDouble()
+        || field.toDouble() < 0.0
+        || field.toDouble() > maximumExactJsonInteger) {
+        return false;
+    }
+    *value = static_cast<qint64>(field.toDouble());
+    return true;
+}
+
 bool validDate(const QString &value)
 {
     const QDate date = QDate::fromString(value, Qt::ISODate);
@@ -344,6 +363,19 @@ FeatureParseResult<WeatherForecast> parseWeatherForecast(const QByteArray &body)
 FeatureParseResult<WeatherCity> parseWeatherCitySearch(const QByteArray &body)
 {
     FeatureParseResult<WeatherCity> result;
+    const auto candidates = parseWeatherCitySearchResults(body);
+    if (!candidates.succeeded()) {
+        result.error = candidates.error;
+        return result;
+    }
+    if (!candidates.value.isEmpty()) result.value = candidates.value.first();
+    return result;
+}
+
+FeatureParseResult<QVector<WeatherCity>> parseWeatherCitySearchResults(
+    const QByteArray &body)
+{
+    FeatureParseResult<QVector<WeatherCity>> result;
     QJsonObject root;
     if (!parseObject(body, &root)) {
         result.error = invalidResponse();
@@ -356,24 +388,48 @@ FeatureParseResult<WeatherCity> parseWeatherCitySearch(const QByteArray &body)
         return result;
     }
     const QJsonArray results = resultsValue.toArray();
-    if (results.isEmpty()) return result;
-    if (!results.first().isObject()) {
+    if (results.size() > 10) {
         result.error = invalidResponse();
         return result;
     }
-    const QJsonObject first = results.first().toObject();
-    WeatherCity city;
-    if (!requiredString(first, QStringLiteral("name"), &city.name)
-        || !requiredNumber(first, QStringLiteral("latitude"), &city.latitude)
-        || !requiredNumber(first, QStringLiteral("longitude"), &city.longitude)
-        || !optionalString(first, QStringLiteral("admin1"), &city.administrativeArea)
-        || !optionalString(first, QStringLiteral("country"), &city.country)
-        || !something::domain::isValidWeatherCoordinates(city.latitude, city.longitude)) {
-        result.error = invalidResponse();
-        return result;
+    result.value.reserve(results.size());
+    for (const QJsonValue &value : results) {
+        if (!value.isObject()) {
+            result.error = invalidResponse();
+            result.value.clear();
+            return result;
+        }
+        const QJsonObject object = value.toObject();
+        WeatherCity city;
+        QString secondaryAdministrativeArea;
+        if (!optionalInteger64(object, QStringLiteral("id"), &city.geocodingId)
+            || !requiredString(object, QStringLiteral("name"), &city.name)
+            || !requiredNumber(object, QStringLiteral("latitude"), &city.latitude)
+            || !requiredNumber(object, QStringLiteral("longitude"), &city.longitude)
+            || !optionalString(object, QStringLiteral("admin1"), &city.administrativeArea)
+            || !optionalString(object, QStringLiteral("admin2"), &secondaryAdministrativeArea)
+            || !optionalString(object, QStringLiteral("country"), &city.country)
+            || !optionalString(object, QStringLiteral("timezone"), &city.timezone)
+            || city.name.trimmed().isEmpty()
+            || !something::domain::isValidWeatherCoordinates(city.latitude, city.longitude)) {
+            result.error = invalidResponse();
+            result.value.clear();
+            return result;
+        }
+        city.name = city.name.trimmed();
+        city.administrativeArea = city.administrativeArea.trimmed();
+        secondaryAdministrativeArea = secondaryAdministrativeArea.trimmed();
+        if (city.administrativeArea.isEmpty())
+            city.administrativeArea = std::move(secondaryAdministrativeArea);
+        city.country = city.country.trimmed();
+        city.timezone = city.timezone.trimmed();
+        city.found = true;
+        const bool duplicate = std::any_of(result.value.cbegin(), result.value.cend(),
+            [&city](const WeatherCity &existing) {
+                return something::domain::isSameWeatherLocation(existing, city);
+            });
+        if (!duplicate) result.value.push_back(std::move(city));
     }
-    result.value = std::move(city);
-    result.value.found = true;
     return result;
 }
 
