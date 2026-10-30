@@ -168,6 +168,14 @@ QJsonArray taskSubtasksJson(const QVector<Subtask> &subtasks)
     return result;
 }
 
+QJsonObject subtaskHistoryJson(const Subtask &subtask)
+{
+    return {{QStringLiteral("id"), QString::number(subtask.id)},
+            {QStringLiteral("title"), subtask.title},
+            {QStringLiteral("completed"), subtask.completed},
+            {QStringLiteral("position"), subtask.position}};
+}
+
 void appendHistoryChange(QVector<domain::TaskHistoryChange> *changes,
                          QString field, domain::TaskHistoryValue previous,
                          domain::TaskHistoryValue current)
@@ -664,10 +672,12 @@ RepositoryResult<Task> TaskRepository::setSubtaskCompleted(qint64 id, qint64 sub
     const auto updated = load(id);
     if (!updated.succeeded()) return failure<Task>(updated.error.category());
     if (previousSubtask && previousSubtask->completed != completed) {
-        const QString field = QStringLiteral("subtasks.%1.completed").arg(subtaskId);
+        const QString field = QStringLiteral("subtasks.%1").arg(subtaskId);
+        Subtask updatedSubtask = *previousSubtask;
+        updatedSubtask.completed = completed;
         const QVector<domain::TaskHistoryChange> changes{{
-            field, historyValue(QJsonValue(previousSubtask->completed)),
-            historyValue(QJsonValue(completed))}};
+            field, historyValue(subtaskHistoryJson(*previousSubtask)),
+            historyValue(subtaskHistoryJson(updatedSubtask))}};
         const auto type = completed ? domain::TaskHistoryEventType::SubtaskCompleted
                                     : domain::TaskHistoryEventType::SubtaskReopened;
         domain::AppError error;

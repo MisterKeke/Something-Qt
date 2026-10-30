@@ -176,7 +176,9 @@ qt_add_qml_module(SomethingQt
         qml/components/OrbitNavigation.qml
         qml/dialogs/ConfirmationDialog.qml
         qml/dialogs/TaskEditorDialog.qml
+        qml/dialogs/TaskHistoryDialog.qml
         qml/components/TaskSummaryCard.qml
+        qml/components/TaskHistoryEventCard.qml
         qml/pages/CalendarPage.qml
         qml/pages/CurrenciesPage.qml
         qml/pages/DesktopApplicationsPage.qml

@@ -73,7 +73,8 @@ struct SerializedTaskHistoryDiff final {
 // Version 1 stores field names as a JSON string array and each value map as a
 // JSON object. Canonical task fields are title, description, dueDate, priority,
 // difficulty, tags, and completed; full subtask-list changes use "subtasks",
-// and focused subtask properties use "subtasks.<id>.<property>". Values use {"state":"unset"},
+// and focused subtask snapshots/properties use "subtasks.<id>" or
+// "subtasks.<id>.<property>". Values use {"state":"unset"},
 // {"state":"null"}, or {"state":"value","value":...}, so unset,
 // SQL NULL, and empty values remain distinct (including empty strings, arrays,
 // and objects).
