@@ -26,6 +26,8 @@ private slots:
     void appOpenUpdatesFavoriteWindowsAndPrunesAtomically();
     void setupMembershipPreservesOrderAndEnforcesReferences();
     void desktopApplicationPathsAreCaseInsensitive();
+    void applicationCategoriesPreserveApplicationsAndSetups();
+    void applicationCategoryMigrationPreservesExistingProfiles();
     void invalidWeekStartIsRejectedAndDefaultsToMonday();
     void preferencesServiceCommandsValidateAndRoundTripWeekStart();
 };
@@ -53,15 +55,15 @@ void StorageRepositoryTest::migrationsAreTransactionalIndependentAndRepeatable()
     QString connectionName;
     QSqlDatabase database;
     QVERIFY(openTestDatabase(&database, &connectionName));
-    QCOMPARE(storage::SchemaMigrator::latestVersion(), 7);
+    QCOMPARE(storage::SchemaMigrator::latestVersion(), 8);
     QVERIFY(storage::SchemaMigrator::apply(database));
 
     QSqlQuery history(database);
     QVERIFY(history.exec(QStringLiteral("SELECT COUNT(*),MIN(version),MAX(version) FROM schema_migrations")));
     QVERIFY(history.next());
-    QCOMPARE(history.value(0).toInt(), 7);
+    QCOMPARE(history.value(0).toInt(), 8);
     QCOMPARE(history.value(1).toInt(), 1);
-    QCOMPARE(history.value(2).toInt(), 7);
+    QCOMPARE(history.value(2).toInt(), 8);
 
     const QStringList tables = tableNames(database);
     for (const QString &retained : {QStringLiteral("tasks"), QStringLiteral("task_tags"),
@@ -489,6 +491,171 @@ void StorageRepositoryTest::desktopApplicationPathsAreCaseInsensitive()
                                  QStringLiteral("c:/APPS/browser.exe"))
                  .error.category(), domain::ErrorCategory::Conflict);
 
+    database.close();
+    database = QSqlDatabase();
+    QSqlDatabase::removeDatabase(connectionName);
+}
+
+void StorageRepositoryTest::applicationCategoriesPreserveApplicationsAndSetups()
+{
+    QString connectionName;
+    QSqlDatabase database;
+    QVERIFY(openTestDatabase(&database, &connectionName));
+    storage::StorageRepositories repositories(database);
+
+    const storage::AssetMetadata firstIcon{
+        QStringLiteral("11111111111111111111111111111111.png"), QStringLiteral("image/png"), 32};
+    const storage::AssetMetadata secondIcon{
+        QStringLiteral("22222222222222222222222222222222.png"), QStringLiteral("image/png"), 48};
+    const auto first = repositories.applications.add(
+        QStringLiteral("Editor"), QStringLiteral("C:/Apps/editor.exe"), firstIcon);
+    const auto second = repositories.applications.add(
+        QStringLiteral("Browser"), QStringLiteral("C:/Apps/browser.exe"), secondIcon);
+    QVERIFY(first.succeeded());
+    QVERIFY(second.succeeded());
+
+    storage::Setup setup;
+    setup.name = QStringLiteral("Daily");
+    setup.applicationIds = {second.value.id, first.value.id};
+    const auto savedSetup = repositories.setups.save(setup);
+    QVERIFY(savedSetup.succeeded());
+    const auto originalSetupOrder = savedSetup.value.applicationIds;
+
+    const QString composedName = QString::fromUtf8("Caf\xC3\xA9");
+    const QString decomposedName = QString::fromUtf8("Cafe\xCC\x81");
+    const auto firstCategory = repositories.applications.createCategory(
+        composedName, QStringLiteral("Work tools"), QStringLiteral("#abc"), QStringLiteral("work"));
+    const auto secondCategory = repositories.applications.createCategory(
+        QStringLiteral("Games"), {}, {}, {});
+    QVERIFY(firstCategory.succeeded());
+    QVERIFY(secondCategory.succeeded());
+    QCOMPARE(repositories.applications.createCategory(decomposedName, {}, {}, {}).error.category(),
+             domain::ErrorCategory::Conflict);
+    QCOMPARE(repositories.applications.createCategory(QStringLiteral("gAmEs"), {}, {}, {})
+                 .error.category(), domain::ErrorCategory::Conflict);
+    QCOMPARE(repositories.applications.createCategory(QString(81, QLatin1Char('x')), {}, {}, {})
+                 .error.category(), domain::ErrorCategory::Validation);
+
+    QVERIFY(repositories.applications.reorderCategories(
+        {secondCategory.value.id, firstCategory.value.id}).succeeded());
+    const auto orderedCategories = repositories.applications.listCategories();
+    QVERIFY(orderedCategories.succeeded());
+    QCOMPARE(orderedCategories.value.at(0).id, secondCategory.value.id);
+    QCOMPARE(orderedCategories.value.at(1).id, firstCategory.value.id);
+
+    QVERIFY(repositories.applications.assignCategory(first.value.id, firstCategory.value.id).succeeded());
+    QVERIFY(repositories.applications.assignCategory(second.value.id, secondCategory.value.id).succeeded());
+    QCOMPARE(repositories.applications.assignCategory(first.value.id, qint64(999999))
+                 .error.category(), domain::ErrorCategory::Validation);
+    QCOMPARE(repositories.applications.listByCategory(qint64(999999)).error.category(),
+             domain::ErrorCategory::NotFound);
+    QCOMPARE(repositories.applications.listByCategory(firstCategory.value.id).value.size(), 1);
+    QCOMPARE(repositories.applications.uncategorizedApplicationCount().value, 0);
+
+    const auto deletion = repositories.applications.deleteCategory(firstCategory.value.id);
+    QVERIFY(deletion.succeeded());
+    QCOMPARE(deletion.value.affectedApplications, 1);
+    const auto uncategorized = repositories.applications.listUncategorized();
+    QVERIFY(uncategorized.succeeded());
+    QCOMPARE(uncategorized.value.size(), 1);
+    QCOMPARE(uncategorized.value.front().id, first.value.id);
+
+    const auto preservedFirst = repositories.applications.get(first.value.id);
+    QVERIFY(preservedFirst.succeeded());
+    QCOMPARE(preservedFirst.value.executablePath, QStringLiteral("C:/Apps/editor.exe"));
+    QVERIFY(preservedFirst.value.icon.has_value());
+    QCOMPARE(preservedFirst.value.icon->filename, firstIcon.filename);
+    const auto preservedSetup = repositories.setups.get(savedSetup.value.id);
+    QVERIFY(preservedSetup.succeeded());
+    QCOMPARE(preservedSetup.value.applicationIds, originalSetupOrder);
+
+    const auto renamed = repositories.applications.updateCategory(
+        secondCategory.value.id, QStringLiteral("Renamed 🎮"), {}, {}, {});
+    QVERIFY(renamed.succeeded());
+    QCOMPARE(renamed.value.id, secondCategory.value.id);
+    const auto preservedSecond = repositories.applications.get(second.value.id);
+    QVERIFY(preservedSecond.succeeded());
+    QCOMPARE(preservedSecond.value.id, second.value.id);
+    QVERIFY(preservedSecond.value.categoryId.has_value());
+    QCOMPARE(*preservedSecond.value.categoryId, secondCategory.value.id);
+    QVERIFY(preservedSecond.value.icon.has_value());
+    QCOMPARE(preservedSecond.value.icon->filename, secondIcon.filename);
+
+    QVERIFY(repositories.applications.remove(second.value.id).succeeded());
+    QVERIFY(!repositories.applications.get(second.value.id).succeeded());
+    const auto setupAfterApplicationRemoval = repositories.setups.get(savedSetup.value.id);
+    QVERIFY(setupAfterApplicationRemoval.succeeded());
+    QCOMPARE(setupAfterApplicationRemoval.value.applicationIds, QVector<qint64>({first.value.id}));
+
+    database.close();
+    database = QSqlDatabase();
+    QSqlDatabase::removeDatabase(connectionName);
+}
+
+void StorageRepositoryTest::applicationCategoryMigrationPreservesExistingProfiles()
+{
+    const QString connectionName = QStringLiteral("storage-category-migration-%1")
+                                       .arg(QUuid::createUuid().toString(QUuid::WithoutBraces));
+    QSqlDatabase database = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), connectionName);
+    database.setDatabaseName(QStringLiteral(":memory:"));
+    QVERIFY(database.open());
+
+    QSqlQuery fixture(database);
+    QVERIFY(fixture.exec(QStringLiteral(
+        "CREATE TABLE schema_migrations(version INTEGER PRIMARY KEY, name TEXT NOT NULL, "
+        "applied_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)")));
+    const QStringList migrationNames{
+        QStringLiteral("core tasks currencies preferences"),
+        QStringLiteral("favorites and retained update news"),
+        QStringLiteral("saved weather location and cache"),
+        QStringLiteral("wallpapers desktop applications and setups"),
+        QStringLiteral("Steam tracking"),
+        QStringLiteral("favorite display ordering"),
+        QStringLiteral("one-time retained profile import ledger")};
+    for (int version = 1; version <= migrationNames.size(); ++version) {
+        fixture.prepare(QStringLiteral("INSERT INTO schema_migrations(version,name) VALUES(?,?)"));
+        fixture.addBindValue(version);
+        fixture.addBindValue(migrationNames.at(version - 1));
+        QVERIFY(fixture.exec());
+    }
+    QVERIFY(fixture.exec(QStringLiteral(
+        "CREATE TABLE desktop_apps(id INTEGER PRIMARY KEY AUTOINCREMENT, display_name TEXT NOT NULL, "
+        "executable_path TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)")));
+    QVERIFY(fixture.exec(QStringLiteral(
+        "INSERT INTO desktop_apps(id,display_name,executable_path,created_at,updated_at) "
+        "VALUES(47,'Legacy editor','C:/Legacy/editor.exe','2024-01-01','2024-01-02')")));
+    QVERIFY(fixture.exec(QStringLiteral(
+        "CREATE TABLE desktop_app_icons(app_id INTEGER PRIMARY KEY, filename TEXT NOT NULL, "
+        "mime_type TEXT NOT NULL, byte_size INTEGER NOT NULL)")));
+    QVERIFY(fixture.exec(QStringLiteral(
+        "INSERT INTO desktop_app_icons VALUES(47,'legacy-icon.png','image/png',64)")));
+    QVERIFY(fixture.exec(QStringLiteral(
+        "CREATE TABLE setups(id INTEGER PRIMARY KEY, name TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', "
+        "created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)")));
+    QVERIFY(fixture.exec(QStringLiteral("INSERT INTO setups(id,name) VALUES(3,'Legacy setup')")));
+    QVERIFY(fixture.exec(QStringLiteral(
+        "CREATE TABLE setup_apps(setup_id INTEGER NOT NULL, app_id INTEGER NOT NULL, position INTEGER NOT NULL)")));
+    QVERIFY(fixture.exec(QStringLiteral("INSERT INTO setup_apps VALUES(3,47,0)")));
+    QVERIFY(fixture.exec(QStringLiteral(
+        "CREATE TABLE setup_icons(setup_id INTEGER PRIMARY KEY, filename TEXT NOT NULL, "
+        "mime_type TEXT NOT NULL, byte_size INTEGER NOT NULL)")));
+
+    QString diagnostic;
+    QVERIFY2(storage::SchemaMigrator::apply(database, &diagnostic), qPrintable(diagnostic));
+    storage::StorageRepositories repositories(database);
+    const auto existing = repositories.applications.get(47);
+    QVERIFY(existing.succeeded());
+    QCOMPARE(existing.value.displayName, QStringLiteral("Legacy editor"));
+    QCOMPARE(existing.value.executablePath, QStringLiteral("C:/Legacy/editor.exe"));
+    QVERIFY(!existing.value.categoryId.has_value());
+    QVERIFY(existing.value.icon.has_value());
+    QCOMPARE(existing.value.icon->filename, QStringLiteral("legacy-icon.png"));
+    QCOMPARE(repositories.applications.listUncategorized().value.size(), 1);
+    const auto existingSetup = repositories.setups.get(3);
+    QVERIFY(existingSetup.succeeded());
+    QCOMPARE(existingSetup.value.applicationIds, QVector<qint64>({47}));
+
+    fixture = QSqlQuery();
     database.close();
     database = QSqlDatabase();
     QSqlDatabase::removeDatabase(connectionName);

@@ -16,6 +16,7 @@ ComboBox {
         leftPadding: ThemeModule.Theme.controlPadding - 1
         rightPadding: 30
         text: root.displayText
+        textFormat: Text.PlainText
         color: root.enabled ? ThemeModule.Theme.textPrimary : ThemeModule.Theme.textDisabled
         font: root.font
         verticalAlignment: Text.AlignVCenter

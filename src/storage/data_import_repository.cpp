@@ -120,7 +120,8 @@ bool DataImportRepository::targetIsEmpty(bool *empty, QString *blockingReason) c
         QStringLiteral("favorite_update_checkpoints"), QStringLiteral("favorite_update_seen_items"),
         QStringLiteral("favorite_news_items"),
         QStringLiteral("saved_weather"), QStringLiteral("wallpapers"),
-        QStringLiteral("desktop_apps"), QStringLiteral("desktop_app_icons"),
+        QStringLiteral("application_categories"), QStringLiteral("desktop_apps"),
+        QStringLiteral("desktop_app_icons"),
         QStringLiteral("setups"), QStringLiteral("setup_apps"), QStringLiteral("setup_icons"),
         QStringLiteral("steam_games"), QStringLiteral("steam_game_images"),
         QStringLiteral("data_imports")};
@@ -141,6 +142,7 @@ bool DataImportRepository::targetIsEmpty(bool *empty, QString *blockingReason) c
                     {QStringLiteral("youtube_favorites"), QStringLiteral("YouTube favorites")},
                     {QStringLiteral("saved_weather"), QStringLiteral("saved weather locations")},
                     {QStringLiteral("wallpapers"), QStringLiteral("imported wallpapers")},
+                    {QStringLiteral("application_categories"), QStringLiteral("application categories")},
                     {QStringLiteral("desktop_apps"), QStringLiteral("saved applications")},
                     {QStringLiteral("desktop_app_icons"), QStringLiteral("application icons")},
                     {QStringLiteral("setups"), QStringLiteral("setups")},

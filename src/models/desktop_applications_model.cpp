@@ -26,6 +26,7 @@ QVariant DesktopApplicationsModel::data(const QModelIndex &index, int role) cons
     case IconSourceRole: return iconSource(row);
     case NativeIconDataUrlRole: return row.value(QStringLiteral("nativeIconDataUrl"));
     case AvailableRole: return row.value(QStringLiteral("available"), false);
+    case CategoryIdRole: return row.value(QStringLiteral("categoryId"));
     default: return {};
     }
 }
@@ -35,7 +36,7 @@ QHash<int, QByteArray> DesktopApplicationsModel::roleNames() const
     return {{IdRole, "applicationId"}, {DisplayNameRole, "displayName"},
             {ExecutablePathRole, "executablePath"}, {IconFilenameRole, "iconFilename"},
             {IconSourceRole, "iconSource"}, {NativeIconDataUrlRole, "nativeIconDataUrl"},
-            {AvailableRole, "available"}};
+            {AvailableRole, "available"}, {CategoryIdRole, "categoryId"}};
 }
 
 bool DesktopApplicationsModel::less(const QVariantMap &left, const QVariantMap &right)
@@ -65,7 +66,8 @@ void DesktopApplicationsModel::applyRowChange(int row, const QVariantMap &value)
         std::pair{ExecutablePathRole, QStringLiteral("executablePath")},
         std::pair{IconFilenameRole, QStringLiteral("iconFilename")},
         std::pair{NativeIconDataUrlRole, QStringLiteral("nativeIconDataUrl")},
-        std::pair{AvailableRole, QStringLiteral("available")}}) {
+        std::pair{AvailableRole, QStringLiteral("available")},
+        std::pair{CategoryIdRole, QStringLiteral("categoryId")}}) {
         if (old.value(key) != value.value(key)) changed.push_back(role);
     }
     if (old.value(QStringLiteral("iconFilename")) != value.value(QStringLiteral("iconFilename"))
