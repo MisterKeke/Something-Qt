@@ -91,7 +91,8 @@ bool makeSourceFixture(const QString &directory, int sourceVersion = 24,
     if (!writer.open(writerPath) || !storage::SchemaMigrator::apply(writer.db)
         || !exec(writer.db, QStringLiteral("PRAGMA wal_autocheckpoint=0"))) return false;
     const QStringList changes{
-        "DROP TABLE data_imports", "DELETE FROM schema_migrations",
+        "DROP TABLE data_imports", "DROP TABLE steam_price_observations",
+        "DELETE FROM schema_migrations",
         "ALTER TABLE tasks RENAME TO todos", "ALTER TABLE task_tags RENAME TO todo_tags",
         "ALTER TABLE todo_tags RENAME COLUMN task_id TO todo_id",
         "ALTER TABLE task_subtasks RENAME TO todo_subtasks",

@@ -674,8 +674,9 @@ void WeatherCurrencyFeatureTest::weatherComparisonPersistenceRestoresOrderCacheA
     {
         QSqlQuery downgrade(database);
         QVERIFY(downgrade.exec(QStringLiteral("DROP TABLE weather_comparison_cities")));
+        QVERIFY(downgrade.exec(QStringLiteral("DROP TABLE steam_price_observations")));
         QVERIFY(downgrade.exec(QStringLiteral(
-            "DELETE FROM schema_migrations WHERE version=11")));
+            "DELETE FROM schema_migrations WHERE version>=11")));
     }
     QString migrationDiagnostic;
     QVERIFY2(storage::SchemaMigrator::apply(database, &migrationDiagnostic),
