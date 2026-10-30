@@ -33,6 +33,7 @@ add_executable(SomethingQtApplicationCommandTests
     ../src/domain/desktop_application_rules.cpp
     ../src/providers/provider_parsers.cpp
     ../src/application/route_catalog.cpp
+    ../src/domain/task_history.cpp
     ../src/storage/repositories.cpp
     ../src/storage/schema_migrator.cpp
     ../src/storage/storage_worker.cpp
@@ -83,6 +84,7 @@ add_executable(SomethingQtConsolePhaseThreeTests
     ../src/services/desktop_applications_service.cpp
     ../src/services/setups_service.cpp
     ../src/services/setup_icon_store.cpp
+    ../src/domain/task_history.cpp
     ../src/storage/repositories.cpp
     ../src/storage/schema_migrator.cpp
     ../src/storage/storage_worker.cpp
@@ -108,6 +110,7 @@ add_executable(SomethingQtLifecycleTests
     ../src/providers/provider_policy.cpp
     ../src/providers/provider_response_cache.cpp
     ../src/services/bounded_worker_pool.cpp
+    ../src/domain/task_history.cpp
     ../src/storage/repositories.cpp
     ../src/storage/schema_migrator.cpp
     ../src/storage/storage_worker.cpp
@@ -131,6 +134,7 @@ add_executable(SomethingQtStorageTests
     ../src/domain/app_error.cpp
     ../src/domain/task_rules.cpp
     ../src/services/preferences_service.cpp
+    ../src/domain/task_history.cpp
     ../src/storage/repositories.cpp
     ../src/storage/schema_migrator.cpp
 )
@@ -146,6 +150,20 @@ target_link_libraries(SomethingQtStorageTests PRIVATE
 )
 
 add_test(NAME SomethingQtStorageTests COMMAND SomethingQtStorageTests)
+
+add_executable(SomethingQtTaskHistoryTests
+    task_history_test.cpp
+    ../src/domain/app_error.cpp
+    ../src/domain/task_history.cpp
+    ../src/domain/task_rules.cpp
+    ../src/storage/repositories.cpp
+    ../src/storage/schema_migrator.cpp
+)
+target_include_directories(SomethingQtTaskHistoryTests PRIVATE ../src)
+target_link_libraries(SomethingQtTaskHistoryTests PRIVATE
+    Qt6::Core Qt6::Sql Qt6::Test)
+add_test(NAME SomethingQtTaskHistoryTests COMMAND SomethingQtTaskHistoryTests)
+set_tests_properties(SomethingQtTaskHistoryTests PROPERTIES TIMEOUT 60)
 
 add_executable(SomethingQtTaskDomainTests
     task_domain_test.cpp
@@ -172,6 +190,7 @@ add_executable(SomethingQtCalendarDashboardTests
     ../src/models/calendar_months_model.cpp
     ../src/models/tasks_model.cpp
     ../src/services/task_service.cpp
+    ../src/domain/task_history.cpp
     ../src/storage/repositories.cpp
     ../src/storage/schema_migrator.cpp
 )
@@ -213,6 +232,7 @@ add_executable(SomethingQtFavoritesFeatureTests
     ../src/providers/provider_policy.cpp
     ../src/services/favorites_service.cpp
     ../src/models/provider_items_model.cpp
+    ../src/domain/task_history.cpp
     ../src/storage/repositories.cpp
     ../src/storage/schema_migrator.cpp
 )
@@ -238,6 +258,7 @@ add_executable(SomethingQtWeatherCurrencyTests
     ../src/providers/provider_policy.cpp
     ../src/services/currency_service.cpp
     ../src/services/weather_service.cpp
+    ../src/domain/task_history.cpp
     ../src/storage/repositories.cpp
     ../src/storage/schema_migrator.cpp
 )
@@ -284,6 +305,7 @@ add_executable(SomethingQtDesktopApplicationsControllerTests
     ../src/services/bounded_worker_pool.cpp
     ../src/services/desktop_app_icon_store.cpp
     ../src/services/desktop_applications_service.cpp
+    ../src/domain/task_history.cpp
     ../src/storage/repositories.cpp
     ../src/storage/schema_migrator.cpp
     ../src/storage/storage_worker.cpp
@@ -308,6 +330,7 @@ add_executable(SomethingQtRunningApplicationsControllerTests
     ../src/providers/provider_policy.cpp
     ../src/providers/provider_response_cache.cpp
     ../src/services/bounded_worker_pool.cpp
+    ../src/domain/task_history.cpp
     ../src/storage/repositories.cpp
     ../src/storage/schema_migrator.cpp
     ../src/storage/storage_worker.cpp
@@ -327,6 +350,7 @@ add_executable(SomethingQtSetupsFeatureTests
     ../src/services/desktop_applications_service.cpp
     ../src/services/setup_icon_store.cpp
     ../src/services/setups_service.cpp
+    ../src/domain/task_history.cpp
     ../src/storage/repositories.cpp
     ../src/storage/schema_migrator.cpp
 )
@@ -355,6 +379,7 @@ add_executable(SomethingQtSetupsControllerTests
     ../src/services/desktop_applications_service.cpp
     ../src/services/setup_icon_store.cpp
     ../src/services/setups_service.cpp
+    ../src/domain/task_history.cpp
     ../src/storage/repositories.cpp
     ../src/storage/schema_migrator.cpp
     ../src/storage/storage_worker.cpp
@@ -391,6 +416,7 @@ add_executable(SomethingQtSteamFeatureTests
     ../src/providers/steam_artwork_image_provider.cpp
     ../src/services/steam_artwork_store.cpp
     ../src/services/steam_service.cpp
+    ../src/domain/task_history.cpp
     ../src/storage/repositories.cpp
     ../src/storage/schema_migrator.cpp
 )
@@ -410,6 +436,7 @@ add_executable(SomethingQtDataImportTests
     ../src/providers/network_worker.cpp
     ../src/providers/provider_response_cache.cpp
     ../src/services/bounded_worker_pool.cpp
+    ../src/domain/task_history.cpp
     ../src/storage/repositories.cpp
     ../src/storage/storage_worker.cpp
     ../src/domain/app_error.cpp

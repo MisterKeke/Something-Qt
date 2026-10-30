@@ -55,15 +55,15 @@ void StorageRepositoryTest::migrationsAreTransactionalIndependentAndRepeatable()
     QString connectionName;
     QSqlDatabase database;
     QVERIFY(openTestDatabase(&database, &connectionName));
-    QCOMPARE(storage::SchemaMigrator::latestVersion(), 8);
+    QCOMPARE(storage::SchemaMigrator::latestVersion(), 9);
     QVERIFY(storage::SchemaMigrator::apply(database));
 
     QSqlQuery history(database);
     QVERIFY(history.exec(QStringLiteral("SELECT COUNT(*),MIN(version),MAX(version) FROM schema_migrations")));
     QVERIFY(history.next());
-    QCOMPARE(history.value(0).toInt(), 8);
+    QCOMPARE(history.value(0).toInt(), 9);
     QCOMPARE(history.value(1).toInt(), 1);
-    QCOMPARE(history.value(2).toInt(), 8);
+    QCOMPARE(history.value(2).toInt(), 9);
 
     const QStringList tables = tableNames(database);
     for (const QString &retained : {QStringLiteral("tasks"), QStringLiteral("task_tags"),
@@ -72,6 +72,7 @@ void StorageRepositoryTest::migrationsAreTransactionalIndependentAndRepeatable()
                                     QStringLiteral("favorite_update_checkpoints"), QStringLiteral("saved_weather"),
                                     QStringLiteral("desktop_apps"), QStringLiteral("setups"),
                                     QStringLiteral("steam_games"), QStringLiteral("wallpapers"),
+                                    QStringLiteral("task_history"),
                                     QStringLiteral("preferences")}) {
         QVERIFY2(tables.contains(retained), qPrintable(retained));
     }
@@ -135,7 +136,7 @@ void StorageRepositoryTest::migratorRejectsUntrackedAndUnknownHistories()
     QVERIFY(unknown.open());
     QSqlQuery unknownSetup(unknown);
     QVERIFY(unknownSetup.exec(QStringLiteral("CREATE TABLE schema_migrations(version INTEGER PRIMARY KEY, name TEXT NOT NULL, applied_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)")));
-    QVERIFY(unknownSetup.exec(QStringLiteral("INSERT INTO schema_migrations(version,name) VALUES(9,'future')")));
+    QVERIFY(unknownSetup.exec(QStringLiteral("INSERT INTO schema_migrations(version,name) VALUES(10,'future')")));
     QVERIFY(!storage::SchemaMigrator::apply(unknown));
     unknownSetup.finish();
     unknown.close();
