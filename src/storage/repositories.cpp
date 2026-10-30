@@ -93,6 +93,14 @@ QString sqlLikePattern(QString value)
     return QStringLiteral("%") + value.toCaseFolded() + QStringLiteral("%");
 }
 
+QString taskHistoryTitleLikePattern(QString value)
+{
+    value.replace(QLatin1Char('\\'), QStringLiteral("\\\\"));
+    value.replace(QLatin1Char('%'), QStringLiteral("\\%"));
+    value.replace(QLatin1Char('_'), QStringLiteral("\\_"));
+    return QStringLiteral("%") + value + QStringLiteral("%");
+}
+
 bool validAsset(const AssetMetadata &asset, const QStringList &allowedMimeTypes)
 {
     if (asset.filename.isEmpty() || asset.filename == QStringLiteral(".")
@@ -695,6 +703,103 @@ RepositoryResult<void> TaskRepository::remove(qint64 id, qint64 expectedRevision
     }
     if (!transaction.commit()) return failureVoid(domain::ErrorCategory::Storage);
     return {};
+}
+
+TaskHistoryRepository::TaskHistoryRepository(QSqlDatabase &database) : m_database(database) {}
+
+RepositoryResult<TaskHistoryPage> TaskHistoryRepository::forTask(
+    qint64 taskId, std::optional<domain::TaskHistoryEventType> eventType,
+    int pageSize, const TaskHistoryCursor &before) const
+{
+    if (taskId <= 0) return failure<TaskHistoryPage>(domain::ErrorCategory::Validation);
+    return list(taskId, {}, eventType, pageSize, before);
+}
+
+RepositoryResult<TaskHistoryPage> TaskHistoryRepository::recent(
+    QString taskTitleQuery, std::optional<domain::TaskHistoryEventType> eventType,
+    int pageSize, const TaskHistoryCursor &before) const
+{
+    return list(std::nullopt, std::move(taskTitleQuery), eventType, pageSize, before);
+}
+
+RepositoryResult<TaskHistoryPage> TaskHistoryRepository::list(
+    std::optional<qint64> taskId, QString taskTitleQuery,
+    std::optional<domain::TaskHistoryEventType> eventType,
+    int pageSize, const TaskHistoryCursor &before) const
+{
+    Q_ASSERT(QThread::currentThread() == m_database.driver()->thread());
+    if (pageSize < 1 || pageSize > 100 || !before.isValid()
+        || taskTitleQuery.toUcs4().size() > 256
+        || (before.hasValue()
+            && (!QDateTime::fromString(before.occurredAtUtc, Qt::ISODateWithMs).isValid()
+                || before.occurredAtUtc.size() > 64
+                || !before.occurredAtUtc.endsWith(QLatin1Char('Z'))))) {
+        return failure<TaskHistoryPage>(domain::ErrorCategory::Validation);
+    }
+
+    QString sql = QStringLiteral(
+        "SELECT event_id,task_id,event_type,occurred_at_utc,task_revision,task_title,"
+        "serialization_version,changed_fields_json,previous_values_json,new_values_json "
+        "FROM task_history WHERE 1=1");
+    QVariantList binds;
+    if (taskId) {
+        sql += QStringLiteral(" AND task_id=?");
+        binds.push_back(*taskId);
+    }
+    if (!taskTitleQuery.trimmed().isEmpty()) {
+        sql += QStringLiteral(" AND task_title COLLATE NOCASE LIKE ? ESCAPE '\\'");
+        binds.push_back(taskHistoryTitleLikePattern(taskTitleQuery.trimmed()));
+    }
+    if (eventType) {
+        const QString typeName = domain::taskHistoryEventTypeName(*eventType);
+        if (typeName.isEmpty()) return failure<TaskHistoryPage>(domain::ErrorCategory::Validation);
+        sql += QStringLiteral(" AND event_type=?");
+        binds.push_back(typeName);
+    }
+    if (before.hasValue()) {
+        sql += QStringLiteral(
+            " AND (occurred_at_utc<? OR (occurred_at_utc=? AND event_id<?))");
+        binds << before.occurredAtUtc << before.occurredAtUtc << before.eventId;
+    }
+    sql += QStringLiteral(" ORDER BY occurred_at_utc DESC,event_id DESC LIMIT ?");
+    binds.push_back(pageSize + 1);
+
+    QSqlQuery query(m_database);
+    query.prepare(sql);
+    for (const QVariant &bind : binds) query.addBindValue(bind);
+    if (!query.exec()) return failure<TaskHistoryPage>(queryFailure(query));
+
+    RepositoryResult<TaskHistoryPage> result;
+    while (query.next()) {
+        if (result.value.events.size() == pageSize) {
+            result.value.hasMore = true;
+            break;
+        }
+        const auto type = domain::taskHistoryEventTypeFromName(query.value(2).toString());
+        const int version = query.value(6).toInt();
+        const auto changes = domain::deserializeTaskHistoryDiff(
+            version, query.value(7).toString(), query.value(8).toString(),
+            query.value(9).toString());
+        if (!type || !changes) {
+            return failure<TaskHistoryPage>(domain::ErrorCategory::InvalidResponse);
+        }
+
+        domain::TaskHistoryEvent event;
+        event.eventId = query.value(0).toLongLong();
+        event.taskId = query.value(1).toLongLong();
+        event.type = *type;
+        event.occurredAtUtc = query.value(3).toString();
+        if (!query.isNull(4)) event.taskRevision = query.value(4).toLongLong();
+        event.taskTitle = query.value(5).toString();
+        event.serializationVersion = version;
+        event.changes = *changes;
+        result.value.events.push_back(std::move(event));
+    }
+    if (!result.value.events.isEmpty()) {
+        const auto &last = result.value.events.constLast();
+        result.value.nextCursor = {last.occurredAtUtc, last.eventId};
+    }
+    return result;
 }
 
 CurrencyFavoritesRepository::CurrencyFavoritesRepository(QSqlDatabase &database) : m_database(database) {}
@@ -2501,6 +2606,7 @@ RepositoryResult<void> SteamRepository::remove(qint64 id)
 
 StorageRepositories::StorageRepositories(QSqlDatabase &database)
     : tasks(database)
+    , taskHistory(database)
     , currencies(database)
     , favorites(database)
     , news(database)

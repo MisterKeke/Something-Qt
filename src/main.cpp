@@ -31,6 +31,7 @@
 #include "controllers/setups_controller.h"
 #include "controllers/steam_games_controller.h"
 #include "controllers/tasks_controller.h"
+#include "controllers/task_history_controller.h"
 #include "controllers/terminal_controller.h"
 #include "controllers/wallpaper_controller.h"
 #include "controllers/weather_controller.h"
@@ -131,6 +132,7 @@ int main(int argc, char *argv[])
     something::controllers::WallpaperController wallpaperController(&services,
                                                                      wallpaperImages);
     something::controllers::TasksController tasksController(&services, &clock, &mutationWorkflow);
+    something::controllers::TaskHistoryController taskHistoryController(&services);
     something::controllers::TerminalController terminalController(&commandService);
     something::controllers::CalendarController calendarController(&services, &clock);
     something::controllers::DashboardController dashboardController(&services, &clock);
@@ -235,6 +237,8 @@ int main(int argc, char *argv[])
                                              &legacyDataImportController);
     engine.rootContext()->setContextProperty(QStringLiteral("taskController"),
                                              &tasksController);
+    engine.rootContext()->setContextProperty(QStringLiteral("taskHistoryController"),
+                                             &taskHistoryController);
     engine.rootContext()->setContextProperty(QStringLiteral("terminalController"),
                                              &terminalController);
     engine.rootContext()->setContextProperty(QStringLiteral("calendarController"),

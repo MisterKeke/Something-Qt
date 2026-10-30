@@ -81,6 +81,7 @@ qt_add_executable(SomethingQt WIN32
     src/controllers/running_applications_controller.cpp
     src/controllers/settings_controller.cpp
     src/controllers/tasks_controller.cpp
+    src/controllers/task_history_controller.cpp
     src/controllers/terminal_controller.cpp
     src/controllers/wallpaper_controller.cpp
     src/controllers/weather_controller.cpp
@@ -120,6 +121,7 @@ qt_add_executable(SomethingQt WIN32
     src/services/currency_service.cpp
     src/services/favorites_service.cpp
     src/services/task_service.cpp
+    src/services/task_history_service.cpp
     src/services/application_command_service.cpp
     src/services/application_mutation_workflow.cpp
     src/services/preferences_service.cpp
@@ -131,6 +133,7 @@ qt_add_executable(SomethingQt WIN32
     src/storage/schema_migrator.cpp
     src/storage/storage_worker.cpp
     src/models/tasks_model.cpp
+    src/models/task_history_model.cpp
     src/models/terminal_output_model.cpp
     src/models/calendar_months_model.cpp
     src/models/currency_rates_model.cpp

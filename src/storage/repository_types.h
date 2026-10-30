@@ -2,6 +2,7 @@
 
 #include "../domain/app_error.h"
 #include "../domain/task.h"
+#include "../domain/task_history.h"
 
 #include <QString>
 #include <QStringList>
@@ -29,6 +30,24 @@ using domain::SubtaskInput;
 using domain::Task;
 using domain::TaskFilter;
 using domain::TaskInput;
+
+struct TaskHistoryCursor final {
+    QString occurredAtUtc;
+    qint64 eventId{0};
+
+    bool isValid() const noexcept
+    {
+        return (occurredAtUtc.isEmpty() && eventId == 0)
+            || (!occurredAtUtc.isEmpty() && eventId > 0);
+    }
+    bool hasValue() const noexcept { return !occurredAtUtc.isEmpty(); }
+};
+
+struct TaskHistoryPage final {
+    QVector<domain::TaskHistoryEvent> events;
+    TaskHistoryCursor nextCursor;
+    bool hasMore{false};
+};
 
 struct FavoriteCategory {
     qint64 id{0};
