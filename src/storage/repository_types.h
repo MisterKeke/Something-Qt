@@ -5,6 +5,7 @@
 #include "../domain/task_history.h"
 #include "../domain/task_scheduling.h"
 #include "../domain/steam_release.h"
+#include "../domain/steam_game_updates.h"
 #include "../domain/weather_currency.h"
 
 #include <QString>

@@ -478,6 +478,54 @@ constexpr const char *weatherComparison[] = {
     "CREATE INDEX idx_weather_comparison_order ON weather_comparison_cities(display_order, identity)",
 };
 
+constexpr const char *steamGameUpdates[] = {
+    // Membership is independent of both price tracking and Release Radar.
+    // A row is a followed game; ownership_status is only a local user label.
+    R"SQL(CREATE TABLE steam_game_update_follows (
+        steam_app_id INTEGER PRIMARY KEY CHECK(steam_app_id BETWEEN 1 AND 4294967295),
+        store_url TEXT NOT NULL,
+        name TEXT NOT NULL CHECK(length(trim(name)) BETWEEN 1 AND 300),
+        artwork_source_url TEXT NOT NULL DEFAULT '',
+        artwork_filename TEXT NOT NULL DEFAULT '',
+        artwork_mime_type TEXT NOT NULL DEFAULT '',
+        artwork_byte_size INTEGER NOT NULL DEFAULT 0 CHECK(artwork_byte_size >= 0),
+        ownership_status TEXT NOT NULL DEFAULT 'not_owned'
+            CHECK(ownership_status IN ('owned', 'not_owned')),
+        added_at_utc TEXT NOT NULL CHECK(
+            length(trim(added_at_utc)) >= 20 AND substr(added_at_utc, -1, 1) = 'Z'
+            AND julianday(added_at_utc) IS NOT NULL),
+        last_successful_news_check_at_utc TEXT CHECK(
+            last_successful_news_check_at_utc IS NULL OR
+            (length(trim(last_successful_news_check_at_utc)) >= 20
+            AND substr(last_successful_news_check_at_utc, -1, 1) = 'Z'
+            AND julianday(last_successful_news_check_at_utc) IS NOT NULL)),
+        last_attempted_news_check_at_utc TEXT CHECK(
+            last_attempted_news_check_at_utc IS NULL OR
+            (length(trim(last_attempted_news_check_at_utc)) >= 20
+            AND substr(last_attempted_news_check_at_utc, -1, 1) = 'Z'
+            AND julianday(last_attempted_news_check_at_utc) IS NOT NULL)),
+        refresh_state TEXT NOT NULL DEFAULT 'never_attempted'
+            CHECK(refresh_state IN ('never_attempted', 'succeeded', 'failed')),
+        last_refresh_error TEXT NOT NULL DEFAULT '' CHECK(length(last_refresh_error) <= 500),
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        CHECK((artwork_filename = '' AND artwork_mime_type = '' AND artwork_byte_size = 0)
+            OR (artwork_filename <> '' AND artwork_mime_type IN
+                ('image/jpeg', 'image/png', 'image/webp') AND artwork_byte_size > 0)),
+        CHECK((refresh_state = 'never_attempted'
+                AND last_attempted_news_check_at_utc IS NULL
+                AND last_successful_news_check_at_utc IS NULL AND last_refresh_error = '')
+            OR (refresh_state = 'succeeded'
+                AND last_attempted_news_check_at_utc IS NOT NULL
+                AND last_successful_news_check_at_utc IS NOT NULL AND last_refresh_error = '')
+            OR (refresh_state = 'failed'
+                AND last_attempted_news_check_at_utc IS NOT NULL
+                AND length(trim(last_refresh_error)) > 0))
+    ))SQL",
+    "CREATE INDEX idx_steam_game_update_follows_name ON steam_game_update_follows(name COLLATE NOCASE, steam_app_id)",
+    "CREATE INDEX idx_steam_game_update_follows_added ON steam_game_update_follows(added_at_utc DESC, steam_app_id)",
+};
+
 constexpr std::array migrations{
     Migration{1, "core tasks currencies preferences", core, qsizetype(std::size(core))},
     Migration{2, "favorites and retained update news", favorites, qsizetype(std::size(favorites))},
@@ -503,6 +551,8 @@ constexpr std::array migrations{
               qsizetype(std::size(steamReleaseDateChangeNotice))},
     Migration{15, "calendar Steam release visibility", calendarGameReleaseVisibility,
               qsizetype(std::size(calendarGameReleaseVisibility))},
+    Migration{16, "independent Steam Game Updates follows", steamGameUpdates,
+              qsizetype(std::size(steamGameUpdates))},
 };
 
 bool fail(QString *diagnostic, const QString &message)
@@ -561,6 +611,7 @@ bool hasUnexpectedTables(const QSqlDatabase &database, QString *diagnostic, bool
         QStringLiteral("steam_game_images"),
         QStringLiteral("steam_price_observations"), QStringLiteral("data_imports"),
         QStringLiteral("steam_release_follows"),
+        QStringLiteral("steam_game_update_follows"),
         QStringLiteral("task_history"), QStringLiteral("task_schedules"),
         QStringLiteral("scheduling_preferences"),
         QStringLiteral("weather_comparison_cities")

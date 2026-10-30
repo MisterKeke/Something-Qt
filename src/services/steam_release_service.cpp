@@ -18,13 +18,16 @@ storage::StorageReply failed(domain::AppError error)
 
 void removeArtworkIfUnowned(const QString &profileDirectory, const QString &filename,
                             storage::SteamRepository &steam,
-                            storage::SteamReleaseRepository &steamReleases)
+                            storage::SteamReleaseRepository &steamReleases,
+                            storage::SteamGameUpdatesRepository &gameUpdates)
 {
     if (filename.isEmpty()) return;
     const auto priceOwner = steam.hasArtworkFilename(filename);
     if (!priceOwner.succeeded() || priceOwner.value) return;
     const auto releaseOwner = steamReleases.hasArtworkFilename(filename);
     if (!releaseOwner.succeeded() || releaseOwner.value) return;
+    const auto updatesOwner = gameUpdates.hasArtworkFilename(filename);
+    if (!updatesOwner.succeeded() || updatesOwner.value) return;
     QString originalPath;
     QString stagedPath;
     if (SteamArtworkStore::stageDeletion(profileDirectory, filename, &stagedPath,
@@ -38,13 +41,16 @@ void removeInstalledIfUnowned(const QString &profileDirectory,
                               const StagedSteamArtwork &artwork,
                               bool installedNewFile,
                               storage::SteamRepository &steam,
-                              storage::SteamReleaseRepository &steamReleases)
+                              storage::SteamReleaseRepository &steamReleases,
+                              storage::SteamGameUpdatesRepository &gameUpdates)
 {
     if (!installedNewFile) return;
     const auto releaseOwner = steamReleases.hasArtworkFilename(artwork.asset.filename);
     if (!releaseOwner.succeeded() || releaseOwner.value) return;
     const auto priceOwner = steam.hasArtworkFilename(artwork.asset.filename);
     if (!priceOwner.succeeded() || priceOwner.value) return;
+    const auto updatesOwner = gameUpdates.hasArtworkFilename(artwork.asset.filename);
+    if (!updatesOwner.succeeded() || updatesOwner.value) return;
     SteamArtworkStore::removeInstalledIfNew(profileDirectory, artwork, true);
 }
 
@@ -160,7 +166,8 @@ storage::StorageCommand SteamReleaseService::applyRefresh(
         if (!applied.succeeded()) return failed(applied.error);
 
         // A changed artwork URL clears the cached release image in the same
-        // transaction. Remove its old file only after checking both trackers.
+        // transaction. Remove its old file only after checking every Steam
+        // feature that can reference shared artwork.
         for (const storage::SteamReleaseRefreshUpdate &update : updates) {
             if (!update.refreshedDetails) continue;
             for (const domain::SteamTrackedRelease &oldRelease : previous.value) {
@@ -169,7 +176,8 @@ storage::StorageCommand SteamReleaseService::applyRefresh(
                     && !oldRelease.artwork.cachedFilename.isEmpty()) {
                     removeArtworkIfUnowned(profileDirectory,
                                            oldRelease.artwork.cachedFilename,
-                                           repositories.steam, repositories.steamReleases);
+                                           repositories.steam, repositories.steamReleases,
+                                           repositories.gameUpdates);
                     break;
                 }
             }
@@ -201,7 +209,8 @@ storage::StorageCommand SteamReleaseService::removeRelease(QString profileDirect
         const auto removed = repositories.steamReleases.remove(appId);
         if (!removed.succeeded()) return failed(removed.error);
         removeArtworkIfUnowned(profileDirectory, existing.value.artwork.cachedFilename,
-                               repositories.steam, repositories.steamReleases);
+                               repositories.steam, repositories.steamReleases,
+                               repositories.gameUpdates);
         storage::StorageReply reply;
         reply.values.insert(QStringLiteral("deletedAppId"), appId);
         return reply;
@@ -255,7 +264,8 @@ storage::StorageCommand SteamReleaseService::saveArtwork(
         if (cancelled()) {
             SteamArtworkStore::discard(profileDirectory, artwork);
             removeInstalledIfUnowned(profileDirectory, artwork, installedNewFile,
-                                     repositories.steam, repositories.steamReleases);
+                                     repositories.steam, repositories.steamReleases,
+                                     repositories.gameUpdates);
             return failed(domain::AppError::cancelled());
         }
 
@@ -268,13 +278,15 @@ storage::StorageCommand SteamReleaseService::saveArtwork(
         if (!saved.succeeded()) {
             SteamArtworkStore::discard(profileDirectory, artwork);
             removeInstalledIfUnowned(profileDirectory, artwork, installedNewFile,
-                                     repositories.steam, repositories.steamReleases);
+                                     repositories.steam, repositories.steamReleases,
+                                     repositories.gameUpdates);
             return failed(saved.error);
         }
         SteamArtworkStore::discard(profileDirectory, artwork);
         if (existing.value.artwork.cachedFilename != artwork.asset.filename) {
             removeArtworkIfUnowned(profileDirectory, existing.value.artwork.cachedFilename,
-                                   repositories.steam, repositories.steamReleases);
+                                   repositories.steam, repositories.steamReleases,
+                                   repositories.gameUpdates);
         }
         const auto refreshed = repositories.steamReleases.get(appId);
         if (!refreshed.succeeded()) return failed(refreshed.error);

@@ -125,6 +125,7 @@ bool DataImportRepository::targetIsEmpty(bool *empty, QString *blockingReason) c
         QStringLiteral("setups"), QStringLiteral("setup_apps"), QStringLiteral("setup_icons"),
         QStringLiteral("steam_games"), QStringLiteral("steam_game_images"),
         QStringLiteral("steam_release_follows"),
+        QStringLiteral("steam_game_update_follows"),
         QStringLiteral("data_imports")};
     for (const QString &table : tables) {
         qint64 count = 0;
@@ -152,6 +153,7 @@ bool DataImportRepository::targetIsEmpty(bool *empty, QString *blockingReason) c
                     {QStringLiteral("steam_games"), QStringLiteral("tracked games")},
                     {QStringLiteral("steam_game_images"), QStringLiteral("game artwork")},
                     {QStringLiteral("steam_release_follows"), QStringLiteral("followed releases")},
+                    {QStringLiteral("steam_game_update_follows"), QStringLiteral("followed Game Updates games")},
                     {QStringLiteral("data_imports"), QStringLiteral("a completed import")}};
                 *blockingReason = QStringLiteral("This Qt profile already contains %1 (%2 records). Import needs a fresh Qt profile; existing records will not be overwritten.")
                     .arg(labels.value(table, QStringLiteral("saved favorite updates"))).arg(count);

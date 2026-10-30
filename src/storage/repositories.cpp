@@ -4270,6 +4270,263 @@ RepositoryResult<void> SteamReleaseRepository::remove(quint32 appId)
                                         : failureVoid(domain::ErrorCategory::NotFound);
 }
 
+SteamGameUpdatesRepository::SteamGameUpdatesRepository(QSqlDatabase &database)
+    : m_database(database)
+{
+}
+
+RepositoryResult<QVector<domain::SteamGameUpdateFollow>> SteamGameUpdatesRepository::list(
+    const std::function<bool()> &cancellationRequested) const
+{
+    Q_ASSERT(QThread::currentThread() == m_database.driver()->thread());
+    QSqlQuery query(m_database);
+    if (!query.exec(QStringLiteral(
+            "SELECT steam_app_id FROM steam_game_update_follows "
+            "ORDER BY name COLLATE NOCASE,steam_app_id"))) {
+        return failure<QVector<domain::SteamGameUpdateFollow>>(queryFailure(query));
+    }
+    QVector<quint32> appIds;
+    while (query.next()) {
+        if (cancellationRequested && cancellationRequested())
+            return failure<QVector<domain::SteamGameUpdateFollow>>(
+                domain::ErrorCategory::Cancelled);
+        appIds.push_back(query.value(0).toUInt());
+    }
+    query.finish();
+
+    RepositoryResult<QVector<domain::SteamGameUpdateFollow>> result;
+    result.value.reserve(appIds.size());
+    for (quint32 appId : appIds) {
+        if (cancellationRequested && cancellationRequested())
+            return failure<QVector<domain::SteamGameUpdateFollow>>(
+                domain::ErrorCategory::Cancelled);
+        const auto follow = load(appId);
+        if (!follow.succeeded())
+            return failure<QVector<domain::SteamGameUpdateFollow>>(
+                follow.error.category());
+        result.value.push_back(follow.value);
+    }
+    return result;
+}
+
+RepositoryResult<domain::SteamGameUpdateFollow> SteamGameUpdatesRepository::get(
+    quint32 appId) const
+{
+    Q_ASSERT(QThread::currentThread() == m_database.driver()->thread());
+    if (appId == 0)
+        return failure<domain::SteamGameUpdateFollow>(domain::ErrorCategory::Validation);
+    return load(appId);
+}
+
+RepositoryResult<domain::SteamGameUpdateFollow> SteamGameUpdatesRepository::load(
+    quint32 appId) const
+{
+    QSqlQuery query(m_database);
+    query.prepare(QStringLiteral(
+        "SELECT steam_app_id,store_url,name,artwork_source_url,artwork_filename,"
+        "artwork_mime_type,artwork_byte_size,ownership_status,added_at_utc,"
+        "last_successful_news_check_at_utc,last_attempted_news_check_at_utc,"
+        "refresh_state,last_refresh_error "
+        "FROM steam_game_update_follows WHERE steam_app_id=?"));
+    query.addBindValue(appId);
+    if (!query.exec()) return failure<domain::SteamGameUpdateFollow>(queryFailure(query));
+    if (!query.next())
+        return failure<domain::SteamGameUpdateFollow>(domain::ErrorCategory::NotFound);
+
+    domain::SteamGameUpdateFollow follow;
+    follow.appId = query.value(0).toUInt();
+    follow.canonicalStoreUrl = query.value(1).toString();
+    follow.name = query.value(2).toString();
+    follow.artwork.sourceUrl = query.value(3).toString();
+    follow.artwork.cachedFilename = query.value(4).toString();
+    follow.artwork.mimeType = query.value(5).toString();
+    follow.artwork.byteSize = query.value(6).toLongLong();
+    const auto ownership = domain::steamGameUpdateOwnershipStatusFromName(
+        query.value(7).toString());
+    follow.addedAtUtc = query.value(8).toString();
+    follow.lastSuccessfulNewsCheckAtUtc = query.value(9).toString();
+    follow.lastAttemptedNewsCheckAtUtc = query.value(10).toString();
+    const auto refreshState = domain::steamGameUpdateRefreshStateFromName(
+        query.value(11).toString());
+    follow.lastRefreshError = query.value(12).toString();
+    if (!ownership || !refreshState)
+        return failure<domain::SteamGameUpdateFollow>(domain::ErrorCategory::Storage);
+    follow.ownershipStatus = *ownership;
+    follow.refreshState = *refreshState;
+    if (!domain::isValidSteamGameUpdateFollow(follow))
+        return failure<domain::SteamGameUpdateFollow>(domain::ErrorCategory::Storage);
+
+    RepositoryResult<domain::SteamGameUpdateFollow> result;
+    result.value = std::move(follow);
+    return result;
+}
+
+RepositoryResult<domain::SteamGameUpdateFollow> SteamGameUpdatesRepository::add(
+    domain::SteamGameUpdateFollow follow,
+    const std::function<bool()> &cancellationRequested)
+{
+    Q_ASSERT(QThread::currentThread() == m_database.driver()->thread());
+    follow.name = follow.name.trimmed();
+    const domain::SteamStoreUrl normalized =
+        domain::normalizeSteamStoreUrl(follow.canonicalStoreUrl);
+    if (normalized.isValid()) follow.canonicalStoreUrl = normalized.canonicalUrl;
+    if (!domain::isValidSteamGameUpdateFollow(follow))
+        return failure<domain::SteamGameUpdateFollow>(domain::ErrorCategory::Validation);
+    if (cancellationRequested && cancellationRequested())
+        return failure<domain::SteamGameUpdateFollow>(domain::ErrorCategory::Cancelled);
+
+    Transaction transaction(m_database);
+    if (!transaction.active())
+        return failure<domain::SteamGameUpdateFollow>(domain::ErrorCategory::Storage);
+    QSqlQuery query(m_database);
+    query.prepare(QStringLiteral(
+        "INSERT INTO steam_game_update_follows(steam_app_id,store_url,name,"
+        "artwork_source_url,artwork_filename,artwork_mime_type,artwork_byte_size,"
+        "ownership_status,added_at_utc,last_successful_news_check_at_utc,"
+        "last_attempted_news_check_at_utc,refresh_state,last_refresh_error) "
+        "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)"));
+    query.addBindValue(follow.appId);
+    query.addBindValue(follow.canonicalStoreUrl);
+    query.addBindValue(follow.name);
+    query.addBindValue(follow.artwork.sourceUrl);
+    query.addBindValue(follow.artwork.cachedFilename);
+    query.addBindValue(follow.artwork.mimeType);
+    query.addBindValue(follow.artwork.byteSize);
+    query.addBindValue(domain::steamGameUpdateOwnershipStatusName(follow.ownershipStatus));
+    query.addBindValue(follow.addedAtUtc);
+    query.addBindValue(nullableString(follow.lastSuccessfulNewsCheckAtUtc));
+    query.addBindValue(nullableString(follow.lastAttemptedNewsCheckAtUtc));
+    query.addBindValue(domain::steamGameUpdateRefreshStateName(follow.refreshState));
+    query.addBindValue(follow.lastRefreshError);
+    if (!query.exec())
+        return failure<domain::SteamGameUpdateFollow>(queryFailure(query));
+    if (cancellationRequested && cancellationRequested())
+        return failure<domain::SteamGameUpdateFollow>(domain::ErrorCategory::Cancelled);
+    const auto inserted = load(follow.appId);
+    if (!inserted.succeeded())
+        return failure<domain::SteamGameUpdateFollow>(inserted.error.category());
+    if (!transaction.commit())
+        return failure<domain::SteamGameUpdateFollow>(domain::ErrorCategory::Storage);
+    return inserted;
+}
+
+RepositoryResult<domain::SteamGameUpdateFollow>
+SteamGameUpdatesRepository::setOwnershipStatus(
+    quint32 appId, domain::SteamGameUpdateOwnershipStatus status)
+{
+    Q_ASSERT(QThread::currentThread() == m_database.driver()->thread());
+    if (appId == 0
+        || (status != domain::SteamGameUpdateOwnershipStatus::Owned
+            && status != domain::SteamGameUpdateOwnershipStatus::NotOwned)) {
+        return failure<domain::SteamGameUpdateFollow>(domain::ErrorCategory::Validation);
+    }
+    QSqlQuery query(m_database);
+    query.prepare(QStringLiteral(
+        "UPDATE steam_game_update_follows SET ownership_status=?,"
+        "updated_at=CURRENT_TIMESTAMP WHERE steam_app_id=?"));
+    query.addBindValue(domain::steamGameUpdateOwnershipStatusName(status));
+    query.addBindValue(appId);
+    if (!query.exec())
+        return failure<domain::SteamGameUpdateFollow>(queryFailure(query));
+    if (query.numRowsAffected() != 1)
+        return failure<domain::SteamGameUpdateFollow>(domain::ErrorCategory::NotFound);
+    return load(appId);
+}
+
+RepositoryResult<domain::SteamGameUpdateFollow>
+SteamGameUpdatesRepository::recordNewsCheck(
+    quint32 appId, QString attemptedAtUtc, bool succeeded, QString safeError)
+{
+    Q_ASSERT(QThread::currentThread() == m_database.driver()->thread());
+    attemptedAtUtc = attemptedAtUtc.trimmed();
+    safeError = safeError.trimmed();
+    if (appId == 0 || !validUtcInstant(attemptedAtUtc)
+        || (succeeded && !safeError.isEmpty())
+        || (!succeeded && (safeError.isEmpty() || safeError.size() > 500))) {
+        return failure<domain::SteamGameUpdateFollow>(domain::ErrorCategory::Validation);
+    }
+    QSqlQuery query(m_database);
+    query.prepare(QStringLiteral(
+        "UPDATE steam_game_update_follows SET "
+        "last_successful_news_check_at_utc=CASE WHEN ?=1 THEN ? "
+        "ELSE last_successful_news_check_at_utc END,"
+        "last_attempted_news_check_at_utc=?,refresh_state=?,last_refresh_error=?,"
+        "updated_at=CURRENT_TIMESTAMP WHERE steam_app_id=?"));
+    query.addBindValue(succeeded ? 1 : 0);
+    query.addBindValue(succeeded ? QVariant(attemptedAtUtc) : QVariant());
+    query.addBindValue(attemptedAtUtc);
+    query.addBindValue(domain::steamGameUpdateRefreshStateName(
+        succeeded ? domain::SteamGameUpdateRefreshState::Succeeded
+                  : domain::SteamGameUpdateRefreshState::Failed));
+    query.addBindValue(safeError);
+    query.addBindValue(appId);
+    if (!query.exec())
+        return failure<domain::SteamGameUpdateFollow>(queryFailure(query));
+    if (query.numRowsAffected() != 1)
+        return failure<domain::SteamGameUpdateFollow>(domain::ErrorCategory::NotFound);
+    return load(appId);
+}
+
+RepositoryResult<void> SteamGameUpdatesRepository::setArtwork(
+    quint32 appId, const QString &expectedSourceUrl,
+    const domain::SteamGameUpdateArtworkMetadata &artwork)
+{
+    Q_ASSERT(QThread::currentThread() == m_database.driver()->thread());
+    const auto current = get(appId);
+    if (!current.succeeded()) return failureVoid(current.error.category());
+    if (expectedSourceUrl.isEmpty()
+        || domain::normalizeSteamArtworkUrl(expectedSourceUrl) != expectedSourceUrl
+        || current.value.artwork.sourceUrl != expectedSourceUrl) {
+        return failureVoid(domain::ErrorCategory::Conflict);
+    }
+    domain::SteamGameUpdateFollow updated = current.value;
+    updated.artwork = artwork;
+    if (!domain::isValidSteamGameUpdateFollow(updated))
+        return failureVoid(domain::ErrorCategory::Validation);
+
+    QSqlQuery query(m_database);
+    query.prepare(QStringLiteral(
+        "UPDATE steam_game_update_follows SET artwork_filename=?,artwork_mime_type=?,"
+        "artwork_byte_size=?,updated_at=CURRENT_TIMESTAMP "
+        "WHERE steam_app_id=? AND artwork_source_url=?"));
+    query.addBindValue(artwork.cachedFilename);
+    query.addBindValue(artwork.mimeType);
+    query.addBindValue(artwork.byteSize);
+    query.addBindValue(appId);
+    query.addBindValue(expectedSourceUrl);
+    if (!query.exec()) return failureVoid(queryFailure(query));
+    return query.numRowsAffected() == 1 ? RepositoryResult<void>{}
+                                       : failureVoid(domain::ErrorCategory::Conflict);
+}
+
+RepositoryResult<bool> SteamGameUpdatesRepository::hasArtworkFilename(
+    const QString &filename) const
+{
+    Q_ASSERT(QThread::currentThread() == m_database.driver()->thread());
+    if (filename.isEmpty()) return failure<bool>(domain::ErrorCategory::Validation);
+    QSqlQuery query(m_database);
+    query.prepare(QStringLiteral(
+        "SELECT 1 FROM steam_game_update_follows WHERE artwork_filename=? LIMIT 1"));
+    query.addBindValue(filename);
+    if (!query.exec()) return failure<bool>(queryFailure(query));
+    RepositoryResult<bool> result;
+    result.value = query.next();
+    return result;
+}
+
+RepositoryResult<void> SteamGameUpdatesRepository::remove(quint32 appId)
+{
+    Q_ASSERT(QThread::currentThread() == m_database.driver()->thread());
+    if (appId == 0) return failureVoid(domain::ErrorCategory::Validation);
+    QSqlQuery query(m_database);
+    query.prepare(QStringLiteral(
+        "DELETE FROM steam_game_update_follows WHERE steam_app_id=?"));
+    query.addBindValue(appId);
+    if (!query.exec()) return failureVoid(queryFailure(query));
+    return query.numRowsAffected() == 1 ? RepositoryResult<void>{}
+                                       : failureVoid(domain::ErrorCategory::NotFound);
+}
+
 StorageRepositories::StorageRepositories(QSqlDatabase &database)
     : tasks(database)
     , taskHistory(database)
@@ -4285,6 +4542,7 @@ StorageRepositories::StorageRepositories(QSqlDatabase &database)
     , wallpapers(database)
     , steam(database)
     , steamReleases(database)
+    , gameUpdates(database)
     , dataImport(database)
 {
 }

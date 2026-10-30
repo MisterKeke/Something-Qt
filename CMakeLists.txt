@@ -96,6 +96,7 @@ qt_add_executable(SomethingQt WIN32
     src/domain/task_scheduling.cpp
     src/domain/scheduling_engine.cpp
     src/domain/steam_game.cpp
+    src/domain/steam_game_updates.cpp
     src/domain/steam_release.cpp
     src/domain/weather_currency.cpp
     src/platform/profile_instance_lock.cpp
@@ -124,6 +125,7 @@ qt_add_executable(SomethingQt WIN32
     src/services/setup_icon_store.cpp
     src/services/setups_service.cpp
     src/services/steam_artwork_store.cpp
+    src/services/steam_game_updates_service.cpp
     src/services/steam_release_service.cpp
     src/services/steam_service.cpp
     src/services/currency_service.cpp

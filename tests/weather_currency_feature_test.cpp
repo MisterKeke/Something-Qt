@@ -676,6 +676,7 @@ void WeatherCurrencyFeatureTest::weatherComparisonPersistenceRestoresOrderCacheA
         QVERIFY(downgrade.exec(QStringLiteral("DROP TABLE weather_comparison_cities")));
         QVERIFY(downgrade.exec(QStringLiteral("DROP TABLE steam_price_observations")));
         QVERIFY(downgrade.exec(QStringLiteral("DROP TABLE steam_release_follows")));
+        QVERIFY(downgrade.exec(QStringLiteral("DROP TABLE steam_game_update_follows")));
         QVERIFY(downgrade.exec(QStringLiteral(
             "DELETE FROM schema_migrations WHERE version>=11")));
     }

@@ -283,6 +283,30 @@ private:
     QSqlDatabase &m_database;
 };
 
+class SteamGameUpdatesRepository final {
+public:
+    explicit SteamGameUpdatesRepository(QSqlDatabase &database);
+    RepositoryResult<QVector<domain::SteamGameUpdateFollow>> list(
+        const std::function<bool()> &cancellationRequested = {}) const;
+    RepositoryResult<domain::SteamGameUpdateFollow> get(quint32 appId) const;
+    RepositoryResult<domain::SteamGameUpdateFollow> add(
+        domain::SteamGameUpdateFollow follow,
+        const std::function<bool()> &cancellationRequested = {});
+    RepositoryResult<domain::SteamGameUpdateFollow> setOwnershipStatus(
+        quint32 appId, domain::SteamGameUpdateOwnershipStatus status);
+    RepositoryResult<domain::SteamGameUpdateFollow> recordNewsCheck(
+        quint32 appId, QString attemptedAtUtc, bool succeeded, QString safeError);
+    RepositoryResult<void> setArtwork(
+        quint32 appId, const QString &expectedSourceUrl,
+        const domain::SteamGameUpdateArtworkMetadata &artwork);
+    RepositoryResult<bool> hasArtworkFilename(const QString &filename) const;
+    RepositoryResult<void> remove(quint32 appId);
+
+private:
+    RepositoryResult<domain::SteamGameUpdateFollow> load(quint32 appId) const;
+    QSqlDatabase &m_database;
+};
+
 // Constructed only by StorageWorker after migration. It is never passed across
 // threads; callers submit value-only commands to the worker.
 class StorageRepositories final {
@@ -302,6 +326,7 @@ public:
     WallpapersRepository wallpapers;
     SteamRepository steam;
     SteamReleaseRepository steamReleases;
+    SteamGameUpdatesRepository gameUpdates;
     DataImportRepository dataImport;
 };
 
