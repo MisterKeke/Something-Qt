@@ -129,6 +129,16 @@ void SchedulingPreviewModel::clearAcceptance()
     if (changed) notifyAcceptanceChanged();
 }
 
+QVariantList SchedulingPreviewModel::acceptedRecommendations() const
+{
+    QVariantList accepted;
+    for (const QVariant &value : m_rows) {
+        const QVariantMap row = value.toMap();
+        if (row.value(QStringLiteral("accepted")).toBool()) accepted.push_back(row);
+    }
+    return accepted;
+}
+
 bool SchedulingPreviewModel::setAccepted(qint64 taskId, bool accepted)
 {
     for (int rowIndex = 0; rowIndex < m_rows.size(); ++rowIndex) {

@@ -5,6 +5,8 @@
 #include "../services/task_service.h"
 
 #include <QThread>
+#include <QDate>
+#include <QTime>
 #include <QVariantMap>
 
 #include <utility>
@@ -31,12 +33,14 @@ SchedulingController::SchedulingController(application::ApplicationServiceGraph 
 
 void SchedulingController::generatePreview()
 {
+    if (m_applying) return;
     m_previewVisible = true;
     m_errorMessage.clear();
     m_statusMessage.clear();
     m_warnings.clear();
     m_daySummaries.clear();
     m_todayDate.clear();
+    m_previewPreferencesRevision = 0;
     m_recommendations.clear();
     m_previewAvailable = false;
     m_previewStale = false;
@@ -88,13 +92,114 @@ void SchedulingController::acceptAllValid()
     emit stateChanged();
 }
 
+void SchedulingController::applyAccepted()
+{
+    if (!canApply() || m_graph->lifecycle().state()
+            != application::ApplicationLifecycle::State::Running) return;
+    if (m_previewPreferencesRevision <= 0) {
+        m_errorMessage = QStringLiteral("Scheduling settings are missing from this preview.");
+        emit stateChanged();
+        return;
+    }
+
+    QVector<domain::TaskScheduleSnapshot> taskSnapshot;
+    const QVariantList recommendationRows = m_recommendations.recommendationRows();
+    taskSnapshot.reserve(recommendationRows.size());
+    for (const QVariant &value : recommendationRows) {
+        const QVariantMap row = value.toMap();
+        domain::TaskScheduleSnapshot snapshot;
+        snapshot.taskId = row.value(QStringLiteral("taskId")).toLongLong();
+        snapshot.taskRevision = row.value(QStringLiteral("taskRevision")).toLongLong();
+        snapshot.scheduleRevision = row.value(QStringLiteral("scheduleRevision")).toLongLong();
+        if (snapshot.taskId <= 0 || snapshot.taskRevision <= 0 || snapshot.scheduleRevision < 0) {
+            m_errorMessage = QStringLiteral("The task snapshot is invalid. Refresh the preview.");
+            emit stateChanged();
+            return;
+        }
+        taskSnapshot.push_back(snapshot);
+    }
+
+    QVector<domain::TaskScheduleProposal> proposals;
+    const QVariantList acceptedRows = m_recommendations.acceptedRecommendations();
+    proposals.reserve(acceptedRows.size());
+    for (const QVariant &value : acceptedRows) {
+        const QVariantMap row = value.toMap();
+        domain::TaskScheduleProposal proposal;
+        domain::TaskSchedule &schedule = proposal.schedule;
+        schedule.taskId = row.value(QStringLiteral("taskId")).toLongLong();
+        const QString plannedDate = row.value(QStringLiteral("plannedDate")).toString();
+        const QDate parsedDate = QDate::fromString(plannedDate, Qt::ISODate);
+        if (!parsedDate.isValid() || parsedDate.toString(Qt::ISODate) != plannedDate) {
+            m_errorMessage = QStringLiteral("An accepted recommendation has no valid planned date.");
+            emit stateChanged();
+            return;
+        }
+        schedule.plannedDate = parsedDate;
+        const QString plannedStartTime = row.value(QStringLiteral("plannedStartTime")).toString();
+        if (!plannedStartTime.isEmpty()) {
+            const QTime parsedTime = QTime::fromString(plannedStartTime,
+                                                        QStringLiteral("HH:mm"));
+            if (!parsedTime.isValid()
+                || parsedTime.toString(QStringLiteral("HH:mm")) != plannedStartTime) {
+                m_errorMessage = QStringLiteral("An accepted recommendation has an invalid start time.");
+                emit stateChanged();
+                return;
+            }
+            schedule.plannedStartTime = parsedTime;
+        }
+        schedule.estimatedDurationMinutes =
+            row.value(QStringLiteral("estimatedDurationMinutes")).toInt();
+        schedule.revision = row.value(QStringLiteral("scheduleRevision")).toLongLong();
+        proposal.expectedTaskRevision = row.value(QStringLiteral("taskRevision")).toLongLong();
+        if (!row.value(QStringLiteral("canAccept")).toBool()
+            || proposal.expectedTaskRevision <= 0 || schedule.revision < 0
+            || domain::normalizeTaskSchedule(schedule).isError()) {
+            m_errorMessage = QStringLiteral("An accepted recommendation is invalid. Refresh the preview.");
+            emit stateChanged();
+            return;
+        }
+        proposals.push_back(std::move(proposal));
+    }
+    if (proposals.isEmpty()) return;
+
+    const auto operation = m_graph->beginOperation(
+        QStringLiteral("apply accepted schedule recommendations"),
+        QStringLiteral("smart-schedule-apply"));
+    if (!operation.isValid()) {
+        m_errorMessage = QStringLiteral("The accepted schedules could not be applied right now.");
+        emit stateChanged();
+        return;
+    }
+
+    const quint64 id = operation.id.value;
+    m_currentOperationId = id;
+    m_pending.insert(id, Action::ApplySchedules);
+    m_applying = true;
+    m_errorMessage.clear();
+    m_statusMessage = QStringLiteral("Saving accepted schedules atomically…");
+    emit stateChanged();
+    if (!m_graph->submitStorage(operation, services::SchedulingService::applyAcceptedSchedules(
+            std::move(proposals), std::move(taskSnapshot), m_previewPreferencesRevision))) {
+        const bool wasPending = m_pending.remove(id) > 0;
+        if (m_currentOperationId == id) m_currentOperationId = 0;
+        if (wasPending) {
+            m_applying = false;
+            m_errorMessage = QStringLiteral("The accepted schedules could not be submitted.");
+            m_statusMessage.clear();
+            emit stateChanged();
+        }
+    }
+}
+
 void SchedulingController::rejectProposal()
 {
+    if (m_applying) return;
     cancelCurrentOperation();
     m_recommendations.clear();
     m_daySummaries.clear();
     m_warnings.clear();
     m_todayDate.clear();
+    m_previewPreferencesRevision = 0;
     m_errorMessage.clear();
     m_statusMessage.clear();
     m_loading = false;
@@ -124,10 +229,15 @@ void SchedulingController::onStorageFinished(quint64 operationId,
                                              domain::AppError error)
 {
     const auto found = m_pending.find(operationId);
-    if (found == m_pending.end() || found.value() != Action::LoadSnapshot
-        || operationId != m_currentOperationId) return;
+    if (found == m_pending.end() || operationId != m_currentOperationId) return;
+    const Action action = found.value();
     m_pending.erase(found);
     m_currentOperationId = 0;
+    if (action == Action::ApplySchedules) {
+        finishApply(values, error);
+        return;
+    }
+    if (action != Action::LoadSnapshot) return;
     if (error.isError()) {
         finishWithError(error, QStringLiteral("Task and schedule data could not be loaded."));
         return;
@@ -176,6 +286,7 @@ bool SchedulingController::submitCalculation(const QVariantMap &snapshot)
         m_errorMessage = QStringLiteral("Scheduling preferences could not be read.");
         return false;
     }
+    m_previewPreferencesRevision = input.preferences.revision;
 
     const auto operation = m_graph->beginOperation(
         QStringLiteral("calculate smart schedule preview"),
@@ -247,13 +358,60 @@ void SchedulingController::onLifecycleChanged(application::ApplicationLifecycle:
         && state != application::ApplicationLifecycle::State::ShuttingDown
         && state != application::ApplicationLifecycle::State::Stopped) return;
     cancelCurrentOperation();
-    if (m_loading) {
+    if (m_loading || m_applying) {
+        const bool wasLoading = m_loading;
         m_loading = false;
-        m_previewAvailable = false;
+        m_applying = false;
+        if (wasLoading) m_previewAvailable = false;
         if (state == application::ApplicationLifecycle::State::Failed)
             m_errorMessage = m_graph->lifecycle().startupError().userMessage();
+        else
+            m_statusMessage = QStringLiteral("Scheduling stopped before completion.");
         emit stateChanged();
     }
+}
+
+void SchedulingController::finishApply(const QVariantMap &values, domain::AppError error)
+{
+    m_applying = false;
+    if (error.isCancelled()) {
+        m_statusMessage = QStringLiteral("The schedule batch was cancelled before it was saved.");
+        emit stateChanged();
+        return;
+    }
+    if (error.isError()) {
+        if (error.category() == domain::ErrorCategory::Conflict
+            || error.category() == domain::ErrorCategory::NotFound) {
+            m_previewStale = true;
+            m_recommendations.clearAcceptance();
+            m_errorMessage = QStringLiteral(
+                "Tasks, scheduling preferences, or saved plans changed since this preview. "
+                "No schedules were applied. Refresh the preview and accept them again.");
+            m_statusMessage = QStringLiteral("The preview is stale.");
+        } else {
+            m_errorMessage = error.userMessage().isEmpty()
+                ? QStringLiteral("No schedules were applied.") : error.userMessage();
+            m_statusMessage = QStringLiteral("The batch was rolled back. You can retry or reject it.");
+        }
+        emit stateChanged();
+        return;
+    }
+
+    const int acceptedCount = values.value(QStringLiteral("acceptedCount")).toInt();
+    const int changedCount = values.value(QStringLiteral("changedCount")).toInt();
+    m_recommendations.clear();
+    m_daySummaries.clear();
+    m_warnings.clear();
+    m_previewAvailable = false;
+    m_previewStale = false;
+    m_previewPreferencesRevision = 0;
+    m_errorMessage.clear();
+    m_statusMessage = changedCount == 0
+        ? QStringLiteral("No schedule records needed changes for the %1 accepted recommendation(s). Generate a fresh preview when ready.")
+              .arg(acceptedCount)
+        : QStringLiteral("Applied %1 accepted recommendation(s); %2 schedule record(s) changed. Generate a fresh preview when ready.")
+              .arg(acceptedCount).arg(changedCount);
+    emit stateChanged();
 }
 
 void SchedulingController::cancelCurrentOperation()
@@ -268,6 +426,12 @@ void SchedulingController::cancelCurrentOperation()
 void SchedulingController::invalidatePreview()
 {
     if (!m_previewVisible) return;
+    if (m_applying) {
+        m_statusMessage = QStringLiteral(
+            "Task data changed while applying. The stored revisions are being checked.");
+        emit stateChanged();
+        return;
+    }
     const bool wasLoading = m_loading;
     cancelCurrentOperation();
     m_loading = false;

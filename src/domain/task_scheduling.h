@@ -25,6 +25,19 @@ struct TaskSchedule final {
     QString updatedAt;
 };
 
+// The task revision and schedule revision are captured when a recommendation
+// is generated. Both are checked before the schedule is applied.
+struct TaskScheduleProposal final {
+    TaskSchedule schedule;
+    qint64 expectedTaskRevision{0};
+};
+
+struct TaskScheduleSnapshot final {
+    qint64 taskId{0};
+    qint64 taskRevision{0};
+    qint64 scheduleRevision{0};
+};
+
 struct SchedulingPreferences final {
     // ISO weekday numbers: Monday=1 through Sunday=7. An empty list means
     // the profile has explicitly disabled all working days.

@@ -250,6 +250,7 @@ Item {
                     visible: root.activeView === "tasks"
                     quiet: true
                     enabled: taskController.ready && !schedulingController.loading
+                             && !schedulingController.applying
                     onClicked: schedulingController.generatePreview()
                 }
                 Shared.AppButton {
@@ -398,7 +399,7 @@ Item {
                     }
                     Item { Layout.fillWidth: true }
                     BusyIndicator {
-                        visible: schedulingController.loading
+                        visible: schedulingController.loading || schedulingController.applying
                         running: visible
                         width: 24
                         height: 24
@@ -408,11 +409,13 @@ Item {
                         text: qsTr("Refresh preview")
                         quiet: true
                         enabled: taskController.ready && !schedulingController.loading
+                                 && !schedulingController.applying
                         onClicked: schedulingController.generatePreview()
                     }
                     Shared.AppButton {
                         text: qsTr("Reject proposal")
                         quiet: true
+                        enabled: !schedulingController.applying
                         onClicked: schedulingController.rejectProposal()
                     }
                 }
@@ -462,6 +465,11 @@ Item {
                         enabled: schedulingController.canStage
                                  && schedulingController.validCount > 0
                         onClicked: schedulingController.acceptAllValid()
+                    }
+                    Shared.AppButton {
+                        text: qsTr("Apply accepted")
+                        enabled: schedulingController.canApply
+                        onClicked: schedulingController.applyAccepted()
                     }
                 }
 

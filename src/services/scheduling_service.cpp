@@ -240,6 +240,37 @@ storage::StorageCommand SchedulingService::loadPreviewSnapshot()
     };
 }
 
+storage::StorageCommand SchedulingService::applyAcceptedSchedules(
+    QVector<domain::TaskScheduleProposal> proposals,
+    QVector<domain::TaskScheduleSnapshot> taskSnapshot,
+    qint64 expectedPreferencesRevision)
+{
+    if (proposals.isEmpty() || taskSnapshot.isEmpty() || expectedPreferencesRevision <= 0) {
+        return [](storage::StorageRepositories &, const std::function<bool()> &) {
+            return failed(domain::AppError(domain::ErrorCategory::Validation));
+        };
+    }
+    return [proposals = std::move(proposals), taskSnapshot = std::move(taskSnapshot),
+            expectedPreferencesRevision](
+               storage::StorageRepositories &repositories,
+               const std::function<bool()> &cancelled) {
+        if (cancelled()) return failed(domain::AppError::cancelled());
+        const auto result = repositories.scheduling.applyTaskSchedules(
+            proposals, taskSnapshot, expectedPreferencesRevision, cancelled);
+        if (!result.succeeded()) return failed(result.error);
+
+        QVariantList schedules;
+        schedules.reserve(result.value.schedules.size());
+        for (const domain::TaskSchedule &schedule : result.value.schedules)
+            schedules.push_back(SchedulingService::toVariantMap(schedule));
+        storage::StorageReply reply;
+        reply.values.insert(QStringLiteral("schedules"), schedules);
+        reply.values.insert(QStringLiteral("acceptedCount"), result.value.schedules.size());
+        reply.values.insert(QStringLiteral("changedCount"), result.value.changedCount);
+        return reply;
+    };
+}
+
 storage::StorageCommand SchedulingService::loadTaskSchedules()
 {
     return [](storage::StorageRepositories &repositories,

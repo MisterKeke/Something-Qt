@@ -51,6 +51,8 @@ public:
     void setRecommendations(QVariantList recommendations);
     void clear();
     void clearAcceptance();
+    QVariantList recommendationRows() const { return m_rows; }
+    QVariantList acceptedRecommendations() const;
     Q_INVOKABLE bool setAccepted(qint64 taskId, bool accepted);
     Q_INVOKABLE void acceptAllValid();
 

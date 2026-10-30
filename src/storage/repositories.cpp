@@ -282,6 +282,64 @@ bool insertTaskHistory(QSqlDatabase &database, qint64 taskId,
     return true;
 }
 
+bool taskHistoryTableExists(QSqlDatabase &database, bool *exists,
+                            domain::AppError *error)
+{
+    QSqlQuery query(database);
+    if (!query.exec(QStringLiteral(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='task_history'"))) {
+        *error = domain::AppError(queryFailure(query));
+        return false;
+    }
+    *exists = query.next();
+    return true;
+}
+
+QVector<domain::TaskHistoryChange> taskScheduleHistoryChanges(
+    const TaskSchedule &before, const TaskSchedule &after)
+{
+    QVector<domain::TaskHistoryChange> changes;
+    if (before.plannedDate != after.plannedDate) {
+        const domain::TaskHistoryValue oldValue = before.plannedDate
+            ? historyValue(QJsonValue(before.plannedDate->toString(Qt::ISODate)))
+            : domain::TaskHistoryValue::null();
+        const domain::TaskHistoryValue newValue = after.plannedDate
+            ? historyValue(QJsonValue(after.plannedDate->toString(Qt::ISODate)))
+            : domain::TaskHistoryValue::null();
+        appendHistoryChange(&changes, QStringLiteral("plannedDate"),
+                            oldValue, newValue);
+    }
+    if (before.plannedStartTime != after.plannedStartTime) {
+        const domain::TaskHistoryValue oldValue = before.plannedStartTime
+            ? historyValue(QJsonValue(before.plannedStartTime->toString(QStringLiteral("HH:mm"))))
+            : domain::TaskHistoryValue::null();
+        const domain::TaskHistoryValue newValue = after.plannedStartTime
+            ? historyValue(QJsonValue(after.plannedStartTime->toString(QStringLiteral("HH:mm"))))
+            : domain::TaskHistoryValue::null();
+        appendHistoryChange(&changes, QStringLiteral("plannedStartTime"),
+                            oldValue, newValue);
+    }
+    if (before.estimatedDurationMinutes != after.estimatedDurationMinutes) {
+        const domain::TaskHistoryValue oldValue = before.estimatedDurationMinutes
+            ? historyValue(QJsonValue(*before.estimatedDurationMinutes))
+            : domain::TaskHistoryValue::null();
+        const domain::TaskHistoryValue newValue = after.estimatedDurationMinutes
+            ? historyValue(QJsonValue(*after.estimatedDurationMinutes))
+            : domain::TaskHistoryValue::null();
+        appendHistoryChange(&changes, QStringLiteral("estimatedDurationMinutes"),
+                            oldValue, newValue);
+    }
+    return changes;
+}
+
+bool sameScheduleValues(const TaskSchedule &left, const TaskSchedule &right)
+{
+    return left.taskId == right.taskId
+        && left.plannedDate == right.plannedDate
+        && left.plannedStartTime == right.plannedStartTime
+        && left.estimatedDurationMinutes == right.estimatedDurationMinutes;
+}
+
 domain::TaskHistoryEventType taskUpdateEventType(
     const Task &before, const Task &after,
     const QVector<domain::TaskHistoryChange> &changes)
@@ -897,6 +955,230 @@ RepositoryResult<TaskSchedule> SchedulingRepository::setTaskSchedule(
     if (!saved.succeeded()) return saved;
     if (!transaction.commit()) return failure<TaskSchedule>(domain::ErrorCategory::Storage);
     return saved;
+}
+
+RepositoryResult<TaskScheduleBatchResult> SchedulingRepository::applyTaskSchedules(
+    const QVector<TaskScheduleProposal> &proposals,
+    const QVector<TaskScheduleSnapshot> &taskSnapshot,
+    qint64 expectedPreferencesRevision,
+    const std::function<bool()> &cancelled)
+{
+    Q_ASSERT(QThread::currentThread() == m_database.driver()->thread());
+    if (proposals.isEmpty() || taskSnapshot.isEmpty() || expectedPreferencesRevision <= 0)
+        return failure<TaskScheduleBatchResult>(domain::ErrorCategory::Validation);
+
+    QHash<qint64, TaskScheduleSnapshot> expectedTasks;
+    expectedTasks.reserve(taskSnapshot.size());
+    for (const TaskScheduleSnapshot &snapshot : taskSnapshot) {
+        if (snapshot.taskId <= 0 || snapshot.taskRevision <= 0 || snapshot.scheduleRevision < 0
+            || expectedTasks.contains(snapshot.taskId)) {
+            return failure<TaskScheduleBatchResult>(domain::ErrorCategory::Validation);
+        }
+        expectedTasks.insert(snapshot.taskId, snapshot);
+    }
+
+    QSet<qint64> seenTaskIds;
+    for (const TaskScheduleProposal &proposal : proposals) {
+        TaskSchedule schedule = proposal.schedule;
+        const auto expectedTask = expectedTasks.constFind(schedule.taskId);
+        if (proposal.expectedTaskRevision <= 0 || !schedule.plannedDate
+            || schedule.revision < 0 || seenTaskIds.contains(schedule.taskId)
+            || expectedTask == expectedTasks.cend()
+            || expectedTask->taskRevision != proposal.expectedTaskRevision
+            || expectedTask->scheduleRevision != schedule.revision
+            || domain::normalizeTaskSchedule(schedule).isError()) {
+            return failure<TaskScheduleBatchResult>(domain::ErrorCategory::Validation);
+        }
+        seenTaskIds.insert(schedule.taskId);
+    }
+    const auto isCancelled = [&cancelled] { return cancelled && cancelled(); };
+    if (isCancelled()) {
+        RepositoryResult<TaskScheduleBatchResult> result;
+        result.error = domain::AppError::cancelled();
+        return result;
+    }
+
+    Transaction transaction(m_database);
+    if (!transaction.active())
+        return failure<TaskScheduleBatchResult>(domain::ErrorCategory::Storage);
+
+    const auto preferences = schedulingPreferences();
+    if (!preferences.succeeded())
+        return failure<TaskScheduleBatchResult>(preferences.error.category());
+    if (preferences.value.revision != expectedPreferencesRevision)
+        return failure<TaskScheduleBatchResult>(domain::ErrorCategory::Conflict);
+
+    struct LiveTask final {
+        qint64 revision{0};
+        QString title;
+    };
+    QHash<qint64, LiveTask> liveTasks;
+    liveTasks.reserve(taskSnapshot.size());
+    QSqlQuery tasksQuery(m_database);
+    if (!tasksQuery.exec(QStringLiteral(
+            "SELECT id,revision,title FROM tasks WHERE is_completed=0 ORDER BY id"))) {
+        return failure<TaskScheduleBatchResult>(queryFailure(tasksQuery));
+    }
+    while (tasksQuery.next()) {
+        if (isCancelled()) {
+            RepositoryResult<TaskScheduleBatchResult> result;
+            result.error = domain::AppError::cancelled();
+            return result;
+        }
+        bool idOk = false;
+        bool revisionOk = false;
+        const qint64 taskId = tasksQuery.value(0).toLongLong(&idOk);
+        const qint64 revision = tasksQuery.value(1).toLongLong(&revisionOk);
+        if (!idOk || !revisionOk || taskId <= 0 || revision <= 0)
+            return failure<TaskScheduleBatchResult>(domain::ErrorCategory::Storage);
+        liveTasks.insert(taskId, LiveTask{revision, tasksQuery.value(2).toString()});
+    }
+    tasksQuery.finish();
+    if (liveTasks.size() != expectedTasks.size())
+        return failure<TaskScheduleBatchResult>(domain::ErrorCategory::Conflict);
+    for (const TaskScheduleSnapshot &snapshot : taskSnapshot) {
+        const auto live = liveTasks.constFind(snapshot.taskId);
+        if (live == liveTasks.cend() || live->revision != snapshot.taskRevision)
+            return failure<TaskScheduleBatchResult>(domain::ErrorCategory::Conflict);
+    }
+
+    QHash<qint64, TaskSchedule> currentSchedules;
+    QSqlQuery schedulesQuery(m_database);
+    if (!schedulesQuery.exec(QStringLiteral(
+            "SELECT task_id,planned_date,planned_start_time,estimated_duration_minutes,"
+            "revision,updated_at FROM task_schedules ORDER BY task_id"))) {
+        return failure<TaskScheduleBatchResult>(queryFailure(schedulesQuery));
+    }
+    while (schedulesQuery.next()) {
+        if (isCancelled()) {
+            RepositoryResult<TaskScheduleBatchResult> result;
+            result.error = domain::AppError::cancelled();
+            return result;
+        }
+        const auto schedule = taskScheduleFromQuery(schedulesQuery, 0, true);
+        if (!schedule.succeeded())
+            return failure<TaskScheduleBatchResult>(schedule.error.category());
+        currentSchedules.insert(schedule.value.taskId, schedule.value);
+    }
+    schedulesQuery.finish();
+    for (const TaskScheduleSnapshot &snapshot : taskSnapshot) {
+        if (!currentSchedules.contains(snapshot.taskId)) {
+            TaskSchedule schedule;
+            schedule.taskId = snapshot.taskId;
+            currentSchedules.insert(snapshot.taskId, schedule);
+        }
+        if (currentSchedules.value(snapshot.taskId).revision != snapshot.scheduleRevision)
+            return failure<TaskScheduleBatchResult>(domain::ErrorCategory::Conflict);
+    }
+
+    struct CheckedProposal final {
+        TaskScheduleProposal proposal;
+        TaskSchedule currentSchedule;
+        QString taskTitle;
+    };
+    QVector<CheckedProposal> checked;
+    checked.reserve(proposals.size());
+    for (const TaskScheduleProposal &proposal : proposals) {
+        const LiveTask task = liveTasks.value(proposal.schedule.taskId);
+        checked.push_back({proposal, currentSchedules.value(proposal.schedule.taskId), task.title});
+    }
+
+    bool historyAvailable = false;
+    domain::AppError historyAvailabilityError;
+    if (!taskHistoryTableExists(m_database, &historyAvailable, &historyAvailabilityError))
+        return failure<TaskScheduleBatchResult>(historyAvailabilityError.category());
+
+    TaskScheduleBatchResult batch;
+    batch.schedules.reserve(checked.size());
+    for (const CheckedProposal &entry : checked) {
+        if (isCancelled()) {
+            RepositoryResult<TaskScheduleBatchResult> result;
+            result.error = domain::AppError::cancelled();
+            return result;
+        }
+
+        const TaskSchedule &schedule = entry.proposal.schedule;
+        if (sameScheduleValues(entry.currentSchedule, schedule)) {
+            batch.schedules.push_back(entry.currentSchedule);
+            continue;
+        }
+
+        const QString plannedDate = schedule.plannedDate->toString(Qt::ISODate);
+        const QString plannedStart = schedule.plannedStartTime
+            ? schedule.plannedStartTime->toString(QStringLiteral("HH:mm")) : QString{};
+        QSqlQuery writeQuery(m_database);
+        if (schedule.revision == 0) {
+            writeQuery.prepare(QStringLiteral(
+                "INSERT INTO task_schedules(task_id,planned_date,planned_start_time,"
+                "estimated_duration_minutes,revision) "
+                "SELECT ?,?,?,?,1 WHERE EXISTS(SELECT 1 FROM tasks "
+                "WHERE id=? AND revision=? AND is_completed=0) "
+                "AND EXISTS(SELECT 1 FROM scheduling_preferences WHERE id=1 AND revision=?)"));
+            writeQuery.addBindValue(schedule.taskId);
+            writeQuery.addBindValue(plannedDate);
+            writeQuery.addBindValue(nullableString(plannedStart));
+            writeQuery.addBindValue(schedule.estimatedDurationMinutes
+                                        ? QVariant(*schedule.estimatedDurationMinutes)
+                                        : QVariant{});
+            writeQuery.addBindValue(schedule.taskId);
+            writeQuery.addBindValue(entry.proposal.expectedTaskRevision);
+            writeQuery.addBindValue(expectedPreferencesRevision);
+        } else {
+            writeQuery.prepare(QStringLiteral(
+                "UPDATE task_schedules SET planned_date=?,planned_start_time=?,"
+                "estimated_duration_minutes=?,revision=revision+1,updated_at=CURRENT_TIMESTAMP "
+                "WHERE task_id=? AND revision=? AND EXISTS(SELECT 1 FROM tasks "
+                "WHERE id=? AND revision=? AND is_completed=0) "
+                "AND EXISTS(SELECT 1 FROM scheduling_preferences WHERE id=1 AND revision=?)"));
+            writeQuery.addBindValue(plannedDate);
+            writeQuery.addBindValue(nullableString(plannedStart));
+            writeQuery.addBindValue(schedule.estimatedDurationMinutes
+                                        ? QVariant(*schedule.estimatedDurationMinutes)
+                                        : QVariant{});
+            writeQuery.addBindValue(schedule.taskId);
+            writeQuery.addBindValue(schedule.revision);
+            writeQuery.addBindValue(schedule.taskId);
+            writeQuery.addBindValue(entry.proposal.expectedTaskRevision);
+            writeQuery.addBindValue(expectedPreferencesRevision);
+        }
+        if (!writeQuery.exec())
+            return failure<TaskScheduleBatchResult>(queryFailure(writeQuery));
+        if (writeQuery.numRowsAffected() != 1)
+            return failure<TaskScheduleBatchResult>(domain::ErrorCategory::Conflict);
+
+        if (isCancelled()) {
+            RepositoryResult<TaskScheduleBatchResult> result;
+            result.error = domain::AppError::cancelled();
+            return result;
+        }
+        if (historyAvailable) {
+            const QVector<domain::TaskHistoryChange> changes = taskScheduleHistoryChanges(
+                entry.currentSchedule, schedule);
+            domain::AppError historyError;
+            if (!insertTaskHistory(m_database, schedule.taskId,
+                                   domain::TaskHistoryEventType::TaskUpdated, std::nullopt,
+                                   entry.taskTitle, changes, &historyError)) {
+                return failure<TaskScheduleBatchResult>(historyError.category());
+            }
+        }
+
+        const auto saved = loadTaskSchedule(schedule.taskId);
+        if (!saved.succeeded())
+            return failure<TaskScheduleBatchResult>(saved.error.category());
+        batch.schedules.push_back(saved.value);
+        ++batch.changedCount;
+    }
+
+    if (isCancelled()) {
+        RepositoryResult<TaskScheduleBatchResult> result;
+        result.error = domain::AppError::cancelled();
+        return result;
+    }
+    if (!transaction.commit())
+        return failure<TaskScheduleBatchResult>(domain::ErrorCategory::Storage);
+    RepositoryResult<TaskScheduleBatchResult> result;
+    result.value = std::move(batch);
+    return result;
 }
 
 RepositoryResult<SchedulingPreferences> SchedulingRepository::schedulingPreferences() const

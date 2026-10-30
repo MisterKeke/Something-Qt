@@ -14,6 +14,10 @@ public:
     static storage::StorageCommand loadTaskSchedules();
     static storage::StorageCommand loadTaskSchedule(qint64 taskId);
     static storage::StorageCommand loadPreviewSnapshot();
+    static storage::StorageCommand applyAcceptedSchedules(
+        QVector<domain::TaskScheduleProposal> proposals,
+        QVector<domain::TaskScheduleSnapshot> taskSnapshot,
+        qint64 expectedPreferencesRevision);
     static storage::StorageCommand saveTaskSchedule(domain::TaskSchedule schedule,
                                                     qint64 expectedRevision);
     static storage::StorageCommand loadPreferences();

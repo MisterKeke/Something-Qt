@@ -23,7 +23,9 @@ class SchedulingController final : public QObject {
     Q_PROPERTY(bool previewVisible READ previewVisible NOTIFY stateChanged)
     Q_PROPERTY(bool previewAvailable READ previewAvailable NOTIFY stateChanged)
     Q_PROPERTY(bool previewStale READ previewStale NOTIFY stateChanged)
+    Q_PROPERTY(bool applying READ applying NOTIFY stateChanged)
     Q_PROPERTY(bool canStage READ canStage NOTIFY stateChanged)
+    Q_PROPERTY(bool canApply READ canApply NOTIFY stateChanged)
     Q_PROPERTY(int acceptedCount READ acceptedCount NOTIFY stateChanged)
     Q_PROPERTY(int validCount READ validCount NOTIFY stateChanged)
     Q_PROPERTY(QString errorMessage READ errorMessage NOTIFY stateChanged)
@@ -42,7 +44,10 @@ public:
     bool previewVisible() const noexcept { return m_previewVisible; }
     bool previewAvailable() const noexcept { return m_previewAvailable; }
     bool previewStale() const noexcept { return m_previewStale; }
-    bool canStage() const noexcept { return m_previewAvailable && !m_loading && !m_previewStale; }
+    bool applying() const noexcept { return m_applying; }
+    bool canStage() const noexcept
+    { return m_previewAvailable && !m_loading && !m_applying && !m_previewStale; }
+    bool canApply() const noexcept { return canStage() && acceptedCount() > 0; }
     int acceptedCount() const noexcept { return m_recommendations.acceptedCount(); }
     int validCount() const noexcept { return m_recommendations.validCount(); }
     QString errorMessage() const { return m_errorMessage; }
@@ -52,6 +57,7 @@ public:
     Q_INVOKABLE void generatePreview();
     Q_INVOKABLE void setRecommendationAccepted(qint64 taskId, bool accepted);
     Q_INVOKABLE void acceptAllValid();
+    Q_INVOKABLE void applyAccepted();
     Q_INVOKABLE void rejectProposal();
 
 public slots:
@@ -62,7 +68,7 @@ signals:
     void stateChanged();
 
 private:
-    enum class Action { LoadSnapshot, Calculate };
+    enum class Action { LoadSnapshot, Calculate, ApplySchedules };
 
     void onStorageFinished(quint64 operationId, const QVariantMap &values,
                            domain::AppError error);
@@ -70,6 +76,7 @@ private:
                                domain::AppError error);
     void onLifecycleChanged(application::ApplicationLifecycle::State state);
     bool submitCalculation(const QVariantMap &snapshot);
+    void finishApply(const QVariantMap &values, domain::AppError error);
     void cancelCurrentOperation();
     void invalidatePreview();
     void finishWithError(domain::AppError error, const QString &fallback);
@@ -83,10 +90,12 @@ private:
     quint64 m_currentOperationId{0};
     QDateTime m_previewNowUtc;
     QTimeZone m_previewTimeZone;
+    qint64 m_previewPreferencesRevision{0};
     QString m_todayDate;
     QString m_errorMessage;
     QString m_statusMessage;
     bool m_loading{false};
+    bool m_applying{false};
     bool m_previewVisible{false};
     bool m_previewAvailable{false};
     bool m_previewStale{false};

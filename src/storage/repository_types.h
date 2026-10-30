@@ -32,7 +32,14 @@ using domain::Task;
 using domain::TaskFilter;
 using domain::TaskInput;
 using domain::TaskSchedule;
+using domain::TaskScheduleProposal;
+using domain::TaskScheduleSnapshot;
 using domain::SchedulingPreferences;
+
+struct TaskScheduleBatchResult final {
+    QVector<TaskSchedule> schedules;
+    int changedCount{0};
+};
 
 struct TaskHistoryCursor final {
     QString occurredAtUtc;

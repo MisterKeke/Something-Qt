@@ -54,6 +54,11 @@ public:
     RepositoryResult<QVector<TaskSchedule>> taskSchedules() const;
     RepositoryResult<TaskSchedule> setTaskSchedule(const TaskSchedule &schedule,
                                                    qint64 expectedRevision);
+    RepositoryResult<TaskScheduleBatchResult> applyTaskSchedules(
+        const QVector<TaskScheduleProposal> &proposals,
+        const QVector<TaskScheduleSnapshot> &taskSnapshot,
+        qint64 expectedPreferencesRevision,
+        const std::function<bool()> &cancelled = {});
     RepositoryResult<SchedulingPreferences> schedulingPreferences() const;
     RepositoryResult<SchedulingPreferences> setSchedulingPreferences(
         const SchedulingPreferences &preferences, qint64 expectedRevision);
