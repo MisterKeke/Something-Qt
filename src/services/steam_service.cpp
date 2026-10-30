@@ -113,12 +113,12 @@ storage::StorageCommand SteamService::loadSnapshot(QString profileDirectory)
 
 storage::StorageCommand SteamService::loadPriceHistory(
     qint64 gameId, QString countryCode, QString currencyCode,
-    storage::SteamPriceHistoryRange range)
+    storage::SteamPriceHistoryRange range, bool includeMarkets)
 {
     countryCode = countryCode.trimmed().toUpper();
     currencyCode = currencyCode.trimmed().toUpper();
     return [gameId, countryCode = std::move(countryCode),
-            currencyCode = std::move(currencyCode), range](
+            currencyCode = std::move(currencyCode), range, includeMarkets](
                storage::StorageRepositories &repositories,
                const std::function<bool()> &cancelled) {
         if (cancelled()) return failed(domain::AppError::cancelled());
@@ -153,9 +153,12 @@ storage::StorageCommand SteamService::loadPriceHistory(
             gameId, countryCode, currencyCode, range, cancelled);
         if (!loaded.succeeded()) return failed(loaded.error);
         if (cancelled()) return failed(domain::AppError::cancelled());
-        const auto availableMarkets = repositories.steam.priceHistoryMarkets(gameId, cancelled);
-        if (!availableMarkets.succeeded()) return failed(availableMarkets.error);
-        if (cancelled()) return failed(domain::AppError::cancelled());
+        storage::RepositoryResult<QVector<storage::SteamPriceHistoryMarket>> availableMarkets;
+        if (includeMarkets) {
+            availableMarkets = repositories.steam.priceHistoryMarkets(gameId, cancelled);
+            if (!availableMarkets.succeeded()) return failed(availableMarkets.error);
+            if (cancelled()) return failed(domain::AppError::cancelled());
+        }
 
         const storage::SteamPriceHistoryStatistics &statistics = loaded.value.statistics;
         QVariantMap value{
@@ -241,6 +244,7 @@ storage::StorageCommand SteamService::loadPriceHistory(
         QVariantList points;
         points.reserve(loaded.value.points.size());
         for (const storage::SteamPriceHistoryPoint &point : loaded.value.points) {
+            if (cancelled()) return failed(domain::AppError::cancelled());
             QVariantMap pointValue{
                 {QStringLiteral("id"), point.id},
                 {QStringLiteral("observedAtUtc"), point.observedAtUtc},
@@ -259,21 +263,25 @@ storage::StorageCommand SteamService::loadPriceHistory(
         }
 
         QVariantList markets;
-        markets.reserve(availableMarkets.value.size());
-        for (const storage::SteamPriceHistoryMarket &market : availableMarkets.value) {
-            markets.push_back(QVariantMap{
-                {QStringLiteral("countryCode"), market.countryCode},
-                {QStringLiteral("currencyCode"), market.currencyCode},
-                {QStringLiteral("observationCount"), market.observationCount},
-                {QStringLiteral("firstObservationAtUtc"), market.firstObservationAtUtc},
-                {QStringLiteral("mostRecentObservationAtUtc"), market.mostRecentObservationAtUtc},
-            });
+        if (includeMarkets) {
+            markets.reserve(availableMarkets.value.size());
+            for (const storage::SteamPriceHistoryMarket &market : availableMarkets.value) {
+                if (cancelled()) return failed(domain::AppError::cancelled());
+                markets.push_back(QVariantMap{
+                    {QStringLiteral("countryCode"), market.countryCode},
+                    {QStringLiteral("currencyCode"), market.currencyCode},
+                    {QStringLiteral("observationCount"), market.observationCount},
+                    {QStringLiteral("firstObservationAtUtc"), market.firstObservationAtUtc},
+                    {QStringLiteral("mostRecentObservationAtUtc"), market.mostRecentObservationAtUtc},
+                });
+            }
         }
+        if (cancelled()) return failed(domain::AppError::cancelled());
 
         storage::StorageReply reply;
         reply.values.insert(QStringLiteral("statistics"), value);
         reply.values.insert(QStringLiteral("points"), points);
-        reply.values.insert(QStringLiteral("markets"), markets);
+        if (includeMarkets) reply.values.insert(QStringLiteral("markets"), markets);
         return reply;
     };
 }
@@ -363,6 +371,7 @@ storage::StorageCommand SteamService::deleteGame(QString profileDirectory, qint6
         if (cancelled()) return failed(domain::AppError::cancelled());
         const auto existing = repositories.steam.get(gameId);
         if (!existing.succeeded()) return failed(existing.error);
+        if (cancelled()) return failed(domain::AppError::cancelled());
         const auto removed = repositories.steam.remove(gameId);
         if (!removed.succeeded()) return failed(removed.error);
         if (existing.value.artwork) {

@@ -470,6 +470,9 @@ Item {
     Connections {
         target: root.controller
         function onStateChanged() {
+            if (root.controller && priceHistoryDialog.visible
+                    && Number(root.controller.historyGame.id || 0) <= 0)
+                priceHistoryDialog.close()
             if (root.pendingAddUrl.length > 0
                     && root.controller.notification.startsWith(qsTr("Added "))) {
                 if (storeUrlField.text === root.pendingAddUrl)

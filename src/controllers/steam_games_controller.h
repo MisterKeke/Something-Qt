@@ -184,6 +184,7 @@ private:
     bool m_countryBusy{false};
     bool m_deleteBusy{false};
     bool m_historyLoading{false};
+    bool m_historyMarketsLoaded{false};
     qint64 m_historyGameId{0};
 };
 

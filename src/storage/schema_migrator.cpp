@@ -230,6 +230,7 @@ constexpr const char *steam[] = {
 };
 
 constexpr const char *steamPriceObservations[] = {
+    // Observations are owned by a tracked game and are removed with that game.
     R"SQL(CREATE TABLE steam_price_observations (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         steam_game_id INTEGER NOT NULL REFERENCES steam_games(id) ON DELETE CASCADE,

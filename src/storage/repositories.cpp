@@ -3246,6 +3246,7 @@ RepositoryResult<QVector<SteamPriceHistoryMarket>> SteamRepository::priceHistory
         return failure<QVector<SteamPriceHistoryMarket>>(domain::ErrorCategory::Validation);
 
     QSqlQuery query(m_database);
+    query.setForwardOnly(true);
     query.prepare(QStringLiteral(
         "SELECT country_code,currency_code,COUNT(*),MIN(observed_at_utc),"
         "MAX(observed_at_utc) FROM steam_price_observations WHERE steam_game_id=? "
@@ -3311,6 +3312,7 @@ RepositoryResult<SteamPriceHistorySnapshot> SteamRepository::priceHistory(
     }
 
     QSqlQuery exists(m_database);
+    exists.setForwardOnly(true);
     exists.prepare(QStringLiteral("SELECT 1 FROM steam_games WHERE id=?"));
     exists.addBindValue(gameId);
     if (!exists.exec())
@@ -3318,6 +3320,8 @@ RepositoryResult<SteamPriceHistorySnapshot> SteamRepository::priceHistory(
     if (!exists.next())
         return failure<SteamPriceHistorySnapshot>(domain::ErrorCategory::NotFound);
     exists.finish();
+    if (cancellationRequested && cancellationRequested())
+        return failure<SteamPriceHistorySnapshot>(domain::ErrorCategory::Cancelled);
 
     SteamPriceHistorySnapshot snapshot;
     SteamPriceHistoryStatistics &statistics = snapshot.statistics;
@@ -3325,6 +3329,7 @@ RepositoryResult<SteamPriceHistorySnapshot> SteamRepository::priceHistory(
     statistics.currencyCode = currencyCode;
 
     QSqlQuery aggregate(m_database);
+    aggregate.setForwardOnly(true);
     aggregate.prepare(QStringLiteral(
         "SELECT COUNT(*),COALESCE(SUM(CASE WHEN current_price_minor IS NOT NULL "
         "THEN 1 ELSE 0 END),0),MIN(current_price_minor),MAX(current_price_minor),"
@@ -3347,8 +3352,11 @@ RepositoryResult<SteamPriceHistorySnapshot> SteamRepository::priceHistory(
     statistics.mostRecentObservationAtUtc = aggregate.value(5).toString();
     statistics.hasSufficientHistory = statistics.comparablePriceCount >= 2;
     aggregate.finish();
+    if (cancellationRequested && cancellationRequested())
+        return failure<SteamPriceHistorySnapshot>(domain::ErrorCategory::Cancelled);
 
     QSqlQuery latestObservation(m_database);
+    latestObservation.setForwardOnly(true);
     latestObservation.prepare(QStringLiteral(
         "SELECT price_state,observed_at_utc FROM steam_price_observations "
         "WHERE steam_game_id=? AND country_code=? AND currency_code IS ? "
@@ -3363,8 +3371,11 @@ RepositoryResult<SteamPriceHistorySnapshot> SteamRepository::priceHistory(
         statistics.latestObservationAtUtc = latestObservation.value(1).toString();
     }
     latestObservation.finish();
+    if (cancellationRequested && cancellationRequested())
+        return failure<SteamPriceHistorySnapshot>(domain::ErrorCategory::Cancelled);
 
     QSqlQuery latestPrice(m_database);
+    latestPrice.setForwardOnly(true);
     latestPrice.prepare(QStringLiteral(
         "SELECT current_price_minor,price_state,observed_at_utc "
         "FROM steam_price_observations WHERE steam_game_id=? AND country_code=? "
@@ -3381,6 +3392,8 @@ RepositoryResult<SteamPriceHistorySnapshot> SteamRepository::priceHistory(
         statistics.latestPriceAtUtc = latestPrice.value(2).toString();
     }
     latestPrice.finish();
+    if (cancellationRequested && cancellationRequested())
+        return failure<SteamPriceHistorySnapshot>(domain::ErrorCategory::Cancelled);
 
     struct PricePoint final {
         qint64 id{0};
@@ -3400,6 +3413,7 @@ RepositoryResult<SteamPriceHistorySnapshot> SteamRepository::priceHistory(
                      : QStringLiteral(" ORDER BY observed_at_utc DESC,id DESC LIMIT 1");
 
         QSqlQuery query(m_database);
+        query.setForwardOnly(true);
         query.prepare(sql);
         query.addBindValue(gameId);
         query.addBindValue(countryCode);
@@ -3462,6 +3476,7 @@ RepositoryResult<SteamPriceHistorySnapshot> SteamRepository::priceHistory(
         sql += QStringLiteral(" ORDER BY observed_at_utc ASC,id ASC LIMIT %1").arg(pageSize);
 
         QSqlQuery page(m_database);
+        page.setForwardOnly(true);
         page.prepare(sql);
         page.addBindValue(gameId);
         page.addBindValue(countryCode);
