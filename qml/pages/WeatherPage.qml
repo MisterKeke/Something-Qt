@@ -237,7 +237,8 @@ Item {
                             model: controller.primaryForecast
                             delegate: Button {
                                 required property string date
-                                required property string icon
+                                required property var model
+                                readonly property string forecastIcon: model.icon
                                 required property string condition
                                 required property double maximum
                                 required property double minimum
@@ -261,7 +262,7 @@ Item {
                                     anchors.margins: 10
                                     spacing: 4
                                     Label { text: root.formatDate(date); color: ThemeModule.Theme.textPrimary; font.bold: true; font.pixelSize: 12 }
-                                    Label { text: icon; color: ThemeModule.Theme.textPrimary; font.pixelSize: 22 }
+                                    Label { text: forecastIcon; color: ThemeModule.Theme.textPrimary; font.pixelSize: 22 }
                                     Label { text: condition; color: ThemeModule.Theme.textSecondary; font.pixelSize: ThemeModule.Theme.metadataFontSize; wrapMode: Text.Wrap; Layout.fillWidth: true }
                                     Label { text: qsTr("%1° / %2°").arg(Math.round(maximum)).arg(Math.round(minimum)); color: ThemeModule.Theme.textPrimary; font.pixelSize: 12 }
                                     Label { text: qsTr("%1% rain").arg(Math.round(precipitationProbability)); color: ThemeModule.Theme.textSecondary; font.pixelSize: ThemeModule.Theme.metadataFontSize }
@@ -453,7 +454,8 @@ Item {
                             model: controller.cityForecast
                             delegate: Button {
                                 required property string date
-                                required property string icon
+                                required property var model
+                                readonly property string forecastIcon: model.icon
                                 required property string condition
                                 required property double maximum
                                 required property double minimum
@@ -475,7 +477,7 @@ Item {
                                     anchors.centerIn: parent
                                     spacing: 3
                                     Label { anchors.horizontalCenter: parent.horizontalCenter; text: root.formatDate(date); color: ThemeModule.Theme.textPrimary; font.pixelSize: 11 }
-                                    Label { anchors.horizontalCenter: parent.horizontalCenter; text: icon; color: ThemeModule.Theme.textPrimary; font.pixelSize: 17 }
+                                    Label { anchors.horizontalCenter: parent.horizontalCenter; text: forecastIcon; color: ThemeModule.Theme.textPrimary; font.pixelSize: 17 }
                                     Label { anchors.horizontalCenter: parent.horizontalCenter; text: qsTr("%1° / %2°").arg(Math.round(maximum)).arg(Math.round(minimum)); color: ThemeModule.Theme.textSecondary; font.pixelSize: ThemeModule.Theme.metadataFontSize }
                                 }
                             }
