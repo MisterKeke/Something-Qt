@@ -64,6 +64,16 @@ struct SteamReleaseArtworkMetadata final {
     qint64 byteSize{0};
 };
 
+// Detached Steam Store fields used when adding or refreshing a release. The
+// tracked record adds local membership and refresh timestamps around these.
+struct SteamReleaseDetails final {
+    quint32 appId{0};
+    QString title;
+    QString artworkUrl;
+    SteamReleaseDateInfo releaseDate;
+    SteamReleaseStatus status{SteamReleaseStatus::InformationUnavailable};
+};
+
 // Persistence-neutral membership and latest-known release metadata. App ID
 // identifies this record independently of price-tracker membership.
 struct SteamTrackedRelease final {
