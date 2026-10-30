@@ -191,7 +191,7 @@ Item {
                         columnSpacing: 8
                         Repeater {
                             model: controller.primaryForecast
-                            delegate: Rectangle {
+                            delegate: Button {
                                 required property string date
                                 required property string icon
                                 required property string condition
@@ -201,10 +201,18 @@ Item {
                                 required property int index
                                 Layout.fillWidth: true
                                 Layout.preferredHeight: 146
-                                radius: ThemeModule.Theme.panelRadius
-                                color: index === 0 ? ThemeModule.Theme.selectionBlue : ThemeModule.Theme.raisedSurface
-                                border.color: index === 0 ? ThemeModule.Theme.accentCyan : ThemeModule.Theme.borderColor
-                                ColumnLayout {
+                                padding: 0
+                                Accessible.role: Accessible.Button
+                                Accessible.name: qsTr("Select forecast for %1").arg(root.formatDate(date))
+                                onClicked: root.controller.selectPrimaryForecastDate(date)
+                                background: Rectangle {
+                                    radius: ThemeModule.Theme.panelRadius
+                                    color: date === root.controller.primarySelectedDate
+                                           ? ThemeModule.Theme.selectionBlue : ThemeModule.Theme.raisedSurface
+                                    border.color: date === root.controller.primarySelectedDate || parent.activeFocus
+                                                  ? ThemeModule.Theme.accentCyan : ThemeModule.Theme.borderColor
+                                }
+                                contentItem: ColumnLayout {
                                     anchors.fill: parent
                                     anchors.margins: 10
                                     spacing: 4
@@ -306,7 +314,7 @@ Item {
                         columnSpacing: 6
                         Repeater {
                             model: controller.cityForecast
-                            delegate: Rectangle {
+                            delegate: Button {
                                 required property string date
                                 required property string icon
                                 required property string condition
@@ -315,10 +323,18 @@ Item {
                                 required property int index
                                 Layout.fillWidth: true
                                 Layout.preferredHeight: 92
-                                radius: ThemeModule.Theme.panelRadius
-                                color: ThemeModule.Theme.raisedSurface
-                                border.color: ThemeModule.Theme.borderColor
-                                Column {
+                                padding: 0
+                                Accessible.role: Accessible.Button
+                                Accessible.name: qsTr("Select forecast for %1").arg(root.formatDate(date))
+                                onClicked: root.controller.selectCityForecastDate(date)
+                                background: Rectangle {
+                                    radius: ThemeModule.Theme.panelRadius
+                                    color: date === root.controller.citySelectedDate
+                                           ? ThemeModule.Theme.selectionBlue : ThemeModule.Theme.raisedSurface
+                                    border.color: date === root.controller.citySelectedDate || parent.activeFocus
+                                                  ? ThemeModule.Theme.accentCyan : ThemeModule.Theme.borderColor
+                                }
+                                contentItem: Column {
                                     anchors.centerIn: parent
                                     spacing: 3
                                     Label { anchors.horizontalCenter: parent.horizontalCenter; text: root.formatDate(date); color: ThemeModule.Theme.textPrimary; font.pixelSize: 11 }

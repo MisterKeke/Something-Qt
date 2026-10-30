@@ -19,8 +19,10 @@ class WeatherController final : public QObject {
     Q_PROPERTY(QVariantMap primaryCurrent READ primaryCurrent NOTIFY primaryChanged)
     Q_PROPERTY(QVariantMap primaryToday READ primaryToday NOTIFY primaryChanged)
     Q_PROPERTY(QVariantMap primarySolar READ primarySolar NOTIFY primaryChanged)
+    Q_PROPERTY(QString primarySelectedDate READ primarySelectedDate NOTIFY primaryChanged)
     Q_PROPERTY(QVariantMap cityCurrent READ cityCurrent NOTIFY cityChanged)
     Q_PROPERTY(QVariantMap citySolar READ citySolar NOTIFY cityChanged)
+    Q_PROPERTY(QString citySelectedDate READ citySelectedDate NOTIFY cityChanged)
     Q_PROPERTY(QString primaryLocation READ primaryLocation NOTIFY primaryChanged)
     Q_PROPERTY(QString primaryUpdatedAt READ primaryUpdatedAt NOTIFY primaryChanged)
     Q_PROPERTY(QString primaryStatus READ primaryStatus NOTIFY primaryChanged)
@@ -43,8 +45,10 @@ public:
     QVariantMap primaryCurrent() const { return m_primaryCurrent; }
     QVariantMap primaryToday() const { return m_primaryToday; }
     QVariantMap primarySolar() const { return m_primarySolar; }
+    QString primarySelectedDate() const { return m_primarySelectedDate; }
     QVariantMap cityCurrent() const { return m_cityCurrent; }
     QVariantMap citySolar() const { return m_citySolar; }
+    QString citySelectedDate() const { return m_citySelectedDate; }
     QString primaryLocation() const { return m_primaryLocation; }
     QString primaryUpdatedAt() const { return m_primaryUpdatedAt; }
     QString primaryStatus() const { return m_primaryStatus; }
@@ -61,6 +65,8 @@ public:
     Q_INVOKABLE void searchCity(QString city);
     Q_INVOKABLE void cancelCitySearch();
     Q_INVOKABLE void updateSolarInfo();
+    Q_INVOKABLE void selectPrimaryForecastDate(QString date);
+    Q_INVOKABLE void selectCityForecastDate(QString date);
 
 signals:
     void primaryChanged();
@@ -124,8 +130,10 @@ private:
     QVariantMap m_primaryCurrent;
     QVariantMap m_primaryToday;
     QVariantMap m_primarySolar;
+    QString m_primarySelectedDate;
     QVariantMap m_cityCurrent;
     QVariantMap m_citySolar;
+    QString m_citySelectedDate;
     domain::WeatherForecast m_primarySolarForecast;
     domain::WeatherForecast m_citySolarForecast;
     QString m_primaryLocation{QStringLiteral("Your location")};

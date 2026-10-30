@@ -9,6 +9,7 @@
 #include <QUrlQuery>
 #include <QTimeZone>
 
+#include <algorithm>
 #include <cmath>
 #include <utility>
 
@@ -51,12 +52,25 @@ QString daylightDurationText(double seconds)
     return QStringLiteral("%1m").arg(minutesPart);
 }
 
+QString availableForecastDate(const domain::WeatherForecast &forecast,
+                              const QString &requestedDate)
+{
+    for (const domain::WeatherDay &day : forecast.days) {
+        if (day.date == requestedDate) return requestedDate;
+    }
+    return forecast.days.isEmpty() ? QString{} : forecast.days.first().date;
+}
+
 QVariantMap solarInfoForForecast(const domain::WeatherForecast &forecast,
+                                 const QString &selectedDate,
                                  const QDateTime &nowUtc)
 {
     if (forecast.days.isEmpty()) return {};
     const QTimeZone timeZone(forecast.timezone.toUtf8());
-    const domain::WeatherDay &displayedDay = forecast.days.first();
+    const auto selectedDay = std::find_if(forecast.days.cbegin(), forecast.days.cend(),
+        [&selectedDate](const domain::WeatherDay &day) { return day.date == selectedDate; });
+    if (selectedDay == forecast.days.cend()) return {};
+    const domain::WeatherDay &displayedDay = *selectedDay;
     const bool hasSunrise = displayedDay.sunriseUtc && displayedDay.sunriseUtc->isValid()
         && timeZone.isValid();
     const bool hasSunset = displayedDay.sunsetUtc && displayedDay.sunsetUtc->isValid()
@@ -481,6 +495,7 @@ void WeatherController::searchCity(QString city)
     const quint64 generation = ++m_cityGeneration;
     m_cityForecast.clear();
     m_citySolarForecast = {};
+    m_citySelectedDate.clear();
     m_cityCurrent.clear();
     m_citySolar.clear();
     m_cityLocation.clear();
@@ -612,6 +627,7 @@ void WeatherController::onStorageFinished(quint64 id, const QVariantMap &values,
             m_primaryForecast.clear();
             m_primarySolarForecast = {};
             m_primarySolar.clear();
+            m_primarySelectedDate.clear();
             m_primaryCurrent.clear();
             m_primaryToday.clear();
         }
@@ -790,7 +806,8 @@ void WeatherController::publishPrimary(const domain::WeatherForecast &forecast,
                                        QString updatedAt, bool fromCache)
 {
     m_primarySolarForecast = forecast;
-    m_primarySolar = solarInfoForForecast(forecast, m_clock->nowUtc());
+    m_primarySelectedDate = availableForecastDate(forecast, m_primarySelectedDate);
+    m_primarySolar = solarInfoForForecast(forecast, m_primarySelectedDate, m_clock->nowUtc());
     m_primaryForecast.replace(forecast.days, forecast.timezone);
     m_primaryCurrent = currentMap(forecast.current);
     m_primaryToday.clear();
@@ -821,7 +838,8 @@ void WeatherController::publishCity(const domain::WeatherCity &city,
                                     const domain::WeatherForecast &forecast)
 {
     m_citySolarForecast = forecast;
-    m_citySolar = solarInfoForForecast(forecast, m_clock->nowUtc());
+    m_citySelectedDate = availableForecastDate(forecast, m_citySelectedDate);
+    m_citySolar = solarInfoForForecast(forecast, m_citySelectedDate, m_clock->nowUtc());
     m_cityForecast.replace(forecast.days, forecast.timezone);
     m_cityCurrent = currentMap(forecast.current);
     m_cityLocation = cityLabel(city);
@@ -833,8 +851,9 @@ void WeatherController::publishCity(const domain::WeatherCity &city,
 void WeatherController::updateSolarInfo()
 {
     const QDateTime nowUtc = m_clock->nowUtc();
-    const QVariantMap primary = solarInfoForForecast(m_primarySolarForecast, nowUtc);
-    const QVariantMap city = solarInfoForForecast(m_citySolarForecast, nowUtc);
+    const QVariantMap primary = solarInfoForForecast(
+        m_primarySolarForecast, m_primarySelectedDate, nowUtc);
+    const QVariantMap city = solarInfoForForecast(m_citySolarForecast, m_citySelectedDate, nowUtc);
     bool primaryChangedValue = false;
     bool cityChangedValue = false;
     if (primary != m_primarySolar) {
@@ -847,6 +866,40 @@ void WeatherController::updateSolarInfo()
     }
     if (primaryChangedValue) emit primaryChanged();
     if (cityChangedValue) emit cityChanged();
+}
+
+void WeatherController::selectPrimaryForecastDate(QString date)
+{
+    if (date == m_primarySelectedDate) return;
+    bool found = false;
+    for (const domain::WeatherDay &day : m_primarySolarForecast.days) {
+        if (day.date == date) {
+            found = true;
+            break;
+        }
+    }
+    if (!found) return;
+    m_primarySelectedDate = std::move(date);
+    m_primarySolar = solarInfoForForecast(
+        m_primarySolarForecast, m_primarySelectedDate, m_clock->nowUtc());
+    emit primaryChanged();
+}
+
+void WeatherController::selectCityForecastDate(QString date)
+{
+    if (date == m_citySelectedDate) return;
+    bool found = false;
+    for (const domain::WeatherDay &day : m_citySolarForecast.days) {
+        if (day.date == date) {
+            found = true;
+            break;
+        }
+    }
+    if (!found) return;
+    m_citySelectedDate = std::move(date);
+    m_citySolar = solarInfoForForecast(
+        m_citySolarForecast, m_citySelectedDate, m_clock->nowUtc());
+    emit cityChanged();
 }
 
 void WeatherController::setPrimaryError(domain::AppError error, const QString &fallback)
@@ -867,6 +920,7 @@ void WeatherController::setCityError(domain::AppError error, const QString &fall
     m_cityError = safeMessage(error, fallback);
     m_cityForecast.clear();
     m_citySolarForecast = {};
+    m_citySelectedDate.clear();
     m_cityCurrent.clear();
     m_citySolar.clear();
     m_cityLocation.clear();
