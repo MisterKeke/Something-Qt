@@ -365,6 +365,8 @@ void WeatherController::onLifecycleState(application::ApplicationLifecycle::Stat
         m_primaryLoading = false;
         m_primaryRefreshing = false;
         m_citySearching = false;
+        m_cityGeocoding = false;
+        m_cityGeocodeQueryKey.clear();
         m_cityCandidates.clear();
         emit primaryChanged();
         emit cityChanged();
@@ -623,8 +625,15 @@ void WeatherController::requestNativeLocation(quint64 generation)
 
 void WeatherController::searchCity(QString city)
 {
-    city = city.trimmed();
+    city = city.simplified();
     if (!m_ready) return;
+    const int codePoints = city.toUcs4().size();
+    const QString queryKey = city.toCaseFolded();
+    const bool validQuery = codePoints >= 1 && codePoints <= 100;
+    // Enter can repeat while geocoding is active; keep existing work/results for an identical query.
+    if (validQuery && queryKey == m_cityGeocodeQueryKey
+        && (m_cityGeocoding || !m_cityCandidates.isEmpty())) return;
+
     cancelCityOperations();
     const quint64 generation = ++m_cityGeneration;
     m_cityCandidates.clear();
@@ -639,15 +648,18 @@ void WeatherController::searchCity(QString city)
     m_citySolar.clear();
     m_cityLocation.clear();
     m_cityError.clear();
+    m_cityGeocoding = false;
+    m_cityGeocodeQueryKey.clear();
     m_citySearching = false;
-    const int codePoints = city.toUcs4().size();
-    if (codePoints < 1 || codePoints > 100) {
+    if (!validQuery) {
         m_cityError = QStringLiteral("Enter a city name between 1 and 100 characters.");
         emit cityChanged();
         emit comparisonChanged();
         return;
     }
     m_citySearching = true;
+    m_cityGeocoding = true;
+    m_cityGeocodeQueryKey = queryKey;
     emit cityChanged();
     emit comparisonChanged();
     providers::ProviderRequest request;
@@ -665,6 +677,8 @@ void WeatherController::selectCityCandidate(int candidateIndex)
     const domain::WeatherCity city = m_cityCandidates.at(candidateIndex);
     const quint64 generation = m_cityGeneration;
     m_cityCandidates.clear();
+    m_cityGeocoding = false;
+    m_cityGeocodeQueryKey.clear();
     m_searchedCity = city;
     m_hasSearchedCity = true;
     m_cityLocation = cityLabel(city);
@@ -982,6 +996,8 @@ void WeatherController::cancelCitySearch()
     ++m_cityGeneration;
     m_cityCandidates.clear();
     m_citySearching = false;
+    m_cityGeocoding = false;
+    m_cityGeocodeQueryKey.clear();
     emit cityChanged();
     emit comparisonChanged();
 }
@@ -1285,6 +1301,7 @@ void WeatherController::onValueJobFinished(quint64 id, const QVariantMap &values
     m_pending.erase(pendingIt);
     if (pending.kind == Kind::CityGeocodeParse) {
         if (pending.generation != m_cityGeneration) return;
+        m_cityGeocoding = false;
         if (error.isError()) {
             setCityError(error, QStringLiteral("City search could not be completed."));
             return;
@@ -1294,6 +1311,7 @@ void WeatherController::onValueJobFinished(quint64 id, const QVariantMap &values
             m_cityCandidates.push_back(weatherCityFromMap(value.toMap()));
         if (m_cityCandidates.isEmpty()) {
             m_citySearching = false;
+            m_cityGeocodeQueryKey.clear();
             m_cityError = QStringLiteral("No matching city was found.");
             emit cityChanged();
             emit comparisonChanged();
@@ -1602,6 +1620,8 @@ void WeatherController::setPrimaryError(domain::AppError error, const QString &f
 void WeatherController::setCityError(domain::AppError error, const QString &fallback)
 {
     m_citySearching = false;
+    m_cityGeocoding = false;
+    m_cityGeocodeQueryKey.clear();
     m_cityError = safeMessage(error, fallback);
     m_cityForecast.clear();
     m_citySolarForecast = {};

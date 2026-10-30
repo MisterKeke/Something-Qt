@@ -199,6 +199,7 @@ private:
     QString m_cityUpdatedAt;
     QString m_cityUpdatedAtUtc;
     QString m_cityError;
+    QString m_cityGeocodeQueryKey;
     domain::WeatherCity m_searchedCity;
     quint64 m_primaryGeneration{0};
     quint64 m_cityGeneration{0};
@@ -211,6 +212,7 @@ private:
     bool m_primaryLoading{false};
     bool m_primaryRefreshing{false};
     bool m_citySearching{false};
+    bool m_cityGeocoding{false};
     bool m_hasSearchedCity{false};
     bool m_comparisonLoaded{false};
     bool m_comparisonMutationPending{false};
