@@ -1,6 +1,8 @@
 #include "calendar_controller.h"
 
 #include "../application/application_lifecycle.h"
+#include "../services/calendar_service.h"
+#include "../services/preferences_service.h"
 #include "../services/task_service.h"
 
 #include <QCoreApplication>
@@ -107,6 +109,7 @@ void CalendarController::setPageVisible(bool visible)
     m_clockTimer.start();
     m_observedLocalDate = m_clock->localDate();
     updateCalendarModel();
+    loadReleaseVisibility();
     loadYearIndicators();
     if (!m_selectedDate.isEmpty()) loadSelectedDate(false);
     emit stateChanged();
@@ -132,8 +135,48 @@ void CalendarController::refreshSelectedDate()
 void CalendarController::refreshScheduleData()
 {
     if (!m_pageVisible || !m_ready) return;
+    loadReleaseVisibility();
     loadYearIndicators();
     if (!m_selectedDate.isEmpty()) loadSelectedDate(false);
+}
+
+void CalendarController::setShowGameReleases(bool visible)
+{
+    if (!m_ready || !m_releaseVisibilityLoaded || m_releaseVisibilitySaving) return;
+    if (visible == m_showGameReleases) return;
+
+    m_visibilityBeforeSave = m_showGameReleases;
+    m_showGameReleases = visible;
+    if (!visible) {
+        m_selectedReleaseEvents.clear();
+        m_releaseEventsErrorMessage.clear();
+    }
+    updateLabels();
+    m_releaseVisibilitySaving = true;
+    m_releaseVisibilityError.clear();
+    const auto operation = m_graph->beginOperation(
+        QStringLiteral("save calendar release visibility"));
+    if (!operation.isValid()) {
+        m_showGameReleases = m_visibilityBeforeSave;
+        m_releaseVisibilitySaving = false;
+        m_releaseVisibilityError = QStringLiteral(
+            "Calendar release visibility could not be saved.");
+        emit stateChanged();
+        return;
+    }
+    m_visibilityOperationId = operation.id.value;
+    m_pending.insert(operation.id.value, Action::SaveReleaseVisibility);
+    if (!m_graph->submitStorage(operation,
+            services::PreferencesService::setGameReleasesVisibleInCalendar(visible))) {
+        if (m_pending.remove(operation.id.value) > 0) {
+            m_visibilityOperationId = 0;
+            m_showGameReleases = m_visibilityBeforeSave;
+            m_releaseVisibilitySaving = false;
+            m_releaseVisibilityError = QStringLiteral(
+                "Calendar release visibility could not be saved.");
+        }
+    }
+    emit stateChanged();
 }
 
 void CalendarController::onTaskMutation(qint64 taskId, const QVariantMap &currentTask,
@@ -149,6 +192,7 @@ void CalendarController::onLifecycleChanged(application::ApplicationLifecycle::S
 {
     m_ready = state == application::ApplicationLifecycle::State::Running;
     if (m_ready) {
+        loadReleaseVisibility();
         if (m_pageVisible) {
             m_clockTimer.start();
             loadYearIndicators();
@@ -187,7 +231,42 @@ void CalendarController::updateLabels()
     }
     const QDate selected = QDate::fromString(m_selectedDate, Qt::ISODate);
     m_selectedDateLabel = locale.toString(selected, QStringLiteral("dddd, d MMMM yyyy"));
-    if (!m_loading) m_summary = QStringLiteral("%1 task(s) on this date").arg(m_tasks.count());
+    if (!m_loading) {
+        const int releaseCount = m_showGameReleases ? m_selectedReleaseEvents.size() : 0;
+        m_summary = releaseCount > 0
+            ? QStringLiteral("%1 task(s) and %2 game release(s) on this date")
+                  .arg(m_tasks.count()).arg(releaseCount)
+            : QStringLiteral("%1 task(s) on this date").arg(m_tasks.count());
+    }
+}
+
+void CalendarController::loadReleaseVisibility()
+{
+    if (!m_ready || m_releaseVisibilityLoaded || m_releaseVisibilityLoading
+        || m_releaseVisibilitySaving) return;
+    const auto operation = m_graph->beginOperation(
+        QStringLiteral("load calendar release visibility"));
+    if (!operation.isValid()) {
+        m_releaseVisibilityLoaded = true;
+        m_releaseVisibilityError = QStringLiteral(
+            "Calendar release visibility could not be loaded; releases are shown by default.");
+        emit stateChanged();
+        return;
+    }
+    m_visibilityOperationId = operation.id.value;
+    m_pending.insert(operation.id.value, Action::LoadReleaseVisibility);
+    m_releaseVisibilityLoading = true;
+    if (!m_graph->submitStorage(operation,
+            services::PreferencesService::loadGameReleasesVisibleInCalendar())) {
+        if (m_pending.remove(operation.id.value) > 0) {
+            m_visibilityOperationId = 0;
+            m_releaseVisibilityLoading = false;
+            m_releaseVisibilityLoaded = true;
+            m_releaseVisibilityError = QStringLiteral(
+                "Calendar release visibility could not be loaded; releases are shown by default.");
+        }
+    }
+    emit stateChanged();
 }
 
 void CalendarController::loadSelectedDate(bool clearRows)
@@ -200,6 +279,7 @@ void CalendarController::loadSelectedDate(bool clearRows)
     }
     if (clearRows) m_tasks.replacePage({});
     if (clearRows) m_selectedSchedules.clear();
+    if (clearRows) m_selectedReleaseEvents.clear();
     const auto operation = m_graph->beginOperation(QStringLiteral("load calendar date"),
                                                     QStringLiteral("calendar-date"));
     if (!operation.isValid()) {
@@ -214,8 +294,9 @@ void CalendarController::loadSelectedDate(bool clearRows)
     m_summary = QStringLiteral("Loading tasks for %1").arg(m_selectedDateLabel);
     setError({});
     emit stateChanged();
-    if (!m_graph->submitStorage(operation, services::TaskService::calendarDateWithSchedules(
-            QDate::fromString(m_selectedDate, Qt::ISODate)))) {
+    if (!m_graph->submitStorage(operation, services::CalendarService::dateWithSchedules(
+            QDate::fromString(m_selectedDate, Qt::ISODate),
+            m_releaseVisibilityLoaded && m_showGameReleases))) {
         if (m_pending.remove(operation.id.value) > 0) {
             m_dateOperationId = 0;
             m_loading = false;
@@ -251,7 +332,8 @@ void CalendarController::loadYearIndicators(bool clearExisting)
     m_markersLoading = true;
     m_markerErrorMessage.clear();
     emit stateChanged();
-    if (!m_graph->submitStorage(operation, services::TaskService::calendarYear(m_visibleYear))) {
+    if (!m_graph->submitStorage(operation, services::CalendarService::year(
+            m_visibleYear, m_releaseVisibilityLoaded && m_showGameReleases))) {
         if (m_pending.remove(operation.id.value) > 0) {
             m_yearOperationId = 0;
             m_markersLoading = false;
@@ -268,6 +350,42 @@ void CalendarController::onStorageFinished(quint64 operationId, const QVariantMa
     if (pending == m_pending.end()) return;
     const Action action = pending.value();
     m_pending.erase(pending);
+
+    if (action == Action::LoadReleaseVisibility) {
+        if (m_visibilityOperationId != operationId) return;
+        m_visibilityOperationId = 0;
+        m_releaseVisibilityLoading = false;
+        m_releaseVisibilityLoaded = true;
+        if (error.isError() || error.isCancelled()) {
+            m_showGameReleases = true;
+            m_releaseVisibilityError = QStringLiteral(
+                "Calendar release visibility could not be loaded; releases are shown by default.");
+        } else {
+            m_showGameReleases = values.value(QStringLiteral("showGameReleases")).toBool();
+            m_releaseVisibilityError.clear();
+        }
+        if (m_pageVisible) refreshScheduleData();
+        emit stateChanged();
+        return;
+    }
+
+    if (action == Action::SaveReleaseVisibility) {
+        if (m_visibilityOperationId != operationId) return;
+        m_visibilityOperationId = 0;
+        m_releaseVisibilitySaving = false;
+        if (error.isError() || error.isCancelled()) {
+            m_showGameReleases = m_visibilityBeforeSave;
+            if (error.isError())
+                m_releaseVisibilityError = QStringLiteral(
+                    "Calendar release visibility could not be saved.");
+        } else {
+            m_showGameReleases = values.value(QStringLiteral("showGameReleases")).toBool();
+            m_releaseVisibilityError.clear();
+        }
+        if (m_pageVisible) refreshScheduleData();
+        emit stateChanged();
+        return;
+    }
 
     if (action == Action::YearMarkers) {
         if (m_yearOperationId != operationId) return;
@@ -328,12 +446,37 @@ void CalendarController::onStorageFinished(quint64 operationId, const QVariantMa
             if (task != tasksById.cend() && task.value().value(QStringLiteral("completed")).toBool())
                 completedByDate[plannedText].insert(taskId);
         }
+        const QVariantList releaseRows = values.value(QStringLiteral("releases")).toList();
+        for (const QVariant &rowValue : releaseRows) {
+            const QVariantMap release = rowValue.toMap();
+            if (release.value(QStringLiteral("datePrecision")).toString()
+                    != QStringLiteral("exact_day")) {
+                continue;
+            }
+            const QString exactText = release.value(QStringLiteral("exactDate")).toString();
+            const QDate exactDate = QDate::fromString(exactText, Qt::ISODate);
+            if (!exactDate.isValid() || exactDate < yearStart || exactDate > yearEnd
+                || exactDate.toString(Qt::ISODate) != exactText) {
+                continue;
+            }
+            QVariantMap marker = markers.value(exactText);
+            marker.insert(QStringLiteral("deadlineCount"),
+                          marker.value(QStringLiteral("deadlineCount")).toInt());
+            marker.insert(QStringLiteral("plannedWorkCount"),
+                          marker.value(QStringLiteral("plannedWorkCount")).toInt());
+            marker.insert(QStringLiteral("completedTaskCount"),
+                          marker.value(QStringLiteral("completedTaskCount")).toInt());
+            marker.insert(QStringLiteral("gameReleaseCount"),
+                          marker.value(QStringLiteral("gameReleaseCount")).toInt() + 1);
+            markers.insert(exactText, marker);
+        }
         for (auto it = markers.begin(); it != markers.end(); ++it)
             it.value().insert(QStringLiteral("completedTaskCount"),
                               completedByDate.value(it.key()).size());
         m_dateMarkers.clear();
         for (auto it = markers.cbegin(); it != markers.cend(); ++it)
             m_dateMarkers.insert(it.key(), it.value());
+        m_releaseEventsErrorMessage = values.value(QStringLiteral("releaseError")).toString();
         m_markerErrorMessage.clear();
         updateCalendarModel();
         emit stateChanged();
@@ -353,6 +496,16 @@ void CalendarController::onStorageFinished(quint64 operationId, const QVariantMa
             tasks.push_back(services::TaskService::fromVariantMap(row.toMap()));
         m_tasks.setToday(m_clock->localDate());
         m_tasks.replacePage(std::move(tasks));
+        m_selectedReleaseEvents.clear();
+        for (const QVariant &row : values.value(QStringLiteral("releases")).toList()) {
+            const QVariantMap release = row.toMap();
+            if (release.value(QStringLiteral("datePrecision")).toString()
+                    != QStringLiteral("exact_day")
+                || release.value(QStringLiteral("exactDate")).toString() != m_selectedDate) {
+                continue;
+            }
+            m_selectedReleaseEvents.push_back(release);
+        }
         m_selectedSchedules.clear();
         const QVariantList schedules = values.value(QStringLiteral("schedules")).toList();
         for (const QVariant &rowValue : schedules) {
@@ -360,9 +513,15 @@ void CalendarController::onStorageFinished(quint64 operationId, const QVariantMa
             m_selectedSchedules.insert(QString::number(
                 schedule.value(QStringLiteral("taskId")).toLongLong()), schedule);
         }
+        m_releaseEventsErrorMessage = values.value(QStringLiteral("releaseError")).toString();
         setError({});
-        m_summary = QStringLiteral("%1 task(s) on this date").arg(m_tasks.count());
+        const int releaseCount = m_showGameReleases ? m_selectedReleaseEvents.size() : 0;
+        m_summary = releaseCount > 0
+            ? QStringLiteral("%1 task(s) and %2 game release(s) on this date")
+                  .arg(m_tasks.count()).arg(releaseCount)
+            : QStringLiteral("%1 task(s) on this date").arg(m_tasks.count());
     }
+    if (!m_showGameReleases) m_releaseEventsErrorMessage.clear();
     emit stateChanged();
 }
 

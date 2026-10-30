@@ -38,8 +38,54 @@ bool validSteamRecord(const domain::SteamGameDetails &details)
     if (details.priceState == domain::SteamPriceState::Free)
         return details.regularPriceMinor == std::optional<qint64>(0)
             && details.currentPriceMinor == std::optional<qint64>(0);
-    return details.priceState == domain::SteamPriceState::Unavailable
+    return (details.priceState == domain::SteamPriceState::Unavailable
+            || details.priceState == domain::SteamPriceState::Unsupported)
         && !details.regularPriceMinor && !details.currentPriceMinor;
+}
+
+void removeArtworkIfUnowned(const QString &profileDirectory, const QString &filename,
+                            storage::SteamRepository &steam,
+                            storage::SteamReleaseRepository &steamReleases,
+                            storage::SteamGameUpdatesRepository &gameUpdates,
+                            storage::SteamGameCatalogRepository &catalog)
+{
+    if (filename.isEmpty()) return;
+    const auto priceOwner = steam.hasArtworkFilename(filename);
+    if (!priceOwner.succeeded() || priceOwner.value) return;
+    const auto releaseOwner = steamReleases.hasArtworkFilename(filename);
+    if (!releaseOwner.succeeded() || releaseOwner.value) return;
+    const auto updatesOwner = gameUpdates.hasArtworkFilename(filename);
+    if (!updatesOwner.succeeded() || updatesOwner.value) return;
+    const auto catalogOwner = catalog.hasArtworkFilename(filename);
+    if (!catalogOwner.succeeded() || catalogOwner.value) return;
+
+    QString originalPath;
+    QString stagedPath;
+    if (SteamArtworkStore::stageDeletion(profileDirectory, filename, &stagedPath,
+                                         &originalPath)
+        && !stagedPath.isEmpty()) {
+        SteamArtworkStore::finishDeletion(stagedPath);
+    }
+}
+
+void removeInstalledArtworkIfUnowned(const QString &profileDirectory,
+                                     const StagedSteamArtwork &artwork,
+                                     bool installedNewFile,
+                                     storage::SteamRepository &steam,
+                                     storage::SteamReleaseRepository &steamReleases,
+                                     storage::SteamGameUpdatesRepository &gameUpdates,
+                                     storage::SteamGameCatalogRepository &catalog)
+{
+    if (!installedNewFile) return;
+    const auto priceOwner = steam.hasArtworkFilename(artwork.asset.filename);
+    if (!priceOwner.succeeded() || priceOwner.value) return;
+    const auto releaseOwner = steamReleases.hasArtworkFilename(artwork.asset.filename);
+    if (!releaseOwner.succeeded() || releaseOwner.value) return;
+    const auto updatesOwner = gameUpdates.hasArtworkFilename(artwork.asset.filename);
+    if (!updatesOwner.succeeded() || updatesOwner.value) return;
+    const auto catalogOwner = catalog.hasArtworkFilename(artwork.asset.filename);
+    if (!catalogOwner.succeeded() || catalogOwner.value) return;
+    SteamArtworkStore::removeInstalledIfNew(profileDirectory, artwork, true);
 }
 
 } // namespace
@@ -110,6 +156,181 @@ storage::StorageCommand SteamService::loadSnapshot(QString profileDirectory)
     };
 }
 
+storage::StorageCommand SteamService::loadPriceHistory(
+    qint64 gameId, QString countryCode, QString currencyCode,
+    storage::SteamPriceHistoryRange range, bool includeMarkets)
+{
+    countryCode = countryCode.trimmed().toUpper();
+    currencyCode = currencyCode.trimmed().toUpper();
+    return [gameId, countryCode = std::move(countryCode),
+            currencyCode = std::move(currencyCode), range, includeMarkets](
+               storage::StorageRepositories &repositories,
+               const std::function<bool()> &cancelled) {
+        if (cancelled()) return failed(domain::AppError::cancelled());
+        static const QRegularExpression currencyPattern(QStringLiteral("^[A-Z]{3}$"));
+        if (gameId <= 0 || !domain::isSupportedSteamCountry(countryCode)
+            || (!currencyCode.isEmpty() && !currencyPattern.match(currencyCode).hasMatch())) {
+            return failed(domain::AppError(domain::ErrorCategory::Validation));
+        }
+
+        QString rangeName;
+        switch (range) {
+        case storage::SteamPriceHistoryRange::Days7:
+            rangeName = QStringLiteral("7d");
+            break;
+        case storage::SteamPriceHistoryRange::Days30:
+            rangeName = QStringLiteral("30d");
+            break;
+        case storage::SteamPriceHistoryRange::Days90:
+            rangeName = QStringLiteral("90d");
+            break;
+        case storage::SteamPriceHistoryRange::Year1:
+            rangeName = QStringLiteral("1y");
+            break;
+        case storage::SteamPriceHistoryRange::All:
+            rangeName = QStringLiteral("all");
+            break;
+        default:
+            return failed(domain::AppError(domain::ErrorCategory::Validation));
+        }
+
+        const auto loaded = repositories.steam.priceHistory(
+            gameId, countryCode, currencyCode, range, cancelled);
+        if (!loaded.succeeded()) return failed(loaded.error);
+        if (cancelled()) return failed(domain::AppError::cancelled());
+        storage::RepositoryResult<QVector<storage::SteamPriceHistoryMarket>> availableMarkets;
+        if (includeMarkets) {
+            availableMarkets = repositories.steam.priceHistoryMarkets(gameId, cancelled);
+            if (!availableMarkets.succeeded()) return failed(availableMarkets.error);
+            if (cancelled()) return failed(domain::AppError::cancelled());
+        }
+
+        const storage::SteamPriceHistoryStatistics &statistics = loaded.value.statistics;
+        QVariantMap value{
+            {QStringLiteral("gameId"), gameId},
+            {QStringLiteral("countryCode"), statistics.countryCode},
+            {QStringLiteral("currencyCode"), statistics.currencyCode},
+            {QStringLiteral("range"), rangeName},
+            {QStringLiteral("observationCount"), statistics.observationCount},
+            {QStringLiteral("comparablePriceCount"), statistics.comparablePriceCount},
+            {QStringLiteral("hasSufficientHistory"), statistics.hasSufficientHistory},
+            {QStringLiteral("firstObservationAtUtc"), statistics.firstObservationAtUtc},
+            {QStringLiteral("mostRecentObservationAtUtc"), statistics.mostRecentObservationAtUtc},
+            {QStringLiteral("latestObservationState"), statistics.latestObservationState},
+            {QStringLiteral("latestObservationAtUtc"), statistics.latestObservationAtUtc},
+            {QStringLiteral("latestPriceState"), statistics.latestPriceState},
+            {QStringLiteral("latestPriceAtUtc"), statistics.latestPriceAtUtc},
+            {QStringLiteral("hasLatestPrice"), statistics.latestPriceMinor.has_value()},
+            {QStringLiteral("hasLowestPrice"), statistics.lowestPriceMinor.has_value()},
+            {QStringLiteral("hasHighestPrice"), statistics.highestPriceMinor.has_value()},
+            {QStringLiteral("hasComparableInterval"), statistics.hasComparableInterval},
+            {QStringLiteral("intervalStartAtUtc"), statistics.intervalStartAtUtc},
+            {QStringLiteral("intervalEndAtUtc"), statistics.intervalEndAtUtc},
+            {QStringLiteral("hasIntervalPercentageChange"),
+             statistics.intervalPercentageChange.has_value()},
+        };
+        const auto formattedPrice = [](qint64 minor, const QString &state,
+                                       const QString &currency) {
+            if (state == QStringLiteral("free") || minor == 0)
+                return QStringLiteral("Free");
+            return domain::formatSteamPrice(minor, currency);
+        };
+        if (statistics.latestPriceMinor) {
+            value.insert(QStringLiteral("latestPriceMinor"), *statistics.latestPriceMinor);
+            value.insert(QStringLiteral("latestPriceDisplay"),
+                         formattedPrice(*statistics.latestPriceMinor,
+                                        statistics.latestPriceState,
+                                        statistics.currencyCode));
+        }
+        if (statistics.lowestPriceMinor) {
+            value.insert(QStringLiteral("lowestPriceMinor"), *statistics.lowestPriceMinor);
+            value.insert(QStringLiteral("lowestPriceDisplay"),
+                         formattedPrice(*statistics.lowestPriceMinor,
+                                        QStringLiteral("priced"),
+                                        statistics.currencyCode));
+        }
+        if (statistics.highestPriceMinor) {
+            value.insert(QStringLiteral("highestPriceMinor"), *statistics.highestPriceMinor);
+            value.insert(QStringLiteral("highestPriceDisplay"),
+                         formattedPrice(*statistics.highestPriceMinor,
+                                        QStringLiteral("priced"),
+                                        statistics.currencyCode));
+        }
+        if (statistics.intervalStartPriceMinor)
+            value.insert(QStringLiteral("intervalStartPriceMinor"),
+                          *statistics.intervalStartPriceMinor);
+        if (statistics.intervalEndPriceMinor)
+            value.insert(QStringLiteral("intervalEndPriceMinor"),
+                          *statistics.intervalEndPriceMinor);
+        if (statistics.intervalAbsoluteChangeMinor)
+            value.insert(QStringLiteral("intervalAbsoluteChangeMinor"),
+                          *statistics.intervalAbsoluteChangeMinor);
+        if (statistics.intervalAbsoluteChangeMinor) {
+            const qint64 change = *statistics.intervalAbsoluteChangeMinor;
+            const QString magnitude = statistics.currencyCode.isEmpty()
+                ? QString::number(qAbs(change))
+                : domain::formatSteamPrice(qAbs(change), statistics.currencyCode);
+            value.insert(QStringLiteral("intervalAbsoluteChangeDisplay"),
+                         (change > 0 ? QStringLiteral("+")
+                          : change < 0 ? QStringLiteral("−") : QString()) + magnitude);
+        }
+        if (statistics.intervalPercentageChange)
+            value.insert(QStringLiteral("intervalPercentageChange"),
+                          *statistics.intervalPercentageChange);
+        if (statistics.intervalPercentageChange) {
+            const double change = *statistics.intervalPercentageChange;
+            value.insert(QStringLiteral("intervalPercentageChangeDisplay"),
+                         QStringLiteral("%1%2%")
+                             .arg(change > 0 ? QStringLiteral("+")
+                                  : change < 0 ? QStringLiteral("−") : QString(),
+                                  QString::number(qAbs(change), 'f', 2)));
+        }
+
+        QVariantList points;
+        points.reserve(loaded.value.points.size());
+        for (const storage::SteamPriceHistoryPoint &point : loaded.value.points) {
+            if (cancelled()) return failed(domain::AppError::cancelled());
+            QVariantMap pointValue{
+                {QStringLiteral("id"), point.id},
+                {QStringLiteral("observedAtUtc"), point.observedAtUtc},
+                {QStringLiteral("observedAtUtcMs"), point.observedAtUtcMs},
+                {QStringLiteral("priceState"), point.priceState},
+                {QStringLiteral("currencyCode"), point.currencyCode},
+                {QStringLiteral("hasPrice"), point.priceMinor.has_value()},
+            };
+            if (point.priceMinor) {
+                pointValue.insert(QStringLiteral("priceMinor"), *point.priceMinor);
+                pointValue.insert(QStringLiteral("priceDisplay"),
+                    formattedPrice(*point.priceMinor, point.priceState,
+                                   point.currencyCode));
+            }
+            points.push_back(std::move(pointValue));
+        }
+
+        QVariantList markets;
+        if (includeMarkets) {
+            markets.reserve(availableMarkets.value.size());
+            for (const storage::SteamPriceHistoryMarket &market : availableMarkets.value) {
+                if (cancelled()) return failed(domain::AppError::cancelled());
+                markets.push_back(QVariantMap{
+                    {QStringLiteral("countryCode"), market.countryCode},
+                    {QStringLiteral("currencyCode"), market.currencyCode},
+                    {QStringLiteral("observationCount"), market.observationCount},
+                    {QStringLiteral("firstObservationAtUtc"), market.firstObservationAtUtc},
+                    {QStringLiteral("mostRecentObservationAtUtc"), market.mostRecentObservationAtUtc},
+                });
+            }
+        }
+        if (cancelled()) return failed(domain::AppError::cancelled());
+
+        storage::StorageReply reply;
+        reply.values.insert(QStringLiteral("statistics"), value);
+        reply.values.insert(QStringLiteral("points"), points);
+        if (includeMarkets) reply.values.insert(QStringLiteral("markets"), markets);
+        return reply;
+    };
+}
+
 storage::StorageCommand SteamService::setCountry(QString countryCode)
 {
     countryCode = countryCode.trimmed().toUpper();
@@ -158,7 +379,7 @@ storage::StorageCommand SteamService::addGame(QString profileDirectory,
         game.priceCountryCode = countryCode;
         game.lastCheckedAt = checkedAt;
         game.lastAttemptedAt = checkedAt;
-        const auto inserted = repositories.steam.add(std::move(game));
+        const auto inserted = repositories.steam.add(std::move(game), cancelled);
         if (!inserted.succeeded()) return failed(inserted.error);
         storage::StorageReply reply;
         reply.values.insert(QStringLiteral("game"), gameValue(inserted.value, profileDirectory));
@@ -195,15 +416,13 @@ storage::StorageCommand SteamService::deleteGame(QString profileDirectory, qint6
         if (cancelled()) return failed(domain::AppError::cancelled());
         const auto existing = repositories.steam.get(gameId);
         if (!existing.succeeded()) return failed(existing.error);
+        if (cancelled()) return failed(domain::AppError::cancelled());
         const auto removed = repositories.steam.remove(gameId);
         if (!removed.succeeded()) return failed(removed.error);
         if (existing.value.artwork) {
-            QString originalPath;
-            QString ignoredStage;
-            if (SteamArtworkStore::stageDeletion(profileDirectory,
-                    existing.value.artwork->filename, &ignoredStage, &originalPath)) {
-                if (!ignoredStage.isEmpty()) SteamArtworkStore::finishDeletion(ignoredStage);
-            }
+            removeArtworkIfUnowned(profileDirectory, existing.value.artwork->filename,
+                                   repositories.steam, repositories.steamReleases,
+                                   repositories.gameUpdates, repositories.steamCatalog);
         }
         storage::StorageReply reply;
         reply.values.insert(QStringLiteral("deletedId"), gameId);
@@ -234,23 +453,25 @@ storage::StorageCommand SteamService::saveArtwork(QString profileDirectory, qint
         }
         if (cancelled()) {
             SteamArtworkStore::discard(profileDirectory, artwork);
-            SteamArtworkStore::removeInstalledIfNew(profileDirectory, artwork, installedNewFile);
+            removeInstalledArtworkIfUnowned(profileDirectory, artwork, installedNewFile,
+                                            repositories.steam, repositories.steamReleases,
+                                            repositories.gameUpdates, repositories.steamCatalog);
             return failed(domain::AppError::cancelled());
         }
         const auto stored = repositories.steam.setArtwork(gameId, artwork.asset);
         if (!stored.succeeded()) {
             SteamArtworkStore::discard(profileDirectory, artwork);
-            SteamArtworkStore::removeInstalledIfNew(profileDirectory, artwork, installedNewFile);
+            removeInstalledArtworkIfUnowned(profileDirectory, artwork, installedNewFile,
+                                            repositories.steam, repositories.steamReleases,
+                                            repositories.gameUpdates, repositories.steamCatalog);
             return failed(stored.error);
         }
         SteamArtworkStore::discard(profileDirectory, artwork);
         if (existing.value.artwork
             && existing.value.artwork->filename != artwork.asset.filename) {
-            QString originalPath;
-            QString stagedPath;
-            if (SteamArtworkStore::stageDeletion(profileDirectory,
-                    existing.value.artwork->filename, &stagedPath, &originalPath)
-                && !stagedPath.isEmpty()) SteamArtworkStore::finishDeletion(stagedPath);
+            removeArtworkIfUnowned(profileDirectory, existing.value.artwork->filename,
+                                   repositories.steam, repositories.steamReleases,
+                                   repositories.gameUpdates, repositories.steamCatalog);
         }
         const auto refreshed = repositories.steam.get(gameId);
         if (!refreshed.succeeded()) return failed(refreshed.error);

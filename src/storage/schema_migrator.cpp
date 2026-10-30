@@ -229,6 +229,117 @@ constexpr const char *steam[] = {
     ))SQL",
 };
 
+constexpr const char *steamPriceObservations[] = {
+    // Observations are owned by a tracked game and are removed with that game.
+    R"SQL(CREATE TABLE steam_price_observations (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        steam_game_id INTEGER NOT NULL REFERENCES steam_games(id) ON DELETE CASCADE,
+        steam_app_id INTEGER NOT NULL CHECK(steam_app_id > 0),
+        country_code TEXT NOT NULL CHECK(length(country_code) = 2 AND country_code GLOB '[A-Z][A-Z]'),
+        currency_code TEXT CHECK(currency_code IS NULL OR (length(currency_code) = 3 AND currency_code GLOB '[A-Z][A-Z][A-Z]')),
+        price_state TEXT NOT NULL CHECK(price_state IN ('priced', 'free', 'unavailable', 'unsupported')),
+        current_price_minor INTEGER CHECK(current_price_minor IS NULL OR current_price_minor >= 0),
+        regular_price_minor INTEGER CHECK(regular_price_minor IS NULL OR regular_price_minor >= 0),
+        discount_percent INTEGER NOT NULL DEFAULT 0 CHECK(discount_percent BETWEEN 0 AND 100),
+        observed_at_utc TEXT NOT NULL CHECK(
+            length(trim(observed_at_utc)) >= 20
+            AND substr(observed_at_utc, -1, 1) = 'Z'
+            AND julianday(observed_at_utc) IS NOT NULL
+        ),
+        CHECK(
+            (price_state = 'priced' AND currency_code IS NOT NULL
+                AND current_price_minor IS NOT NULL)
+            OR (price_state = 'free' AND current_price_minor IS 0
+                AND regular_price_minor IS 0 AND discount_percent = 0)
+            OR (price_state IN ('unavailable', 'unsupported')
+                AND current_price_minor IS NULL AND regular_price_minor IS NULL
+                AND discount_percent = 0)
+        )
+    ))SQL",
+    "CREATE INDEX idx_steam_price_observations_game_market_time ON steam_price_observations(steam_game_id, country_code, currency_code, observed_at_utc, id)",
+    "CREATE INDEX idx_steam_price_observations_game_time ON steam_price_observations(steam_game_id, observed_at_utc, id)",
+};
+
+constexpr const char *steamReleaseRadar[] = {
+    // Independent App-ID membership: no foreign key to steam_games.
+    R"SQL(CREATE TABLE steam_release_follows (
+        steam_app_id INTEGER PRIMARY KEY CHECK(steam_app_id BETWEEN 1 AND 4294967295),
+        store_url TEXT NOT NULL,
+        title TEXT NOT NULL CHECK(length(trim(title)) BETWEEN 1 AND 300),
+        artwork_source_url TEXT NOT NULL DEFAULT '',
+        artwork_filename TEXT NOT NULL DEFAULT '',
+        artwork_mime_type TEXT NOT NULL DEFAULT '',
+        artwork_byte_size INTEGER NOT NULL DEFAULT 0 CHECK(artwork_byte_size >= 0),
+        release_date_text TEXT NOT NULL DEFAULT '' CHECK(length(release_date_text) <= 200),
+        release_date_precision TEXT NOT NULL CHECK(release_date_precision IN
+            ('unknown', 'exact_day', 'month', 'year', 'quarter', 'season', 'range')),
+        release_date_exact TEXT CHECK(release_date_exact IS NULL OR
+            (length(release_date_exact) = 10 AND date(release_date_exact) IS NOT NULL
+                AND date(release_date_exact) = release_date_exact)),
+        release_window_start TEXT CHECK(release_window_start IS NULL OR
+            (length(release_window_start) = 10 AND date(release_window_start) IS NOT NULL
+                AND date(release_window_start) = release_window_start)),
+        release_window_end TEXT CHECK(release_window_end IS NULL OR
+            (length(release_window_end) = 10 AND date(release_window_end) IS NOT NULL
+                AND date(release_window_end) = release_window_end)),
+        release_status TEXT NOT NULL CHECK(release_status IN
+            ('exact_date_announced', 'approximate_date_announced', 'coming_soon', 'released', 'information_unavailable')),
+        followed_at_utc TEXT NOT NULL CHECK(
+            length(trim(followed_at_utc)) >= 20 AND substr(followed_at_utc, -1, 1) = 'Z'
+            AND julianday(followed_at_utc) IS NOT NULL),
+        last_successful_update_at_utc TEXT CHECK(last_successful_update_at_utc IS NULL OR
+            (length(trim(last_successful_update_at_utc)) >= 20
+            AND substr(last_successful_update_at_utc, -1, 1) = 'Z'
+            AND julianday(last_successful_update_at_utc) IS NOT NULL)),
+        last_attempted_update_at_utc TEXT CHECK(last_attempted_update_at_utc IS NULL OR
+            (length(trim(last_attempted_update_at_utc)) >= 20
+            AND substr(last_attempted_update_at_utc, -1, 1) = 'Z'
+            AND julianday(last_attempted_update_at_utc) IS NOT NULL)),
+        refresh_state TEXT NOT NULL CHECK(refresh_state IN ('never_attempted', 'succeeded', 'failed')),
+        refresh_error TEXT NOT NULL DEFAULT '' CHECK(length(refresh_error) <= 500),
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        CHECK((artwork_filename = '' AND artwork_mime_type = '' AND artwork_byte_size = 0)
+            OR (artwork_filename <> '' AND artwork_mime_type IN
+                ('image/jpeg', 'image/png', 'image/webp') AND artwork_byte_size > 0)),
+        CHECK((release_date_precision = 'exact_day' AND release_date_exact IS NOT NULL)
+            OR (release_date_precision <> 'exact_day' AND release_date_exact IS NULL)),
+        CHECK(release_date_precision <> 'exact_day'
+            OR (release_window_start IS NULL AND release_window_end IS NULL)),
+        CHECK(release_date_precision <> 'unknown'
+            OR (release_window_start IS NULL AND release_window_end IS NULL)),
+        CHECK(release_date_precision NOT IN ('month', 'year', 'quarter')
+            OR (release_window_start IS NOT NULL AND release_window_end IS NOT NULL)),
+        CHECK((release_window_start IS NULL AND release_window_end IS NULL)
+            OR (release_window_start IS NOT NULL AND release_window_end IS NOT NULL
+                AND release_window_start <= release_window_end)),
+        CHECK(release_status <> 'exact_date_announced'
+            OR (release_date_precision = 'exact_day' AND release_date_exact IS NOT NULL)),
+        CHECK(release_status <> 'approximate_date_announced'
+            OR release_date_precision IN ('month', 'year', 'quarter', 'season', 'range')),
+        CHECK(release_status NOT IN ('coming_soon', 'information_unavailable')
+            OR (release_date_precision = 'unknown' AND release_date_exact IS NULL)),
+        CHECK((refresh_state = 'never_attempted' AND last_attempted_update_at_utc IS NULL
+                AND last_successful_update_at_utc IS NULL AND refresh_error = '')
+            OR (refresh_state = 'succeeded' AND last_attempted_update_at_utc IS NOT NULL
+                AND last_successful_update_at_utc IS NOT NULL AND refresh_error = '')
+            OR (refresh_state = 'failed' AND last_attempted_update_at_utc IS NOT NULL
+                AND length(trim(refresh_error)) > 0))
+    ))SQL",
+    "CREATE INDEX idx_steam_release_follows_title ON steam_release_follows(title COLLATE NOCASE, steam_app_id)",
+    "CREATE INDEX idx_steam_release_follows_status_date ON steam_release_follows(release_status, release_date_exact, steam_app_id)",
+};
+
+constexpr const char *steamReleaseDateChangeNotice[] = {
+    "ALTER TABLE steam_release_follows ADD COLUMN date_change_unacknowledged "
+    "INTEGER NOT NULL DEFAULT 0 CHECK(date_change_unacknowledged IN (0,1))",
+};
+
+constexpr const char *calendarGameReleaseVisibility[] = {
+    "INSERT INTO preferences(key,value) VALUES('calendar.game_releases_visible','1') "
+    "ON CONFLICT(key) DO NOTHING",
+};
+
 constexpr const char *favoriteOrdering[] = {
     "DROP INDEX idx_favorite_categories_order",
     "CREATE INDEX idx_favorite_categories_order ON favorite_categories(source, display_order, name_normalized, id)",
@@ -367,6 +478,191 @@ constexpr const char *weatherComparison[] = {
     "CREATE INDEX idx_weather_comparison_order ON weather_comparison_cities(display_order, identity)",
 };
 
+constexpr const char *steamGameUpdates[] = {
+    // Membership is independent of both price tracking and Release Radar.
+    // A row is a followed game; ownership_status is only a local user label.
+    R"SQL(CREATE TABLE steam_game_update_follows (
+        steam_app_id INTEGER PRIMARY KEY CHECK(steam_app_id BETWEEN 1 AND 4294967295),
+        store_url TEXT NOT NULL,
+        name TEXT NOT NULL CHECK(length(trim(name)) BETWEEN 1 AND 300),
+        artwork_source_url TEXT NOT NULL DEFAULT '',
+        artwork_filename TEXT NOT NULL DEFAULT '',
+        artwork_mime_type TEXT NOT NULL DEFAULT '',
+        artwork_byte_size INTEGER NOT NULL DEFAULT 0 CHECK(artwork_byte_size >= 0),
+        ownership_status TEXT NOT NULL DEFAULT 'not_owned'
+            CHECK(ownership_status IN ('owned', 'not_owned')),
+        added_at_utc TEXT NOT NULL CHECK(
+            length(trim(added_at_utc)) >= 20 AND substr(added_at_utc, -1, 1) = 'Z'
+            AND julianday(added_at_utc) IS NOT NULL),
+        last_successful_news_check_at_utc TEXT CHECK(
+            last_successful_news_check_at_utc IS NULL OR
+            (length(trim(last_successful_news_check_at_utc)) >= 20
+            AND substr(last_successful_news_check_at_utc, -1, 1) = 'Z'
+            AND julianday(last_successful_news_check_at_utc) IS NOT NULL)),
+        last_attempted_news_check_at_utc TEXT CHECK(
+            last_attempted_news_check_at_utc IS NULL OR
+            (length(trim(last_attempted_news_check_at_utc)) >= 20
+            AND substr(last_attempted_news_check_at_utc, -1, 1) = 'Z'
+            AND julianday(last_attempted_news_check_at_utc) IS NOT NULL)),
+        refresh_state TEXT NOT NULL DEFAULT 'never_attempted'
+            CHECK(refresh_state IN ('never_attempted', 'succeeded', 'failed')),
+        last_refresh_error TEXT NOT NULL DEFAULT '' CHECK(length(last_refresh_error) <= 500),
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        CHECK((artwork_filename = '' AND artwork_mime_type = '' AND artwork_byte_size = 0)
+            OR (artwork_filename <> '' AND artwork_mime_type IN
+                ('image/jpeg', 'image/png', 'image/webp') AND artwork_byte_size > 0)),
+        CHECK((refresh_state = 'never_attempted'
+                AND last_attempted_news_check_at_utc IS NULL
+                AND last_successful_news_check_at_utc IS NULL AND last_refresh_error = '')
+            OR (refresh_state = 'succeeded'
+                AND last_attempted_news_check_at_utc IS NOT NULL
+                AND last_successful_news_check_at_utc IS NOT NULL AND last_refresh_error = '')
+            OR (refresh_state = 'failed'
+                AND last_attempted_news_check_at_utc IS NOT NULL
+                AND length(trim(last_refresh_error)) > 0))
+    ))SQL",
+    "CREATE INDEX idx_steam_game_update_follows_name ON steam_game_update_follows(name COLLATE NOCASE, steam_app_id)",
+    "CREATE INDEX idx_steam_game_update_follows_added ON steam_game_update_follows(added_at_utc DESC, steam_app_id)",
+};
+
+constexpr const char *steamGameUpdateNews[] = {
+    R"SQL(CREATE TABLE steam_game_update_news_items (
+        steam_app_id INTEGER NOT NULL CHECK(steam_app_id BETWEEN 1 AND 4294967295),
+        news_id TEXT NOT NULL CHECK(length(news_id) BETWEEN 1 AND 32
+            AND news_id NOT GLOB '*[^0-9]*'),
+        title TEXT NOT NULL CHECK(length(trim(title)) BETWEEN 1 AND 500),
+        published_at_unix_seconds INTEGER NOT NULL
+            CHECK(published_at_unix_seconds BETWEEN 1 AND 253402300799),
+        source_url TEXT NOT NULL CHECK(length(source_url) BETWEEN 1 AND 4096),
+        author TEXT NOT NULL DEFAULT '' CHECK(length(author) <= 500),
+        feed_label TEXT NOT NULL DEFAULT '' CHECK(length(feed_label) <= 200),
+        feed_name TEXT NOT NULL DEFAULT '' CHECK(length(feed_name) <= 200),
+        feed_type INTEGER CHECK(feed_type IS NULL OR feed_type >= 0),
+        content_text TEXT NOT NULL DEFAULT '' CHECK(length(content_text) <= 6000),
+        external_url INTEGER NOT NULL DEFAULT 0 CHECK(external_url IN (0, 1)),
+        is_read INTEGER NOT NULL DEFAULT 0 CHECK(is_read IN (0, 1)),
+        discovered_at_utc TEXT NOT NULL CHECK(
+            length(trim(discovered_at_utc)) >= 20 AND substr(discovered_at_utc, -1, 1) = 'Z'
+            AND julianday(discovered_at_utc) IS NOT NULL),
+        PRIMARY KEY(steam_app_id, news_id),
+        FOREIGN KEY(steam_app_id) REFERENCES steam_game_update_follows(steam_app_id)
+            ON DELETE CASCADE
+    ))SQL",
+    "CREATE INDEX idx_steam_game_update_news_order ON steam_game_update_news_items(published_at_unix_seconds DESC, steam_app_id DESC, news_id DESC)",
+    "CREATE INDEX idx_steam_game_update_news_game_order ON steam_game_update_news_items(steam_app_id, published_at_unix_seconds DESC, news_id DESC)",
+    "CREATE INDEX idx_steam_game_update_news_unread ON steam_game_update_news_items(is_read, steam_app_id, published_at_unix_seconds DESC)",
+};
+
+constexpr const char *steamCatalogAndCollections[] = {
+    R"SQL(CREATE TABLE steam_game_catalog (
+        steam_app_id INTEGER PRIMARY KEY CHECK(steam_app_id BETWEEN 1 AND 4294967295),
+        store_url TEXT NOT NULL CHECK(length(store_url) BETWEEN 1 AND 4096),
+        name TEXT NOT NULL CHECK(length(trim(name)) BETWEEN 1 AND 300),
+        artwork_source_url TEXT NOT NULL DEFAULT '' CHECK(length(artwork_source_url) <= 4096),
+        artwork_filename TEXT NOT NULL DEFAULT '',
+        artwork_mime_type TEXT NOT NULL DEFAULT '',
+        artwork_byte_size INTEGER NOT NULL DEFAULT 0 CHECK(artwork_byte_size >= 0),
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        CHECK((artwork_filename = '' AND artwork_mime_type = '' AND artwork_byte_size = 0)
+            OR (artwork_filename <> '' AND artwork_source_url <> '' AND artwork_mime_type IN
+                ('image/jpeg', 'image/png', 'image/webp') AND artwork_byte_size > 0))
+    ))SQL",
+    "CREATE INDEX idx_steam_game_catalog_name ON steam_game_catalog(name COLLATE NOCASE, steam_app_id)",
+    R"SQL(CREATE TABLE steam_collections (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL CHECK(length(trim(name)) BETWEEN 1 AND 80),
+        name_normalized TEXT NOT NULL UNIQUE CHECK(length(trim(name_normalized)) BETWEEN 1 AND 240),
+        description TEXT NOT NULL DEFAULT '' CHECK(length(description) <= 2000),
+        color TEXT NOT NULL DEFAULT '' CHECK(color = '' OR
+            (length(color) = 7 AND substr(color, 1, 1) = '#'
+                AND substr(color, 2) NOT GLOB '*[^0-9a-f]*')),
+        icon TEXT NOT NULL DEFAULT '' CHECK(length(icon) <= 16),
+        display_order INTEGER NOT NULL UNIQUE CHECK(display_order >= 0),
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    ))SQL",
+    R"SQL(CREATE TABLE steam_collection_games (
+        collection_id INTEGER NOT NULL REFERENCES steam_collections(id) ON DELETE CASCADE,
+        steam_app_id INTEGER NOT NULL REFERENCES steam_game_catalog(steam_app_id) ON DELETE RESTRICT,
+        status TEXT CHECK(status IS NULL OR status IN
+            ('backlog', 'playing', 'completed', 'paused', 'dropped')),
+        personal_rating INTEGER CHECK(personal_rating IS NULL OR personal_rating BETWEEN 1 AND 5),
+        personal_comment TEXT NOT NULL DEFAULT '' CHECK(length(personal_comment) <= 4000),
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY(collection_id, steam_app_id)
+    ))SQL",
+    "CREATE INDEX idx_steam_collection_games_app ON steam_collection_games(steam_app_id, collection_id)",
+    // Seed one shared App-ID row from existing independent memberships.
+    R"SQL(INSERT INTO steam_game_catalog(steam_app_id,store_url,name,artwork_source_url,
+        artwork_filename,artwork_mime_type,artwork_byte_size,created_at,updated_at)
+        SELECT steam_app_id,
+            'https://store.steampowered.com/app/' || steam_app_id || '/',title,artwork_source_url,
+            CASE WHEN artwork_source_url<>'' THEN artwork_filename ELSE '' END,
+            CASE WHEN artwork_source_url<>'' THEN artwork_mime_type ELSE '' END,
+            CASE WHEN artwork_source_url<>'' THEN artwork_byte_size ELSE 0 END,
+            created_at,updated_at
+        FROM steam_release_follows WHERE steam_app_id BETWEEN 1 AND 4294967295)SQL",
+    R"SQL(INSERT INTO steam_game_catalog(steam_app_id,store_url,name,artwork_source_url,
+        artwork_filename,artwork_mime_type,artwork_byte_size,created_at,updated_at)
+        SELECT steam_app_id,
+            'https://store.steampowered.com/app/' || steam_app_id || '/',name,artwork_source_url,
+            CASE WHEN artwork_source_url<>'' THEN artwork_filename ELSE '' END,
+            CASE WHEN artwork_source_url<>'' THEN artwork_mime_type ELSE '' END,
+            CASE WHEN artwork_source_url<>'' THEN artwork_byte_size ELSE 0 END,
+            created_at,updated_at
+        FROM steam_game_update_follows WHERE steam_app_id BETWEEN 1 AND 4294967295
+        ON CONFLICT(steam_app_id) DO UPDATE SET
+            artwork_source_url=CASE WHEN steam_game_catalog.artwork_source_url=''
+                THEN excluded.artwork_source_url ELSE steam_game_catalog.artwork_source_url END,
+            artwork_filename=CASE WHEN steam_game_catalog.artwork_filename=''
+                AND (steam_game_catalog.artwork_source_url=''
+                    OR steam_game_catalog.artwork_source_url=excluded.artwork_source_url)
+                AND excluded.artwork_filename<>'' THEN excluded.artwork_filename
+                ELSE steam_game_catalog.artwork_filename END,
+            artwork_mime_type=CASE WHEN steam_game_catalog.artwork_filename=''
+                AND (steam_game_catalog.artwork_source_url=''
+                    OR steam_game_catalog.artwork_source_url=excluded.artwork_source_url)
+                AND excluded.artwork_filename<>'' THEN excluded.artwork_mime_type
+                ELSE steam_game_catalog.artwork_mime_type END,
+            artwork_byte_size=CASE WHEN steam_game_catalog.artwork_filename=''
+                AND (steam_game_catalog.artwork_source_url=''
+                    OR steam_game_catalog.artwork_source_url=excluded.artwork_source_url)
+                AND excluded.artwork_filename<>'' THEN excluded.artwork_byte_size
+                ELSE steam_game_catalog.artwork_byte_size END)SQL",
+    R"SQL(INSERT INTO steam_game_catalog(steam_app_id,store_url,name,artwork_source_url,
+        artwork_filename,artwork_mime_type,artwork_byte_size,created_at,updated_at)
+        SELECT g.steam_app_id,
+            'https://store.steampowered.com/app/' || g.steam_app_id || '/',
+            g.name,g.image_source_url,
+            CASE WHEN g.image_source_url<>'' THEN COALESCE(i.filename,'') ELSE '' END,
+            CASE WHEN g.image_source_url<>'' THEN COALESCE(i.mime_type,'') ELSE '' END,
+            CASE WHEN g.image_source_url<>'' THEN COALESCE(i.byte_size,0) ELSE 0 END,
+            g.created_at,g.updated_at
+        FROM steam_games g LEFT JOIN steam_game_images i ON i.game_id=g.id
+        WHERE g.steam_app_id BETWEEN 1 AND 4294967295
+        ON CONFLICT(steam_app_id) DO UPDATE SET
+            artwork_source_url=CASE WHEN steam_game_catalog.artwork_source_url=''
+                THEN excluded.artwork_source_url ELSE steam_game_catalog.artwork_source_url END,
+            artwork_filename=CASE WHEN steam_game_catalog.artwork_filename=''
+                AND (steam_game_catalog.artwork_source_url=''
+                    OR steam_game_catalog.artwork_source_url=excluded.artwork_source_url)
+                AND excluded.artwork_filename<>'' THEN excluded.artwork_filename
+                ELSE steam_game_catalog.artwork_filename END,
+            artwork_mime_type=CASE WHEN steam_game_catalog.artwork_filename=''
+                AND (steam_game_catalog.artwork_source_url=''
+                    OR steam_game_catalog.artwork_source_url=excluded.artwork_source_url)
+                AND excluded.artwork_filename<>'' THEN excluded.artwork_mime_type
+                ELSE steam_game_catalog.artwork_mime_type END,
+            artwork_byte_size=CASE WHEN steam_game_catalog.artwork_filename=''
+                AND (steam_game_catalog.artwork_source_url=''
+                    OR steam_game_catalog.artwork_source_url=excluded.artwork_source_url)
+                AND excluded.artwork_filename<>'' THEN excluded.artwork_byte_size
+                ELSE steam_game_catalog.artwork_byte_size END)SQL",
+};
+
 constexpr std::array migrations{
     Migration{1, "core tasks currencies preferences", core, qsizetype(std::size(core))},
     Migration{2, "favorites and retained update news", favorites, qsizetype(std::size(favorites))},
@@ -384,6 +680,20 @@ constexpr std::array migrations{
               qsizetype(std::size(taskScheduling))},
     Migration{11, "weather comparison cities and forecast cache", weatherComparison,
               qsizetype(std::size(weatherComparison))},
+    Migration{12, "Steam price observations", steamPriceObservations,
+              qsizetype(std::size(steamPriceObservations))},
+    Migration{13, "Steam Release Radar", steamReleaseRadar,
+              qsizetype(std::size(steamReleaseRadar))},
+    Migration{14, "Steam release date change acknowledgement", steamReleaseDateChangeNotice,
+              qsizetype(std::size(steamReleaseDateChangeNotice))},
+    Migration{15, "calendar Steam release visibility", calendarGameReleaseVisibility,
+              qsizetype(std::size(calendarGameReleaseVisibility))},
+    Migration{16, "independent Steam Game Updates follows", steamGameUpdates,
+              qsizetype(std::size(steamGameUpdates))},
+    Migration{17, "independent Steam Game Updates article cache", steamGameUpdateNews,
+              qsizetype(std::size(steamGameUpdateNews))},
+    Migration{18, "Steam game catalog and collections", steamCatalogAndCollections,
+              qsizetype(std::size(steamCatalogAndCollections))},
 };
 
 bool fail(QString *diagnostic, const QString &message)
@@ -439,7 +749,14 @@ bool hasUnexpectedTables(const QSqlDatabase &database, QString *diagnostic, bool
         QStringLiteral("desktop_app_icons"), QStringLiteral("setups"),
         QStringLiteral("setup_apps"), QStringLiteral("setup_icons"),
         QStringLiteral("steam_game_settings"), QStringLiteral("steam_games"),
-        QStringLiteral("steam_game_images"), QStringLiteral("data_imports"),
+        QStringLiteral("steam_game_images"),
+        QStringLiteral("steam_price_observations"), QStringLiteral("data_imports"),
+        QStringLiteral("steam_release_follows"),
+        QStringLiteral("steam_game_update_follows"),
+        QStringLiteral("steam_game_update_news_items"),
+        QStringLiteral("steam_game_catalog"),
+        QStringLiteral("steam_collections"),
+        QStringLiteral("steam_collection_games"),
         QStringLiteral("task_history"), QStringLiteral("task_schedules"),
         QStringLiteral("scheduling_preferences"),
         QStringLiteral("weather_comparison_cities")

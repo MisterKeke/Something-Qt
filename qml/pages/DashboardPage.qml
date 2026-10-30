@@ -12,6 +12,7 @@ Item {
     readonly property bool sideBySide: width >= 1080
     readonly property int railWidth: width >= 1600 ? 280 : width >= 1300 ? 250 : 224
     signal navigateRequested(string routeId)
+    signal steamReleaseRequested(var appId)
     implicitHeight: dashboardGrid.implicitHeight
     function restoreShellFocus() {
         Qt.callLater(function() {
@@ -84,6 +85,9 @@ Item {
                 Layout.fillWidth: true
                 Layout.preferredHeight: implicitHeight
                 embedded: true
+                onReleaseRequested: function(appId) {
+                    root.steamReleaseRequested(appId)
+                }
             }
             Shared.DashboardNewsCard {
                 Layout.fillWidth: true

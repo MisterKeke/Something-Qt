@@ -4,10 +4,16 @@
 #include "../domain/task.h"
 #include "../domain/task_history.h"
 #include "../domain/task_scheduling.h"
+#include "../domain/steam_news.h"
+#include "../domain/steam_release.h"
+#include "../domain/steam_game_updates.h"
+#include "../domain/steam_game_catalog.h"
+#include "../domain/steam_collections.h"
 #include "../domain/weather_currency.h"
 
 #include <QString>
 #include <QStringList>
+#include <QHash>
 #include <QVector>
 
 #include <optional>
@@ -216,8 +222,61 @@ struct SteamGame {
     std::optional<AssetMetadata> artwork;
 };
 
+using SteamGameCatalogEntry = domain::SteamGameCatalogEntry;
+using SteamCollection = domain::SteamCollection;
+using SteamCollectionGameEntry = domain::SteamCollectionGameEntry;
+
 struct SteamSettings {
     QString countryCode{QStringLiteral("TR")};
+};
+
+enum class SteamPriceHistoryRange { Days7, Days30, Days90, Year1, All };
+
+struct SteamPriceHistoryStatistics final {
+    QString countryCode;
+    QString currencyCode;
+    QString latestObservationState;
+    QString latestObservationAtUtc;
+    std::optional<qint64> latestPriceMinor;
+    QString latestPriceState;
+    QString latestPriceAtUtc;
+    std::optional<qint64> lowestPriceMinor;
+    std::optional<qint64> highestPriceMinor;
+    QString firstObservationAtUtc;
+    QString mostRecentObservationAtUtc;
+    qint64 observationCount{0};
+    qint64 comparablePriceCount{0};
+    // True when at least two observations in this market contain a price.
+    bool hasSufficientHistory{false};
+    bool hasComparableInterval{false};
+    QString intervalStartAtUtc;
+    QString intervalEndAtUtc;
+    std::optional<qint64> intervalStartPriceMinor;
+    std::optional<qint64> intervalEndPriceMinor;
+    std::optional<qint64> intervalAbsoluteChangeMinor; // signed end minus start
+    std::optional<double> intervalPercentageChange;
+};
+
+struct SteamPriceHistoryPoint final {
+    qint64 id{0};
+    QString observedAtUtc;
+    qint64 observedAtUtcMs{0};
+    QString priceState;
+    QString currencyCode;
+    std::optional<qint64> priceMinor;
+};
+
+struct SteamPriceHistorySnapshot final {
+    SteamPriceHistoryStatistics statistics;
+    QVector<SteamPriceHistoryPoint> points;
+};
+
+struct SteamPriceHistoryMarket final {
+    QString countryCode;
+    QString currencyCode;
+    qint64 observationCount{0};
+    QString firstObservationAtUtc;
+    QString mostRecentObservationAtUtc;
 };
 
 struct SteamRefreshUpdate final {
@@ -225,6 +284,49 @@ struct SteamRefreshUpdate final {
     QString attemptedAt;
     QString safeError;
     std::optional<SteamGame> refreshedGame;
+};
+
+struct SteamCollectionDeleteResult final {
+    qint64 deletedId{0};
+    int removedMemberships{0};
+};
+
+struct SteamReleaseRefreshUpdate final {
+    quint32 appId{0};
+    QString attemptedAtUtc;
+    QString safeError;
+    std::optional<domain::SteamReleaseDetails> refreshedDetails;
+};
+
+struct SteamGameUpdateNewsItem final {
+    domain::SteamNewsArticle article;
+    QString gameName;
+    bool isRead{false};
+    QString discoveredAtUtc;
+};
+
+struct SteamGameUpdateNewsCursor final {
+    qint64 publishedAtUnixSeconds{0};
+    quint32 appId{0};
+    QString newsId;
+
+    bool isValid() const noexcept
+    {
+        return publishedAtUnixSeconds > 0
+            && publishedAtUnixSeconds <= 253402300799LL
+            && appId > 0 && !newsId.isEmpty();
+    }
+};
+
+struct SteamGameUpdateNewsPage final {
+    QVector<SteamGameUpdateNewsItem> items;
+    SteamGameUpdateNewsCursor nextCursor;
+    bool hasMore{false};
+};
+
+struct SteamGameUpdateNewsUpsertResult final {
+    int insertedCount{0};
+    int refreshedCount{0};
 };
 
 } // namespace something::storage

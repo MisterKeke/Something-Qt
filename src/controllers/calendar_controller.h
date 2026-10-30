@@ -28,6 +28,12 @@ class CalendarController final : public QObject {
     Q_PROPERTY(QString errorMessage READ errorMessage NOTIFY stateChanged)
     Q_PROPERTY(QString markerErrorMessage READ markerErrorMessage NOTIFY stateChanged)
     Q_PROPERTY(QVariantMap selectedSchedules READ selectedSchedules NOTIFY stateChanged)
+    Q_PROPERTY(QVariantList selectedReleaseEvents READ selectedReleaseEvents NOTIFY stateChanged)
+    Q_PROPERTY(bool showGameReleases READ showGameReleases NOTIFY stateChanged)
+    Q_PROPERTY(bool releaseVisibilityLoaded READ releaseVisibilityLoaded NOTIFY stateChanged)
+    Q_PROPERTY(bool releaseVisibilitySaving READ releaseVisibilitySaving NOTIFY stateChanged)
+    Q_PROPERTY(QString releaseVisibilityError READ releaseVisibilityError NOTIFY stateChanged)
+    Q_PROPERTY(QString releaseEventsErrorMessage READ releaseEventsErrorMessage NOTIFY stateChanged)
 
 public:
     CalendarController(application::ApplicationServiceGraph *graph,
@@ -47,6 +53,12 @@ public:
     QString errorMessage() const { return m_errorMessage; }
     QString markerErrorMessage() const { return m_markerErrorMessage; }
     QVariantMap selectedSchedules() const { return m_selectedSchedules; }
+    QVariantList selectedReleaseEvents() const { return m_selectedReleaseEvents; }
+    bool showGameReleases() const noexcept { return m_showGameReleases; }
+    bool releaseVisibilityLoaded() const noexcept { return m_releaseVisibilityLoaded; }
+    bool releaseVisibilitySaving() const noexcept { return m_releaseVisibilitySaving; }
+    QString releaseVisibilityError() const { return m_releaseVisibilityError; }
+    QString releaseEventsErrorMessage() const { return m_releaseEventsErrorMessage; }
 
     Q_INVOKABLE void previousYear();
     Q_INVOKABLE void nextYear();
@@ -54,6 +66,7 @@ public:
     Q_INVOKABLE void setPageVisible(bool visible);
     Q_INVOKABLE void selectDate(const QString &isoDate);
     Q_INVOKABLE void refreshSelectedDate();
+    Q_INVOKABLE void setShowGameReleases(bool visible);
 
 public slots:
     void onTaskMutation(qint64 taskId, const QVariantMap &currentTask, bool deleted);
@@ -63,12 +76,14 @@ signals:
     void stateChanged();
 
 private:
-    enum class Action { SelectedDate, YearMarkers };
+    enum class Action { SelectedDate, YearMarkers, LoadReleaseVisibility,
+                        SaveReleaseVisibility };
     void onLifecycleChanged(application::ApplicationLifecycle::State state);
     void updateCalendarModel();
     void updateLabels();
     void loadSelectedDate(bool clearRows);
     void loadYearIndicators(bool clearExisting = false);
+    void loadReleaseVisibility();
     void onStorageFinished(quint64 operationId, const QVariantMap &values,
                            domain::AppError error);
     void setError(QString message);
@@ -81,20 +96,29 @@ private:
     QHash<quint64, Action> m_pending;
     QVariantMap m_dateMarkers;
     QVariantMap m_selectedSchedules;
+    QVariantList m_selectedReleaseEvents;
     QDate m_observedLocalDate;
     int m_visibleYear{0};
     quint64 m_dateOperationId{0};
     quint64 m_yearOperationId{0};
+    quint64 m_visibilityOperationId{0};
     bool m_ready{false};
     bool m_pageVisible{false};
     bool m_loading{false};
     bool m_markersLoading{false};
+    bool m_showGameReleases{true};
+    bool m_releaseVisibilityLoaded{false};
+    bool m_releaseVisibilityLoading{false};
+    bool m_releaseVisibilitySaving{false};
+    bool m_visibilityBeforeSave{true};
     QString m_selectedDate;
     QString m_selectedDateLabel;
     QString m_rangeLabel;
     QString m_summary;
     QString m_errorMessage;
     QString m_markerErrorMessage;
+    QString m_releaseVisibilityError;
+    QString m_releaseEventsErrorMessage;
 };
 
 } // namespace something::controllers

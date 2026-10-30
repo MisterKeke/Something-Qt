@@ -274,6 +274,8 @@ add_executable(SomethingQtWeatherCurrencyTests
     ../src/domain/app_error.cpp
     ../src/domain/task_rules.cpp
     ../src/domain/weather_currency.cpp
+    ../src/domain/steam_game.cpp
+    ../src/domain/steam_game_catalog.cpp
     ../src/models/currency_rates_model.cpp
     ../src/models/weather_comparison_model.cpp
     ../src/models/weather_forecast_model.cpp
@@ -442,15 +444,23 @@ add_executable(SomethingQtSteamFeatureTests
     steam_feature_test.cpp
     provider_fixtures.qrc
     ../src/domain/app_error.cpp
+    ../src/domain/task_date_rules.cpp
     ../src/domain/task_rules.cpp
     ../src/domain/steam_game.cpp
+    ../src/domain/steam_game_catalog.cpp
+    ../src/domain/steam_release.cpp
     ../src/domain/weather_currency.cpp
     ../src/models/steam_games_model.cpp
     ../src/providers/feature_parsers.cpp
     ../src/providers/provider_policy.cpp
+    ../src/providers/steam_game_catalog_provider.cpp
+    ../src/providers/steam_release_provider.cpp
     ../src/providers/steam_artwork_image_provider.cpp
+    ../src/services/calendar_service.cpp
     ../src/services/steam_artwork_store.cpp
+    ../src/services/steam_release_service.cpp
     ../src/services/steam_service.cpp
+    ../src/services/task_service.cpp
     ../src/domain/task_history.cpp
     ../src/domain/task_scheduling.cpp
     ../src/storage/repositories.cpp
@@ -460,6 +470,67 @@ target_include_directories(SomethingQtSteamFeatureTests PRIVATE ../src)
 target_link_libraries(SomethingQtSteamFeatureTests PRIVATE
     Qt6::Core Qt6::Gui Qt6::Quick Qt6::Sql Qt6::Test)
 add_test(NAME SomethingQtSteamFeatureTests COMMAND SomethingQtSteamFeatureTests)
+
+add_executable(SomethingQtGameUpdatesTests
+    game_updates_feature_test.cpp
+    ../src/application/application_lifecycle.cpp
+    ../src/application/application_service_graph.cpp
+    ../src/application/capability_registry.cpp
+    ../src/application/operation_coordinator.cpp
+    ../src/controllers/steam_game_updates_controller.cpp
+    ../src/domain/app_error.cpp
+    ../src/domain/task_date_rules.cpp
+    ../src/domain/task_history.cpp
+    ../src/domain/task_rules.cpp
+    ../src/domain/task_scheduling.cpp
+    ../src/domain/steam_game.cpp
+    ../src/domain/steam_game_catalog.cpp
+    ../src/domain/steam_game_updates.cpp
+    ../src/domain/steam_release.cpp
+    ../src/domain/weather_currency.cpp
+    ../src/platform/profile_instance_lock.cpp
+    ../src/providers/feature_parsers.cpp
+    ../src/providers/network_worker.cpp
+    ../src/providers/provider_policy.cpp
+    ../src/providers/provider_response_cache.cpp
+    ../src/providers/steam_news_parser.cpp
+    ../src/providers/steam_news_provider.cpp
+    ../src/providers/steam_game_catalog_provider.cpp
+    ../src/providers/steam_release_provider.cpp
+    ../src/services/bounded_worker_pool.cpp
+    ../src/services/steam_artwork_store.cpp
+    ../src/services/steam_game_updates_service.cpp
+    ../src/storage/repositories.cpp
+    ../src/storage/schema_migrator.cpp
+    ../src/storage/storage_worker.cpp
+)
+target_include_directories(SomethingQtGameUpdatesTests PRIVATE ../src)
+target_link_libraries(SomethingQtGameUpdatesTests PRIVATE
+    Qt6::Core Qt6::Gui Qt6::Network Qt6::Sql Qt6::Test lexbor_static)
+add_test(NAME SomethingQtGameUpdatesTests COMMAND SomethingQtGameUpdatesTests)
+
+add_executable(SomethingQtGameCollectionsTests
+    game_collections_feature_test.cpp
+    ../src/domain/app_error.cpp
+    ../src/domain/task_date_rules.cpp
+    ../src/domain/task_history.cpp
+    ../src/domain/task_rules.cpp
+    ../src/domain/task_scheduling.cpp
+    ../src/domain/steam_game.cpp
+    ../src/domain/steam_game_catalog.cpp
+    ../src/domain/steam_collections.cpp
+    ../src/domain/steam_release.cpp
+    ../src/domain/steam_game_updates.cpp
+    ../src/domain/weather_currency.cpp
+    ../src/services/steam_artwork_store.cpp
+    ../src/services/steam_collections_service.cpp
+    ../src/storage/repositories.cpp
+    ../src/storage/schema_migrator.cpp
+)
+target_include_directories(SomethingQtGameCollectionsTests PRIVATE ../src)
+target_link_libraries(SomethingQtGameCollectionsTests PRIVATE
+    Qt6::Core Qt6::Gui Qt6::Sql Qt6::Test)
+add_test(NAME SomethingQtGameCollectionsTests COMMAND SomethingQtGameCollectionsTests)
 
 add_executable(SomethingQtDataImportTests
     data_import_test.cpp
@@ -479,6 +550,7 @@ add_executable(SomethingQtDataImportTests
     ../src/domain/app_error.cpp
     ../src/domain/favorite_rules.cpp
     ../src/domain/steam_game.cpp
+    ../src/domain/steam_game_catalog.cpp
     ../src/domain/task_rules.cpp
     ../src/domain/desktop_application_rules.cpp
     ../src/domain/weather_currency.cpp

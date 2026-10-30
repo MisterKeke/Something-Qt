@@ -37,6 +37,8 @@ QVariant SteamGamesModel::roleValue(const QVariantMap &game, int role)
         const QString status = game.value(QStringLiteral("priceStatus")).toString();
         if (status == QStringLiteral("free")) return QStringLiteral("Free");
         if (status == QStringLiteral("unavailable")) return QStringLiteral("Unavailable");
+        if (status == QStringLiteral("unsupported"))
+            return QStringLiteral("No supported pricing");
         if (status != QStringLiteral("priced")
             || !game.contains(QStringLiteral("currentPriceMinor"))
             || game.value(QStringLiteral("currency")).toString().isEmpty())

@@ -177,6 +177,10 @@ ApplicationWindow {
             controller: dashboardController
             navigationItems: window.navigationItems
             onNavigateRequested: function(routeId) { window.navigateTo(routeId) }
+            onSteamReleaseRequested: function(appId) {
+                steamReleaseController.openReleaseDetails(Number(appId))
+                window.navigateTo("steam")
+            }
         }
     }
 
@@ -191,6 +195,10 @@ ApplicationWindow {
         id: calendarPageComponent
         Pages.CalendarPage {
             controller: calendarController
+            onReleaseRequested: function(appId) {
+                steamReleaseController.openReleaseDetails(Number(appId))
+                window.navigateTo("steam")
+            }
         }
     }
 
@@ -231,7 +239,17 @@ ApplicationWindow {
 
     Component {
         id: steamPageComponent
-        Pages.SteamGamesPage { controller: steamGamesController }
+        Pages.SteamGamesPage {
+            controller: steamGamesController
+            releaseController: steamReleaseController
+            collectionsController: steamCollectionsController
+            gameUpdatesController: steamGameUpdatesController
+        }
+    }
+
+    Component {
+        id: gameUpdatesPageComponent
+        Pages.GameUpdatesPage { controller: steamGameUpdatesController }
     }
 
     background: Item {
@@ -358,6 +376,7 @@ ApplicationWindow {
                             : window.currentRoute === "currencies" ? qsTr("Rates, conversions, and favorite pairs")
                             : window.currentRoute === "setups" ? qsTr("Launch your saved application groups")
                             : window.currentRoute === "applications" ? qsTr("Your favorite desktop applications")
+                            : window.currentRoute === "gameUpdates" ? qsTr("Follow Steam game news independently from price tracking")
                             : ""
                         visible: text.length > 0
                         color: ThemeModule.Theme.textSecondary
@@ -398,6 +417,7 @@ ApplicationWindow {
                         : window.currentRoute === "runningApplications" ? runningApplicationsPageComponent
                         : window.currentRoute === "setups" ? setupsPageComponent
                         : window.currentRoute === "fileExplorer" ? fileExplorerPageComponent
+                        : window.currentRoute === "gameUpdates" ? gameUpdatesPageComponent
                         : window.currentRoute === "steam" ? steamPageComponent
                         : (window.currentRoute === "telegram" || window.currentRoute === "youtube") ? favoritesPageComponent
                         : dashboardPageComponent

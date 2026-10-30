@@ -76,6 +76,9 @@ qt_add_executable(SomethingQt WIN32
     src/controllers/file_explorer_controller.cpp
     src/controllers/legacy_data_import_controller.cpp
     src/controllers/setups_controller.cpp
+    src/controllers/steam_release_controller.cpp
+    src/controllers/steam_collections_controller.cpp
+    src/controllers/steam_game_updates_controller.cpp
     src/controllers/steam_games_controller.cpp
     src/controllers/favorites_controller.cpp
     src/controllers/running_applications_controller.cpp
@@ -95,6 +98,10 @@ qt_add_executable(SomethingQt WIN32
     src/domain/task_scheduling.cpp
     src/domain/scheduling_engine.cpp
     src/domain/steam_game.cpp
+    src/domain/steam_game_catalog.cpp
+    src/domain/steam_game_updates.cpp
+    src/domain/steam_collections.cpp
+    src/domain/steam_release.cpp
     src/domain/weather_currency.cpp
     src/platform/profile_instance_lock.cpp
     src/platform/file_explorer_platform.cpp
@@ -106,12 +113,17 @@ qt_add_executable(SomethingQt WIN32
     src/providers/provider_response_cache.cpp
     src/providers/provider_parsers.cpp
     src/providers/feature_parsers.cpp
+    src/providers/steam_news_parser.cpp
+    src/providers/steam_game_catalog_provider.cpp
     src/providers/provider_image_provider.cpp
     src/providers/wallpaper_image_provider.cpp
     src/providers/application_icon_image_provider.cpp
     src/providers/setup_icon_image_provider.cpp
     src/providers/steam_artwork_image_provider.cpp
+    src/providers/steam_release_provider.cpp
+    src/providers/steam_news_provider.cpp
     src/services/bounded_worker_pool.cpp
+    src/services/calendar_service.cpp
     src/services/dashboard_service.cpp
     src/services/desktop_app_icon_store.cpp
     src/services/desktop_applications_service.cpp
@@ -120,6 +132,9 @@ qt_add_executable(SomethingQt WIN32
     src/services/setup_icon_store.cpp
     src/services/setups_service.cpp
     src/services/steam_artwork_store.cpp
+    src/services/steam_collections_service.cpp
+    src/services/steam_game_updates_service.cpp
+    src/services/steam_release_service.cpp
     src/services/steam_service.cpp
     src/services/currency_service.cpp
     src/services/favorites_service.cpp
@@ -151,6 +166,7 @@ qt_add_executable(SomethingQt WIN32
     src/models/running_windows_model.cpp
     src/models/weather_forecast_model.cpp
     src/models/weather_comparison_model.cpp
+    src/models/steam_releases_model.cpp
     src/models/steam_games_model.cpp
 )
 
@@ -184,6 +200,7 @@ qt_add_qml_module(SomethingQt
         qml/dialogs/ConfirmationDialog.qml
         qml/dialogs/TaskEditorDialog.qml
         qml/dialogs/TaskHistoryDialog.qml
+        qml/dialogs/SteamPriceHistoryDialog.qml
         qml/components/TaskSummaryCard.qml
         qml/components/TaskHistoryEventCard.qml
         qml/pages/CalendarPage.qml
@@ -194,7 +211,11 @@ qt_add_qml_module(SomethingQt
         qml/pages/FileExplorerPage.qml
         qml/pages/RunningApplicationsPage.qml
         qml/pages/SetupsPage.qml
+        qml/pages/SteamPriceTrackingPanel.qml
+        qml/pages/SteamReleaseRadarPage.qml
+        qml/pages/GameUpdatesPage.qml
         qml/pages/SteamGamesPage.qml
+        qml/pages/SteamCollectionsPage.qml
         qml/pages/TasksPage.qml
         qml/pages/TerminalPage.qml
         qml/pages/WeatherPage.qml

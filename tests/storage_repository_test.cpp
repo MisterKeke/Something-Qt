@@ -56,15 +56,15 @@ void StorageRepositoryTest::migrationsAreTransactionalIndependentAndRepeatable()
     QString connectionName;
     QSqlDatabase database;
     QVERIFY(openTestDatabase(&database, &connectionName));
-    QCOMPARE(storage::SchemaMigrator::latestVersion(), 10);
+    QCOMPARE(storage::SchemaMigrator::latestVersion(), 18);
     QVERIFY(storage::SchemaMigrator::apply(database));
 
     QSqlQuery history(database);
     QVERIFY(history.exec(QStringLiteral("SELECT COUNT(*),MIN(version),MAX(version) FROM schema_migrations")));
     QVERIFY(history.next());
-    QCOMPARE(history.value(0).toInt(), 10);
+    QCOMPARE(history.value(0).toInt(), storage::SchemaMigrator::latestVersion());
     QCOMPARE(history.value(1).toInt(), 1);
-    QCOMPARE(history.value(2).toInt(), 10);
+    QCOMPARE(history.value(2).toInt(), storage::SchemaMigrator::latestVersion());
 
     const QStringList tables = tableNames(database);
     for (const QString &retained : {QStringLiteral("tasks"), QStringLiteral("task_tags"),
@@ -73,12 +73,42 @@ void StorageRepositoryTest::migrationsAreTransactionalIndependentAndRepeatable()
                                     QStringLiteral("favorite_update_checkpoints"), QStringLiteral("saved_weather"),
                                     QStringLiteral("desktop_apps"), QStringLiteral("setups"),
                                     QStringLiteral("steam_games"), QStringLiteral("wallpapers"),
+                                    QStringLiteral("steam_price_observations"),
+                                    QStringLiteral("steam_game_update_follows"),
+                                    QStringLiteral("steam_game_update_news_items"),
                                     QStringLiteral("task_history"),
                                     QStringLiteral("task_schedules"),
                                     QStringLiteral("scheduling_preferences"),
                                     QStringLiteral("preferences")}) {
         QVERIFY2(tables.contains(retained), qPrintable(retained));
     }
+
+    QStringList historyIndexes;
+    QSqlQuery observationIndexes(database);
+    QVERIFY(observationIndexes.exec(QStringLiteral(
+        "SELECT name FROM sqlite_master WHERE type='index' "
+        "AND tbl_name='steam_price_observations'")));
+    while (observationIndexes.next())
+        historyIndexes.push_back(observationIndexes.value(0).toString());
+    QVERIFY(historyIndexes.contains(QStringLiteral(
+        "idx_steam_price_observations_game_market_time")));
+    QVERIFY(historyIndexes.contains(QStringLiteral(
+        "idx_steam_price_observations_game_time")));
+    observationIndexes.finish();
+
+    bool cascadeForeignKeyFound = false;
+    QSqlQuery observationForeignKeys(database);
+    QVERIFY(observationForeignKeys.exec(QStringLiteral(
+        "PRAGMA foreign_key_list(steam_price_observations)")));
+    while (observationForeignKeys.next()) {
+        if (observationForeignKeys.value(2).toString() == QStringLiteral("steam_games")
+            && observationForeignKeys.value(6).toString().compare(
+                QStringLiteral("CASCADE"), Qt::CaseInsensitive) == 0) {
+            cascadeForeignKeyFound = true;
+        }
+    }
+    QVERIFY(cascadeForeignKeyFound);
+    observationForeignKeys.finish();
     for (const QString &excluded : {QStringLiteral("notes"), QStringLiteral("bookmarks"),
                                     QStringLiteral("git_repositories"), QStringLiteral("voice_state"),
                                     QStringLiteral("utilities"), QStringLiteral("website_search")}) {

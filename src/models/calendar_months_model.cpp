@@ -69,7 +69,8 @@ void CalendarMonthsModel::setCalendar(int visibleYear, QDate today, QString sele
                                            {QStringLiteral("weekend"), dayOfWeek == 6 || dayOfWeek == 7},
                                            {QStringLiteral("deadlineCount"), markers.value(QStringLiteral("deadlineCount"), 0)},
                                            {QStringLiteral("plannedWorkCount"), markers.value(QStringLiteral("plannedWorkCount"), 0)},
-                                           {QStringLiteral("completedTaskCount"), markers.value(QStringLiteral("completedTaskCount"), 0)}});
+                                           {QStringLiteral("completedTaskCount"), markers.value(QStringLiteral("completedTaskCount"), 0)},
+                                           {QStringLiteral("gameReleaseCount"), markers.value(QStringLiteral("gameReleaseCount"), 0)}});
             }
             m_months.push_back({locale.monthName(monthNumber, QLocale::LongFormat),
                                 visibleYear, std::move(days)});

@@ -8,7 +8,9 @@
 #include <QJsonParseError>
 #include <QJsonValue>
 #include <QHash>
+#include <QLocale>
 #include <QRegularExpression>
+#include <QStringList>
 #include <QTime>
 #include <QTimeZone>
 
@@ -29,6 +31,10 @@ using something::domain::WeatherDay;
 using something::domain::WeatherForecast;
 using something::domain::SteamGameDetails;
 using something::domain::SteamPriceState;
+using something::domain::SteamReleaseDateInfo;
+using something::domain::SteamReleaseDatePrecision;
+using something::domain::SteamReleaseDetails;
+using something::domain::SteamReleaseStatus;
 
 something::domain::AppError invalidResponse()
 {
@@ -63,6 +69,143 @@ bool optionalString(const QJsonObject &object, const QString &key, QString *valu
     if (!field.isString()) return false;
     *value = field.toString();
     return true;
+}
+
+struct ParsedSteamReleaseDate final {
+    SteamReleaseDateInfo info;
+    bool comingSoon{false};
+};
+
+QDate dateFromEnglishText(const QString &text, const QStringList &formats)
+{
+    const QLocale english(QLocale::English, QLocale::UnitedStates);
+    for (const QString &format : formats) {
+        const QDate date = english.toDate(text, format);
+        if (date.isValid()) return date;
+    }
+    return {};
+}
+
+std::optional<ParsedSteamReleaseDate> parseSteamReleaseDateSegment(const QString &text)
+{
+    ParsedSteamReleaseDate parsed;
+    parsed.info.announcedText = text;
+    const QString normalized = text.trimmed();
+    if (normalized.isEmpty()) return std::nullopt;
+
+    static const QRegularExpression comingSoonPattern(
+        QStringLiteral("^(?:coming\\s+soon|to\\s+be\\s+announced|tba)$"),
+        QRegularExpression::CaseInsensitiveOption);
+    if (comingSoonPattern.match(normalized).hasMatch()) {
+        parsed.comingSoon = true;
+        return parsed;
+    }
+
+    const QDate isoDate = QDate::fromString(normalized, Qt::ISODate);
+    if (isoDate.isValid() && isoDate.toString(Qt::ISODate) == normalized) {
+        parsed.info.precision = SteamReleaseDatePrecision::ExactDay;
+        parsed.info.exactDate = isoDate;
+        return parsed;
+    }
+
+    static const QStringList exactDateFormats{
+        QStringLiteral("MMM d, yyyy"), QStringLiteral("MMMM d, yyyy"),
+        QStringLiteral("d MMM, yyyy"), QStringLiteral("d MMMM, yyyy"),
+        QStringLiteral("MMM d yyyy"), QStringLiteral("MMMM d yyyy"),
+        QStringLiteral("d MMM yyyy"), QStringLiteral("d MMMM yyyy")};
+    const QDate exactDate = dateFromEnglishText(normalized, exactDateFormats);
+    if (exactDate.isValid()) {
+        parsed.info.precision = SteamReleaseDatePrecision::ExactDay;
+        parsed.info.exactDate = exactDate;
+        return parsed;
+    }
+
+    static const QStringList monthFormats{
+        QStringLiteral("MMMM yyyy"), QStringLiteral("MMM yyyy")};
+    const QDate monthDate = dateFromEnglishText(normalized, monthFormats);
+    if (monthDate.isValid()) {
+        parsed.info.precision = SteamReleaseDatePrecision::Month;
+        parsed.info.windowStart = QDate(monthDate.year(), monthDate.month(), 1);
+        parsed.info.windowEnd = QDate(monthDate.year(), monthDate.month(),
+                                      monthDate.daysInMonth());
+        return parsed;
+    }
+
+    static const QRegularExpression quarterPattern(
+        QStringLiteral("^(?:Q([1-4])\\s+(\\d{4})|(\\d{4})\\s+Q([1-4]))$"),
+        QRegularExpression::CaseInsensitiveOption);
+    const auto quarterMatch = quarterPattern.match(normalized);
+    if (quarterMatch.hasMatch()) {
+        const int quarter = quarterMatch.captured(1).isEmpty()
+            ? quarterMatch.captured(4).toInt() : quarterMatch.captured(1).toInt();
+        const int year = quarterMatch.captured(2).isEmpty()
+            ? quarterMatch.captured(3).toInt() : quarterMatch.captured(2).toInt();
+        const QDate firstDay(year, (quarter - 1) * 3 + 1, 1);
+        if (!firstDay.isValid()) return std::nullopt;
+        parsed.info.precision = SteamReleaseDatePrecision::Quarter;
+        parsed.info.windowStart = firstDay;
+        const int lastMonth = (quarter - 1) * 3 + 3;
+        parsed.info.windowEnd = QDate(year, lastMonth,
+                                      QDate(year, lastMonth, 1).daysInMonth());
+        return parsed;
+    }
+
+    static const QRegularExpression yearPattern(QStringLiteral("^(\\d{4})$"));
+    const auto yearMatch = yearPattern.match(normalized);
+    if (yearMatch.hasMatch()) {
+        const int year = yearMatch.captured(1).toInt();
+        const QDate firstDay(year, 1, 1);
+        if (!firstDay.isValid()) return std::nullopt;
+        parsed.info.precision = SteamReleaseDatePrecision::Year;
+        parsed.info.windowStart = firstDay;
+        parsed.info.windowEnd = QDate(year, 12, 31);
+        return parsed;
+    }
+
+    static const QRegularExpression seasonPattern(
+        QStringLiteral("^(?:spring|summer|fall|autumn|winter)\\s+\\d{4}$"),
+        QRegularExpression::CaseInsensitiveOption);
+    if (seasonPattern.match(normalized).hasMatch()) {
+        parsed.info.precision = SteamReleaseDatePrecision::Season;
+        return parsed;
+    }
+
+    return std::nullopt;
+}
+
+ParsedSteamReleaseDate parseSteamReleaseDateText(const QString &text)
+{
+    if (const auto segment = parseSteamReleaseDateSegment(text)) return *segment;
+
+    // Keep a provider-supplied but unfamiliar window as text. It is explicitly
+    // approximate and has no generated calendar boundaries.
+    static const QRegularExpression rangeSeparator(
+        QStringLiteral("\\s+(?:to|[-–—])\\s+"),
+        QRegularExpression::CaseInsensitiveOption);
+    const QStringList parts = text.split(rangeSeparator, Qt::SkipEmptyParts);
+    if (parts.size() == 2) {
+        const auto first = parseSteamReleaseDateSegment(parts.at(0).trimmed());
+        const auto last = parseSteamReleaseDateSegment(parts.at(1).trimmed());
+        const auto start = first
+            ? (first->info.exactDate ? first->info.exactDate : first->info.windowStart)
+            : std::optional<QDate>{};
+        const auto end = last
+            ? (last->info.exactDate ? last->info.exactDate : last->info.windowEnd)
+            : std::optional<QDate>{};
+        if (start && end && *start <= *end) {
+            ParsedSteamReleaseDate parsed;
+            parsed.info.announcedText = text;
+            parsed.info.precision = SteamReleaseDatePrecision::Range;
+            parsed.info.windowStart = start;
+            parsed.info.windowEnd = end;
+            return parsed;
+        }
+    }
+
+    ParsedSteamReleaseDate parsed;
+    parsed.info.announcedText = text;
+    parsed.info.precision = SteamReleaseDatePrecision::Range;
+    return parsed;
 }
 
 bool requiredNumber(const QJsonObject &object, const QString &key, double *value)
@@ -568,6 +711,88 @@ QByteArray serializeWeatherForecast(const WeatherForecast &forecast)
     return QJsonDocument(root).toJson(QJsonDocument::Compact);
 }
 
+FeatureParseResult<something::domain::SteamGameCatalogDetails> parseSteamGameCatalogDetails(
+    const QByteArray &body, quint32 expectedAppId)
+{
+    FeatureParseResult<something::domain::SteamGameCatalogDetails> result;
+    if (expectedAppId == 0 || body.isEmpty() || body.size() > 2 * 1024 * 1024) {
+        result.error = invalidResponse();
+        return result;
+    }
+
+    QJsonObject root;
+    if (!parseObject(body, &root)) {
+        result.error = invalidResponse();
+        return result;
+    }
+    const QJsonValue envelopeValue = root.value(QString::number(expectedAppId));
+    if (!envelopeValue.isObject()) {
+        result.error = invalidResponse();
+        return result;
+    }
+    const QJsonObject envelope = envelopeValue.toObject();
+    const QJsonValue success = envelope.value(QStringLiteral("success"));
+    if (!success.isBool()) {
+        result.error = invalidResponse();
+        return result;
+    }
+    if (!success.toBool()) {
+        result.error = something::domain::AppError(ErrorCategory::NotFound);
+        return result;
+    }
+
+    const QJsonValue dataValue = envelope.value(QStringLiteral("data"));
+    if (!dataValue.isObject()) {
+        result.error = invalidResponse();
+        return result;
+    }
+    const QJsonObject data = dataValue.toObject();
+    QString type;
+    QString name;
+    double returnedAppId = 0.0;
+    if (!requiredString(data, QStringLiteral("type"), &type)
+        || !requiredString(data, QStringLiteral("name"), &name)
+        || !requiredNumber(data, QStringLiteral("steam_appid"), &returnedAppId)
+        || std::floor(returnedAppId) != returnedAppId || returnedAppId <= 0.0
+        || returnedAppId > std::numeric_limits<quint32>::max()) {
+        result.error = invalidResponse();
+        return result;
+    }
+    if (type.trimmed().compare(QStringLiteral("game"), Qt::CaseInsensitive) != 0) {
+        result.error = something::domain::AppError(ErrorCategory::CapabilityUnavailable);
+        return result;
+    }
+    name = name.trimmed().normalized(QString::NormalizationForm_C);
+    if (static_cast<quint32>(returnedAppId) != expectedAppId
+        || name.isEmpty() || name.toUcs4().size() > 300) {
+        result.error = invalidResponse();
+        return result;
+    }
+
+    QString headerImage;
+    QString capsuleImage;
+    if (!optionalString(data, QStringLiteral("header_image"), &headerImage)
+        || !optionalString(data, QStringLiteral("capsule_image"), &capsuleImage)) {
+        result.error = invalidResponse();
+        return result;
+    }
+
+    something::domain::SteamGameCatalogDetails details;
+    details.appId = expectedAppId;
+    details.canonicalStoreUrl = QStringLiteral("https://store.steampowered.com/app/%1/")
+                                    .arg(expectedAppId);
+    details.name = std::move(name);
+    details.artworkUrl = something::domain::normalizeSteamArtworkUrl(headerImage);
+    if (details.artworkUrl.isEmpty())
+        details.artworkUrl = something::domain::normalizeSteamArtworkUrl(capsuleImage);
+    if (!something::domain::isValidSteamGameCatalogDetails(details)) {
+        result.error = invalidResponse();
+        return result;
+    }
+    result.value = std::move(details);
+    return result;
+}
+
 FeatureParseResult<SteamGameDetails> parseSteamGameDetails(const QByteArray &body,
                                                            quint32 expectedAppId)
 {
@@ -651,7 +876,8 @@ FeatureParseResult<SteamGameDetails> parseSteamGameDetails(const QByteArray &bod
     }
     const QJsonValue priceValue = data.value(QStringLiteral("price_overview"));
     if (priceValue.isUndefined() || priceValue.isNull()) {
-        details.priceState = SteamPriceState::Unavailable;
+        details.priceState = isFreeValue.isBool()
+            ? SteamPriceState::Unavailable : SteamPriceState::Unsupported;
         result.value = std::move(details);
         return result;
     }
@@ -688,6 +914,105 @@ FeatureParseResult<SteamGameDetails> parseSteamGameDetails(const QByteArray &bod
     details.regularPriceMinor = static_cast<qint64>(initialValue);
     details.currentPriceMinor = static_cast<qint64>(finalValue);
     details.discountPercent = static_cast<int>(discountField.value_or(0.0));
+    result.value = std::move(details);
+    return result;
+}
+
+FeatureParseResult<SteamReleaseDetails> parseSteamReleaseDetails(const QByteArray &body,
+                                                                 quint32 expectedAppId)
+{
+    FeatureParseResult<SteamReleaseDetails> result;
+    const auto catalog = parseSteamGameCatalogDetails(body, expectedAppId);
+    if (!catalog.succeeded()) {
+        result.error = catalog.error;
+        return result;
+    }
+    if (expectedAppId == 0 || body.isEmpty() || body.size() > 2 * 1024 * 1024) {
+        result.error = invalidResponse();
+        return result;
+    }
+
+    QJsonObject root;
+    if (!parseObject(body, &root)) {
+        result.error = invalidResponse();
+        return result;
+    }
+    const QJsonValue envelopeValue = root.value(QString::number(expectedAppId));
+    if (!envelopeValue.isObject()) {
+        result.error = invalidResponse();
+        return result;
+    }
+    const QJsonObject envelope = envelopeValue.toObject();
+    const QJsonValue success = envelope.value(QStringLiteral("success"));
+    if (!success.isBool()) {
+        result.error = invalidResponse();
+        return result;
+    }
+    if (!success.toBool()) {
+        result.error = something::domain::AppError(ErrorCategory::NotFound);
+        return result;
+    }
+
+    const QJsonValue dataValue = envelope.value(QStringLiteral("data"));
+    if (!dataValue.isObject()) {
+        result.error = invalidResponse();
+        return result;
+    }
+    const QJsonObject data = dataValue.toObject();
+
+    SteamReleaseDetails details;
+    details.appId = expectedAppId;
+    details.title = catalog.value.name;
+    details.artworkUrl = catalog.value.artworkUrl;
+
+    const QJsonValue releaseDateValue = data.value(QStringLiteral("release_date"));
+    if (releaseDateValue.isUndefined() || releaseDateValue.isNull()) {
+        details.status = SteamReleaseStatus::InformationUnavailable;
+        result.value = std::move(details);
+        return result;
+    }
+    if (!releaseDateValue.isObject()) {
+        result.error = invalidResponse();
+        return result;
+    }
+
+    const QJsonObject releaseDate = releaseDateValue.toObject();
+    std::optional<bool> comingSoon;
+    const QJsonValue comingSoonValue = releaseDate.value(QStringLiteral("coming_soon"));
+    if (!comingSoonValue.isUndefined() && !comingSoonValue.isNull()) {
+        if (!comingSoonValue.isBool()) {
+            result.error = invalidResponse();
+            return result;
+        }
+        comingSoon = comingSoonValue.toBool();
+    }
+
+    QString announcedText;
+    if (!optionalString(releaseDate, QStringLiteral("date"), &announcedText)
+        || announcedText.size() > 200) {
+        result.error = invalidResponse();
+        return result;
+    }
+    announcedText = announcedText.trimmed();
+    if (!announcedText.isEmpty()) {
+        const ParsedSteamReleaseDate parsed = parseSteamReleaseDateText(announcedText);
+        details.releaseDate = parsed.info;
+        if (parsed.comingSoon) {
+            details.status = SteamReleaseStatus::ComingSoon;
+        } else if (comingSoon && !*comingSoon) {
+            details.status = SteamReleaseStatus::Released;
+        } else if (details.releaseDate.hasExactDate()) {
+            details.status = SteamReleaseStatus::ExactDateAnnounced;
+        } else {
+            details.status = SteamReleaseStatus::ApproximateDateAnnounced;
+        }
+    } else if (comingSoon) {
+        details.status = *comingSoon ? SteamReleaseStatus::ComingSoon
+                                     : SteamReleaseStatus::Released;
+    } else {
+        details.status = SteamReleaseStatus::InformationUnavailable;
+    }
+
     result.value = std::move(details);
     return result;
 }

@@ -10,7 +10,7 @@
 
 namespace something::domain {
 
-enum class SteamPriceState { Priced, Free, Unavailable };
+enum class SteamPriceState { Priced, Free, Unavailable, Unsupported };
 
 struct SteamGameDetails final {
     quint32 appId{0};

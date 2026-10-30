@@ -3,6 +3,7 @@
 #include "repository_types.h"
 #include "data_import_repository.h"
 
+#include <QDate>
 #include <QSqlDatabase>
 
 #include <functional>
@@ -156,6 +157,8 @@ public:
     RepositoryResult<void> set(QString key, QString value);
     RepositoryResult<int> weekStart() const;
     RepositoryResult<void> setWeekStart(int sundayZero);
+    RepositoryResult<bool> gameReleasesVisibleInCalendar() const;
+    RepositoryResult<void> setGameReleasesVisibleInCalendar(bool visible);
     RepositoryResult<QString> selectedWallpaper() const;
     RepositoryResult<void> setSelectedWallpaper(QString wallpaperId);
 private:
@@ -222,6 +225,56 @@ private:
     QSqlDatabase &m_database;
 };
 
+class SteamGameCatalogRepository final {
+public:
+    explicit SteamGameCatalogRepository(QSqlDatabase &database);
+    RepositoryResult<QVector<domain::SteamGameCatalogEntry>> list() const;
+    RepositoryResult<domain::SteamGameCatalogEntry> get(quint32 appId) const;
+    RepositoryResult<domain::SteamGameCatalogEntry> upsert(
+        domain::SteamGameCatalogDetails details);
+    RepositoryResult<void> setArtwork(
+        quint32 appId, const QString &expectedSourceUrl,
+        const domain::SteamGameCatalogArtwork &artwork);
+    RepositoryResult<bool> hasArtworkFilename(const QString &filename) const;
+    RepositoryResult<void> remove(quint32 appId);
+
+private:
+    RepositoryResult<domain::SteamGameCatalogEntry> load(quint32 appId) const;
+    QSqlDatabase &m_database;
+};
+
+class SteamCollectionsRepository final {
+public:
+    explicit SteamCollectionsRepository(QSqlDatabase &database);
+    RepositoryResult<QVector<domain::SteamCollection>> list() const;
+    RepositoryResult<domain::SteamCollection> get(qint64 collectionId) const;
+    RepositoryResult<domain::SteamCollection> create(
+        domain::SteamCollectionInput input);
+    RepositoryResult<domain::SteamCollection> update(
+        qint64 collectionId, domain::SteamCollectionInput input);
+    RepositoryResult<void> reorder(const QVector<qint64> &orderedIds);
+    RepositoryResult<SteamCollectionDeleteResult> remove(qint64 collectionId);
+    RepositoryResult<QVector<domain::SteamCollectionGameEntry>> games(
+        qint64 collectionId) const;
+    RepositoryResult<QVector<domain::SteamCollectionGameEntry>> allGames() const;
+    RepositoryResult<domain::SteamCollectionGameEntry> addGame(
+        qint64 collectionId, domain::SteamGameCatalogDetails catalogDetails,
+        domain::SteamCollectionGameInput input);
+    RepositoryResult<domain::SteamCollectionGameEntry> updateGame(
+        qint64 collectionId, domain::SteamCollectionGameInput input);
+    RepositoryResult<domain::SteamCollectionGameEntry> copyGame(
+        qint64 sourceCollectionId, qint64 targetCollectionId, quint32 appId);
+    RepositoryResult<domain::SteamCollectionGameEntry> moveGame(
+        qint64 sourceCollectionId, qint64 targetCollectionId, quint32 appId);
+    RepositoryResult<void> removeGame(qint64 collectionId, quint32 appId);
+
+private:
+    RepositoryResult<domain::SteamCollection> load(qint64 collectionId) const;
+    RepositoryResult<domain::SteamCollectionGameEntry> loadGame(
+        qint64 collectionId, quint32 appId) const;
+    QSqlDatabase &m_database;
+};
+
 class SteamRepository final {
 public:
     explicit SteamRepository(QSqlDatabase &database);
@@ -229,16 +282,95 @@ public:
     RepositoryResult<void> setCountry(QString countryCode);
     RepositoryResult<QVector<SteamGame>> list() const;
     RepositoryResult<SteamGame> get(qint64 id) const;
-    RepositoryResult<SteamGame> add(SteamGame game);
-    RepositoryResult<SteamGame> updateRefresh(SteamGame game);
+    RepositoryResult<QVector<SteamPriceHistoryMarket>> priceHistoryMarkets(
+        qint64 gameId,
+        const std::function<bool()> &cancellationRequested = {}) const;
+    RepositoryResult<SteamPriceHistorySnapshot> priceHistory(
+        qint64 gameId, QString countryCode, QString currencyCode,
+        SteamPriceHistoryRange range,
+        const std::function<bool()> &cancellationRequested = {}) const;
+    RepositoryResult<SteamGame> add(
+        SteamGame game,
+        const std::function<bool()> &cancellationRequested = {});
+    RepositoryResult<SteamGame> updateRefresh(
+        SteamGame game,
+        const std::function<bool()> &cancellationRequested = {});
     RepositoryResult<void> applyRefreshBatch(
         const QVector<SteamRefreshUpdate> &updates,
         const std::function<bool()> &cancellationRequested = {});
     RepositoryResult<void> setArtwork(qint64 gameId, const AssetMetadata &asset);
     RepositoryResult<void> removeArtwork(qint64 gameId);
+    RepositoryResult<bool> hasArtworkFilename(const QString &filename) const;
     RepositoryResult<void> remove(qint64 id);
 private:
     RepositoryResult<SteamGame> load(qint64 id) const;
+    QSqlDatabase &m_database;
+};
+
+class SteamReleaseRepository final {
+public:
+    explicit SteamReleaseRepository(QSqlDatabase &database);
+    RepositoryResult<QVector<domain::SteamTrackedRelease>> list() const;
+    RepositoryResult<QVector<domain::SteamTrackedRelease>> exactDateEvents(
+        QDate startDate, QDate endDate,
+        const std::function<bool()> &cancellationRequested = {}) const;
+    RepositoryResult<domain::SteamTrackedRelease> get(quint32 appId) const;
+    RepositoryResult<domain::SteamTrackedRelease> add(
+        domain::SteamTrackedRelease release,
+        const std::function<bool()> &cancellationRequested = {});
+    RepositoryResult<void> applyRefreshBatch(
+        const QVector<SteamReleaseRefreshUpdate> &updates,
+        const std::function<bool()> &cancellationRequested = {});
+    RepositoryResult<void> acknowledgeDateChange(quint32 appId);
+    RepositoryResult<void> setArtwork(
+        quint32 appId, const QString &expectedSourceUrl,
+        const domain::SteamReleaseArtworkMetadata &artwork);
+    RepositoryResult<bool> hasArtworkFilename(const QString &filename) const;
+    RepositoryResult<void> remove(quint32 appId);
+
+private:
+    RepositoryResult<domain::SteamTrackedRelease> load(quint32 appId) const;
+    QSqlDatabase &m_database;
+};
+
+class SteamGameUpdatesRepository final {
+public:
+    static constexpr int maximumArticlesPerGame = 250;
+    static constexpr int maximumArticlesOverall = 3000;
+    static constexpr int maximumArticleContentCharacters = 6000;
+    static constexpr int maximumNewsPageSize = 100;
+
+    explicit SteamGameUpdatesRepository(QSqlDatabase &database);
+    RepositoryResult<QVector<domain::SteamGameUpdateFollow>> list(
+        const std::function<bool()> &cancellationRequested = {}) const;
+    RepositoryResult<domain::SteamGameUpdateFollow> get(quint32 appId) const;
+    RepositoryResult<domain::SteamGameUpdateFollow> add(
+        domain::SteamGameUpdateFollow follow,
+        const std::function<bool()> &cancellationRequested = {});
+    RepositoryResult<domain::SteamGameUpdateFollow> setOwnershipStatus(
+        quint32 appId, domain::SteamGameUpdateOwnershipStatus status);
+    RepositoryResult<domain::SteamGameUpdateFollow> recordNewsCheck(
+        quint32 appId, QString attemptedAtUtc, bool succeeded, QString safeError);
+    RepositoryResult<void> setArtwork(
+        quint32 appId, const QString &expectedSourceUrl,
+        const domain::SteamGameUpdateArtworkMetadata &artwork);
+    RepositoryResult<bool> hasArtworkFilename(const QString &filename) const;
+    RepositoryResult<SteamGameUpdateNewsPage> newsPage(
+        std::optional<quint32> appId, bool unreadOnly, QString titleQuery, int pageSize,
+        const SteamGameUpdateNewsCursor &before = {},
+        const std::function<bool()> &cancellationRequested = {}) const;
+    RepositoryResult<std::optional<qint64>> oldestNewsPublishedAt(quint32 appId) const;
+    RepositoryResult<QHash<quint32, int>> unreadNewsCounts() const;
+    RepositoryResult<SteamGameUpdateNewsUpsertResult> upsertNewsPage(
+        quint32 appId, const QVector<domain::SteamNewsArticle> &articles,
+        const QString &discoveredAtUtc,
+        const std::function<bool()> &cancellationRequested = {});
+    RepositoryResult<void> setNewsRead(quint32 appId, const QString &newsId, bool isRead);
+    RepositoryResult<int> setAllNewsRead(quint32 appId, bool isRead);
+    RepositoryResult<void> remove(quint32 appId);
+
+private:
+    RepositoryResult<domain::SteamGameUpdateFollow> load(quint32 appId) const;
     QSqlDatabase &m_database;
 };
 
@@ -259,7 +391,11 @@ public:
     DesktopApplicationsRepository applications;
     SetupsRepository setups;
     WallpapersRepository wallpapers;
+    SteamGameCatalogRepository steamCatalog;
+    SteamCollectionsRepository steamCollections;
     SteamRepository steam;
+    SteamReleaseRepository steamReleases;
+    SteamGameUpdatesRepository gameUpdates;
     DataImportRepository dataImport;
 };
 

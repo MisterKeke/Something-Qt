@@ -124,6 +124,11 @@ bool DataImportRepository::targetIsEmpty(bool *empty, QString *blockingReason) c
         QStringLiteral("desktop_app_icons"),
         QStringLiteral("setups"), QStringLiteral("setup_apps"), QStringLiteral("setup_icons"),
         QStringLiteral("steam_games"), QStringLiteral("steam_game_images"),
+        QStringLiteral("steam_game_catalog"), QStringLiteral("steam_collections"),
+        QStringLiteral("steam_collection_games"),
+        QStringLiteral("steam_release_follows"),
+        QStringLiteral("steam_game_update_follows"),
+        QStringLiteral("steam_game_update_news_items"),
         QStringLiteral("data_imports")};
     for (const QString &table : tables) {
         qint64 count = 0;
@@ -150,6 +155,12 @@ bool DataImportRepository::targetIsEmpty(bool *empty, QString *blockingReason) c
                     {QStringLiteral("setup_icons"), QStringLiteral("setup icons")},
                     {QStringLiteral("steam_games"), QStringLiteral("tracked games")},
                     {QStringLiteral("steam_game_images"), QStringLiteral("game artwork")},
+                    {QStringLiteral("steam_game_catalog"), QStringLiteral("Steam game catalog entries")},
+                    {QStringLiteral("steam_collections"), QStringLiteral("game collections")},
+                    {QStringLiteral("steam_collection_games"), QStringLiteral("collection games")},
+                    {QStringLiteral("steam_release_follows"), QStringLiteral("followed releases")},
+                    {QStringLiteral("steam_game_update_follows"), QStringLiteral("followed Game Updates games")},
+                    {QStringLiteral("steam_game_update_news_items"), QStringLiteral("cached Game Updates articles")},
                     {QStringLiteral("data_imports"), QStringLiteral("a completed import")}};
                 *blockingReason = QStringLiteral("This Qt profile already contains %1 (%2 records). Import needs a fresh Qt profile; existing records will not be overwritten.")
                     .arg(labels.value(table, QStringLiteral("saved favorite updates"))).arg(count);
