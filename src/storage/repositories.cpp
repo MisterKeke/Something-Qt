@@ -17,6 +17,7 @@
 #include <QSqlQuery>
 #include <QThread>
 #include <QVariant>
+#include <QUrl>
 
 #include <algorithm>
 #include <cmath>
@@ -118,6 +119,38 @@ bool validUtcInstant(const QString &value)
     if (value.isEmpty() || !value.endsWith(QLatin1Char('Z'))) return false;
     const QDateTime parsed = QDateTime::fromString(value, Qt::ISODateWithMs);
     return parsed.isValid() && parsed.timeSpec() == Qt::UTC;
+}
+
+bool validSteamNewsId(const QString &value)
+{
+    static const QRegularExpression pattern(QStringLiteral("^[0-9]{1,32}$"));
+    return pattern.match(value).hasMatch();
+}
+
+bool validSteamNewsSourceUrl(const QString &value)
+{
+    if (value.isEmpty() || value.toUtf8().size() > 4096) return false;
+    const QUrl url(value, QUrl::StrictMode);
+    const QString scheme = url.scheme().toLower();
+    return url.isValid()
+        && (scheme == QStringLiteral("https") || scheme == QStringLiteral("http"))
+        && !url.host().isEmpty() && url.userInfo().isEmpty() && url.fragment().isEmpty()
+        && (url.port(-1) == -1
+            || url.port(-1) == (scheme == QStringLiteral("https") ? 443 : 80));
+}
+
+bool validCachedSteamNewsArticle(const domain::SteamNewsArticle &article, quint32 appId)
+{
+    return appId != 0 && article.appId == appId && validSteamNewsId(article.newsId)
+        && !article.title.trimmed().isEmpty() && article.title.size() <= 500
+        && article.publishedAtUnixSeconds > 0
+        && article.publishedAtUnixSeconds <= 253402300799LL
+        && validSteamNewsSourceUrl(article.sourceUrl)
+        && article.author.size() <= 500 && article.feedLabel.size() <= 200
+        && article.feedName.size() <= 200
+        && (!article.feedType || *article.feedType >= 0)
+        && article.contentText.size()
+            <= SteamGameUpdatesRepository::maximumArticleContentCharacters;
 }
 
 bool validSteamReleaseArtwork(quint32 appId,
@@ -4511,6 +4544,270 @@ RepositoryResult<bool> SteamGameUpdatesRepository::hasArtworkFilename(
     if (!query.exec()) return failure<bool>(queryFailure(query));
     RepositoryResult<bool> result;
     result.value = query.next();
+    return result;
+}
+
+RepositoryResult<SteamGameUpdateNewsPage> SteamGameUpdatesRepository::newsPage(
+    std::optional<quint32> appId, bool unreadOnly, int pageSize,
+    const SteamGameUpdateNewsCursor &before,
+    const std::function<bool()> &cancellationRequested) const
+{
+    Q_ASSERT(QThread::currentThread() == m_database.driver()->thread());
+    const bool hasCursor = before.publishedAtUnixSeconds != 0 || before.appId != 0
+        || !before.newsId.isEmpty();
+    if ((appId && *appId == 0) || pageSize <= 0 || pageSize > maximumNewsPageSize
+        || (hasCursor && (!before.isValid() || !validSteamNewsId(before.newsId)))
+        || (appId && hasCursor && before.appId != *appId)) {
+        return failure<SteamGameUpdateNewsPage>(domain::ErrorCategory::Validation);
+    }
+    if (cancellationRequested && cancellationRequested())
+        return failure<SteamGameUpdateNewsPage>(domain::ErrorCategory::Cancelled);
+
+    QString sql = QStringLiteral(
+        "SELECT n.steam_app_id,n.news_id,n.title,n.published_at_unix_seconds,n.source_url,"
+        "n.author,n.feed_label,n.feed_name,n.feed_type,n.content_text,n.external_url,"
+        "n.is_read,n.discovered_at_utc,f.name "
+        "FROM steam_game_update_news_items n "
+        "JOIN steam_game_update_follows f ON f.steam_app_id=n.steam_app_id WHERE 1=1");
+    if (appId) sql += QStringLiteral(" AND n.steam_app_id=?");
+    if (unreadOnly) sql += QStringLiteral(" AND n.is_read=0");
+    if (hasCursor) {
+        sql += QStringLiteral(
+            " AND (n.published_at_unix_seconds<? OR "
+            "(n.published_at_unix_seconds=? AND n.steam_app_id<?) OR "
+            "(n.published_at_unix_seconds=? AND n.steam_app_id=? AND n.news_id<?))");
+    }
+    sql += QStringLiteral(
+        " ORDER BY n.published_at_unix_seconds DESC,n.steam_app_id DESC,n.news_id DESC LIMIT ?");
+
+    QSqlQuery query(m_database);
+    query.prepare(sql);
+    if (appId) query.addBindValue(*appId);
+    if (hasCursor) {
+        query.addBindValue(before.publishedAtUnixSeconds);
+        query.addBindValue(before.publishedAtUnixSeconds);
+        query.addBindValue(before.appId);
+        query.addBindValue(before.publishedAtUnixSeconds);
+        query.addBindValue(before.appId);
+        query.addBindValue(before.newsId);
+    }
+    query.addBindValue(pageSize + 1);
+    if (!query.exec()) return failure<SteamGameUpdateNewsPage>(queryFailure(query));
+
+    RepositoryResult<SteamGameUpdateNewsPage> result;
+    result.value.items.reserve(pageSize);
+    while (query.next()) {
+        if (cancellationRequested && cancellationRequested())
+            return failure<SteamGameUpdateNewsPage>(domain::ErrorCategory::Cancelled);
+        if (result.value.items.size() == pageSize) {
+            result.value.hasMore = true;
+            break;
+        }
+        SteamGameUpdateNewsItem item;
+        item.article.appId = query.value(0).toUInt();
+        item.article.newsId = query.value(1).toString();
+        item.article.title = query.value(2).toString();
+        item.article.publishedAtUnixSeconds = query.value(3).toLongLong();
+        item.article.sourceUrl = query.value(4).toString();
+        item.article.author = query.value(5).toString();
+        item.article.feedLabel = query.value(6).toString();
+        item.article.feedName = query.value(7).toString();
+        if (!query.value(8).isNull()) item.article.feedType = query.value(8).toInt();
+        item.article.contentText = query.value(9).toString();
+        item.article.externalUrl = query.value(10).toBool();
+        item.isRead = query.value(11).toBool();
+        item.discoveredAtUtc = query.value(12).toString();
+        item.gameName = query.value(13).toString();
+        result.value.items.push_back(std::move(item));
+    }
+    query.finish();
+
+    if (result.value.hasMore && !result.value.items.isEmpty()) {
+        const SteamGameUpdateNewsItem &last = result.value.items.last();
+        result.value.nextCursor = {last.article.publishedAtUnixSeconds,
+                                   last.article.appId, last.article.newsId};
+    }
+    return result;
+}
+
+RepositoryResult<QHash<quint32, int>> SteamGameUpdatesRepository::unreadNewsCounts() const
+{
+    Q_ASSERT(QThread::currentThread() == m_database.driver()->thread());
+    QSqlQuery query(m_database);
+    if (!query.exec(QStringLiteral(
+            "SELECT steam_app_id,COUNT(*) FROM steam_game_update_news_items "
+            "WHERE is_read=0 GROUP BY steam_app_id"))) {
+        return failure<QHash<quint32, int>>(queryFailure(query));
+    }
+    RepositoryResult<QHash<quint32, int>> result;
+    while (query.next())
+        result.value.insert(query.value(0).toUInt(), query.value(1).toInt());
+    return result;
+}
+
+RepositoryResult<SteamGameUpdateNewsUpsertResult>
+SteamGameUpdatesRepository::upsertNewsPage(
+    quint32 appId, const QVector<domain::SteamNewsArticle> &articles,
+    const QString &discoveredAtUtc,
+    const std::function<bool()> &cancellationRequested)
+{
+    Q_ASSERT(QThread::currentThread() == m_database.driver()->thread());
+    if (appId == 0 || articles.size() > maximumNewsPageSize
+        || !validUtcInstant(discoveredAtUtc)) {
+        return failure<SteamGameUpdateNewsUpsertResult>(domain::ErrorCategory::Validation);
+    }
+    for (const domain::SteamNewsArticle &article : articles) {
+        if (!validCachedSteamNewsArticle(article, appId))
+            return failure<SteamGameUpdateNewsUpsertResult>(domain::ErrorCategory::Validation);
+    }
+    if (cancellationRequested && cancellationRequested())
+        return failure<SteamGameUpdateNewsUpsertResult>(domain::ErrorCategory::Cancelled);
+
+    QSqlQuery followQuery(m_database);
+    followQuery.prepare(QStringLiteral(
+        "SELECT 1 FROM steam_game_update_follows WHERE steam_app_id=? LIMIT 1"));
+    followQuery.addBindValue(appId);
+    if (!followQuery.exec())
+        return failure<SteamGameUpdateNewsUpsertResult>(queryFailure(followQuery));
+    if (!followQuery.next())
+        return failure<SteamGameUpdateNewsUpsertResult>(domain::ErrorCategory::NotFound);
+    followQuery.finish();
+
+    Transaction transaction(m_database);
+    if (!transaction.active())
+        return failure<SteamGameUpdateNewsUpsertResult>(domain::ErrorCategory::Storage);
+
+    SteamGameUpdateNewsUpsertResult counts;
+    QSqlQuery insert(m_database);
+    insert.prepare(QStringLiteral(
+        "INSERT INTO steam_game_update_news_items(steam_app_id,news_id,title,"
+        "published_at_unix_seconds,source_url,author,feed_label,feed_name,feed_type,"
+        "content_text,external_url,is_read,discovered_at_utc) "
+        "VALUES(?,?,?,?,?,?,?,?,?,?,?,0,?) ON CONFLICT(steam_app_id,news_id) DO NOTHING"));
+    QSqlQuery update(m_database);
+    update.prepare(QStringLiteral(
+        "UPDATE steam_game_update_news_items SET title=?,published_at_unix_seconds=?,"
+        "source_url=?,author=?,feed_label=?,feed_name=?,feed_type=?,content_text=?,external_url=? "
+        "WHERE steam_app_id=? AND news_id=?"));
+    for (const domain::SteamNewsArticle &article : articles) {
+        if (cancellationRequested && cancellationRequested())
+            return failure<SteamGameUpdateNewsUpsertResult>(domain::ErrorCategory::Cancelled);
+        const QVariant feedType = article.feedType ? QVariant(*article.feedType) : QVariant();
+        insert.bindValue(0, appId);
+        insert.bindValue(1, article.newsId);
+        insert.bindValue(2, article.title);
+        insert.bindValue(3, article.publishedAtUnixSeconds);
+        insert.bindValue(4, article.sourceUrl);
+        insert.bindValue(5, article.author);
+        insert.bindValue(6, article.feedLabel);
+        insert.bindValue(7, article.feedName);
+        insert.bindValue(8, feedType);
+        insert.bindValue(9, article.contentText);
+        insert.bindValue(10, article.externalUrl ? 1 : 0);
+        insert.bindValue(11, discoveredAtUtc);
+        if (!insert.exec())
+            return failure<SteamGameUpdateNewsUpsertResult>(queryFailure(insert));
+        const bool inserted = insert.numRowsAffected() == 1;
+        insert.finish();
+        if (inserted) {
+            ++counts.insertedCount;
+            continue;
+        }
+
+        update.bindValue(0, article.title);
+        update.bindValue(1, article.publishedAtUnixSeconds);
+        update.bindValue(2, article.sourceUrl);
+        update.bindValue(3, article.author);
+        update.bindValue(4, article.feedLabel);
+        update.bindValue(5, article.feedName);
+        update.bindValue(6, feedType);
+        update.bindValue(7, article.contentText);
+        update.bindValue(8, article.externalUrl ? 1 : 0);
+        update.bindValue(9, appId);
+        update.bindValue(10, article.newsId);
+        if (!update.exec())
+            return failure<SteamGameUpdateNewsUpsertResult>(queryFailure(update));
+        update.finish();
+        ++counts.refreshedCount;
+    }
+
+    if (cancellationRequested && cancellationRequested())
+        return failure<SteamGameUpdateNewsUpsertResult>(domain::ErrorCategory::Cancelled);
+
+    QSqlQuery trimGame(m_database);
+    trimGame.prepare(QStringLiteral(
+        "DELETE FROM steam_game_update_news_items WHERE steam_app_id=? AND news_id IN ("
+        "SELECT news_id FROM steam_game_update_news_items WHERE steam_app_id=? "
+        "ORDER BY published_at_unix_seconds DESC,news_id DESC LIMIT -1 OFFSET ?)"));
+    trimGame.addBindValue(appId);
+    trimGame.addBindValue(appId);
+    trimGame.addBindValue(maximumArticlesPerGame);
+    if (!trimGame.exec())
+        return failure<SteamGameUpdateNewsUpsertResult>(queryFailure(trimGame));
+    trimGame.finish();
+
+    QSqlQuery trimAll(m_database);
+    trimAll.prepare(QStringLiteral(
+            "DELETE FROM steam_game_update_news_items WHERE rowid IN ("
+            "SELECT rowid FROM steam_game_update_news_items "
+            "ORDER BY published_at_unix_seconds DESC,steam_app_id DESC,news_id DESC "
+            "LIMIT -1 OFFSET ?)"));
+    trimAll.addBindValue(maximumArticlesOverall);
+    if (!trimAll.exec()) {
+        return failure<SteamGameUpdateNewsUpsertResult>(queryFailure(trimAll));
+    }
+    trimAll.finish();
+    if (cancellationRequested && cancellationRequested())
+        return failure<SteamGameUpdateNewsUpsertResult>(domain::ErrorCategory::Cancelled);
+    if (!transaction.commit())
+        return failure<SteamGameUpdateNewsUpsertResult>(domain::ErrorCategory::Storage);
+
+    RepositoryResult<SteamGameUpdateNewsUpsertResult> result;
+    result.value = counts;
+    return result;
+}
+
+RepositoryResult<void> SteamGameUpdatesRepository::setNewsRead(
+    quint32 appId, const QString &newsId, bool isRead)
+{
+    Q_ASSERT(QThread::currentThread() == m_database.driver()->thread());
+    if (appId == 0 || !validSteamNewsId(newsId))
+        return failureVoid(domain::ErrorCategory::Validation);
+    QSqlQuery exists(m_database);
+    exists.prepare(QStringLiteral(
+        "SELECT 1 FROM steam_game_update_news_items WHERE steam_app_id=? AND news_id=? LIMIT 1"));
+    exists.addBindValue(appId);
+    exists.addBindValue(newsId);
+    if (!exists.exec()) return failureVoid(queryFailure(exists));
+    if (!exists.next()) return failureVoid(domain::ErrorCategory::NotFound);
+    exists.finish();
+
+    QSqlQuery query(m_database);
+    query.prepare(QStringLiteral(
+        "UPDATE steam_game_update_news_items SET is_read=? "
+        "WHERE steam_app_id=? AND news_id=?"));
+    query.addBindValue(isRead ? 1 : 0);
+    query.addBindValue(appId);
+    query.addBindValue(newsId);
+    if (!query.exec()) return failureVoid(queryFailure(query));
+    return {};
+}
+
+RepositoryResult<int> SteamGameUpdatesRepository::setAllNewsRead(
+    quint32 appId, bool isRead)
+{
+    Q_ASSERT(QThread::currentThread() == m_database.driver()->thread());
+    if (appId == 0) return failure<int>(domain::ErrorCategory::Validation);
+    QSqlQuery query(m_database);
+    query.prepare(QStringLiteral(
+        "UPDATE steam_game_update_news_items SET is_read=? "
+        "WHERE steam_app_id=? AND is_read<>?"));
+    query.addBindValue(isRead ? 1 : 0);
+    query.addBindValue(appId);
+    query.addBindValue(isRead ? 1 : 0);
+    if (!query.exec()) return failure<int>(queryFailure(query));
+    RepositoryResult<int> result;
+    result.value = query.numRowsAffected();
     return result;
 }
 

@@ -4,12 +4,14 @@
 #include "../domain/task.h"
 #include "../domain/task_history.h"
 #include "../domain/task_scheduling.h"
+#include "../domain/steam_news.h"
 #include "../domain/steam_release.h"
 #include "../domain/steam_game_updates.h"
 #include "../domain/weather_currency.h"
 
 #include <QString>
 #include <QStringList>
+#include <QHash>
 #include <QVector>
 
 #include <optional>
@@ -283,6 +285,37 @@ struct SteamReleaseRefreshUpdate final {
     QString attemptedAtUtc;
     QString safeError;
     std::optional<domain::SteamReleaseDetails> refreshedDetails;
+};
+
+struct SteamGameUpdateNewsItem final {
+    domain::SteamNewsArticle article;
+    QString gameName;
+    bool isRead{false};
+    QString discoveredAtUtc;
+};
+
+struct SteamGameUpdateNewsCursor final {
+    qint64 publishedAtUnixSeconds{0};
+    quint32 appId{0};
+    QString newsId;
+
+    bool isValid() const noexcept
+    {
+        return publishedAtUnixSeconds > 0
+            && publishedAtUnixSeconds <= 253402300799LL
+            && appId > 0 && !newsId.isEmpty();
+    }
+};
+
+struct SteamGameUpdateNewsPage final {
+    QVector<SteamGameUpdateNewsItem> items;
+    SteamGameUpdateNewsCursor nextCursor;
+    bool hasMore{false};
+};
+
+struct SteamGameUpdateNewsUpsertResult final {
+    int insertedCount{0};
+    int refreshedCount{0};
 };
 
 } // namespace something::storage

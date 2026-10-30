@@ -285,6 +285,11 @@ private:
 
 class SteamGameUpdatesRepository final {
 public:
+    static constexpr int maximumArticlesPerGame = 250;
+    static constexpr int maximumArticlesOverall = 3000;
+    static constexpr int maximumArticleContentCharacters = 6000;
+    static constexpr int maximumNewsPageSize = 100;
+
     explicit SteamGameUpdatesRepository(QSqlDatabase &database);
     RepositoryResult<QVector<domain::SteamGameUpdateFollow>> list(
         const std::function<bool()> &cancellationRequested = {}) const;
@@ -300,6 +305,17 @@ public:
         quint32 appId, const QString &expectedSourceUrl,
         const domain::SteamGameUpdateArtworkMetadata &artwork);
     RepositoryResult<bool> hasArtworkFilename(const QString &filename) const;
+    RepositoryResult<SteamGameUpdateNewsPage> newsPage(
+        std::optional<quint32> appId, bool unreadOnly, int pageSize,
+        const SteamGameUpdateNewsCursor &before = {},
+        const std::function<bool()> &cancellationRequested = {}) const;
+    RepositoryResult<QHash<quint32, int>> unreadNewsCounts() const;
+    RepositoryResult<SteamGameUpdateNewsUpsertResult> upsertNewsPage(
+        quint32 appId, const QVector<domain::SteamNewsArticle> &articles,
+        const QString &discoveredAtUtc,
+        const std::function<bool()> &cancellationRequested = {});
+    RepositoryResult<void> setNewsRead(quint32 appId, const QString &newsId, bool isRead);
+    RepositoryResult<int> setAllNewsRead(quint32 appId, bool isRead);
     RepositoryResult<void> remove(quint32 appId);
 
 private:

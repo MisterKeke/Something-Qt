@@ -526,6 +526,34 @@ constexpr const char *steamGameUpdates[] = {
     "CREATE INDEX idx_steam_game_update_follows_added ON steam_game_update_follows(added_at_utc DESC, steam_app_id)",
 };
 
+constexpr const char *steamGameUpdateNews[] = {
+    R"SQL(CREATE TABLE steam_game_update_news_items (
+        steam_app_id INTEGER NOT NULL CHECK(steam_app_id BETWEEN 1 AND 4294967295),
+        news_id TEXT NOT NULL CHECK(length(news_id) BETWEEN 1 AND 32
+            AND news_id NOT GLOB '*[^0-9]*'),
+        title TEXT NOT NULL CHECK(length(trim(title)) BETWEEN 1 AND 500),
+        published_at_unix_seconds INTEGER NOT NULL
+            CHECK(published_at_unix_seconds BETWEEN 1 AND 253402300799),
+        source_url TEXT NOT NULL CHECK(length(source_url) BETWEEN 1 AND 4096),
+        author TEXT NOT NULL DEFAULT '' CHECK(length(author) <= 500),
+        feed_label TEXT NOT NULL DEFAULT '' CHECK(length(feed_label) <= 200),
+        feed_name TEXT NOT NULL DEFAULT '' CHECK(length(feed_name) <= 200),
+        feed_type INTEGER CHECK(feed_type IS NULL OR feed_type >= 0),
+        content_text TEXT NOT NULL DEFAULT '' CHECK(length(content_text) <= 6000),
+        external_url INTEGER NOT NULL DEFAULT 0 CHECK(external_url IN (0, 1)),
+        is_read INTEGER NOT NULL DEFAULT 0 CHECK(is_read IN (0, 1)),
+        discovered_at_utc TEXT NOT NULL CHECK(
+            length(trim(discovered_at_utc)) >= 20 AND substr(discovered_at_utc, -1, 1) = 'Z'
+            AND julianday(discovered_at_utc) IS NOT NULL),
+        PRIMARY KEY(steam_app_id, news_id),
+        FOREIGN KEY(steam_app_id) REFERENCES steam_game_update_follows(steam_app_id)
+            ON DELETE CASCADE
+    ))SQL",
+    "CREATE INDEX idx_steam_game_update_news_order ON steam_game_update_news_items(published_at_unix_seconds DESC, steam_app_id DESC, news_id DESC)",
+    "CREATE INDEX idx_steam_game_update_news_game_order ON steam_game_update_news_items(steam_app_id, published_at_unix_seconds DESC, news_id DESC)",
+    "CREATE INDEX idx_steam_game_update_news_unread ON steam_game_update_news_items(is_read, steam_app_id, published_at_unix_seconds DESC)",
+};
+
 constexpr std::array migrations{
     Migration{1, "core tasks currencies preferences", core, qsizetype(std::size(core))},
     Migration{2, "favorites and retained update news", favorites, qsizetype(std::size(favorites))},
@@ -553,6 +581,8 @@ constexpr std::array migrations{
               qsizetype(std::size(calendarGameReleaseVisibility))},
     Migration{16, "independent Steam Game Updates follows", steamGameUpdates,
               qsizetype(std::size(steamGameUpdates))},
+    Migration{17, "independent Steam Game Updates article cache", steamGameUpdateNews,
+              qsizetype(std::size(steamGameUpdateNews))},
 };
 
 bool fail(QString *diagnostic, const QString &message)
@@ -612,6 +642,7 @@ bool hasUnexpectedTables(const QSqlDatabase &database, QString *diagnostic, bool
         QStringLiteral("steam_price_observations"), QStringLiteral("data_imports"),
         QStringLiteral("steam_release_follows"),
         QStringLiteral("steam_game_update_follows"),
+        QStringLiteral("steam_game_update_news_items"),
         QStringLiteral("task_history"), QStringLiteral("task_schedules"),
         QStringLiteral("scheduling_preferences"),
         QStringLiteral("weather_comparison_cities")

@@ -64,7 +64,8 @@ bool validStagedArtwork(const StagedSteamArtwork &artwork)
 } // namespace
 
 QVariantMap SteamGameUpdatesService::followValue(
-    const domain::SteamGameUpdateFollow &follow, const QString &profileDirectory)
+    const domain::SteamGameUpdateFollow &follow, const QString &profileDirectory,
+    int unreadNewsCount)
 {
     const QString ownershipStatus =
         domain::steamGameUpdateOwnershipStatusName(follow.ownershipStatus);
@@ -84,6 +85,7 @@ QVariantMap SteamGameUpdatesService::followValue(
                  ? QStringLiteral("Owned") : QStringLiteral("Following")},
         {QStringLiteral("followingStatus"), QStringLiteral("following")},
         {QStringLiteral("isFollowing"), true},
+        {QStringLiteral("unreadNewsCount"), unreadNewsCount},
         {QStringLiteral("addedAtUtc"), follow.addedAtUtc},
         {QStringLiteral("lastSuccessfulNewsCheckAtUtc"),
              follow.lastSuccessfulNewsCheckAtUtc},
@@ -103,11 +105,14 @@ storage::StorageCommand SteamGameUpdatesService::loadSnapshot(QString profileDir
         if (cancelled()) return failed(domain::AppError::cancelled());
         const auto records = repositories.gameUpdates.list(cancelled);
         if (!records.succeeded()) return failed(records.error);
+        const auto unreadCounts = repositories.gameUpdates.unreadNewsCounts();
+        if (!unreadCounts.succeeded()) return failed(unreadCounts.error);
         if (cancelled()) return failed(domain::AppError::cancelled());
         QVariantList games;
         games.reserve(records.value.size());
         for (const domain::SteamGameUpdateFollow &follow : records.value)
-            games.push_back(followValue(follow, profileDirectory));
+            games.push_back(followValue(
+                follow, profileDirectory, unreadCounts.value.value(follow.appId, 0)));
         storage::StorageReply reply;
         reply.values.insert(QStringLiteral("games"), games);
         return reply;
@@ -145,9 +150,12 @@ storage::StorageCommand SteamGameUpdatesService::setOwnershipStatus(
         if (cancelled()) return failed(domain::AppError::cancelled());
         const auto updated = repositories.gameUpdates.setOwnershipStatus(appId, status);
         if (!updated.succeeded()) return failed(updated.error);
+        const auto unreadCounts = repositories.gameUpdates.unreadNewsCounts();
+        if (!unreadCounts.succeeded()) return failed(unreadCounts.error);
         storage::StorageReply reply;
         reply.values.insert(QStringLiteral("game"),
-                            followValue(updated.value, profileDirectory));
+                            followValue(updated.value, profileDirectory,
+                                        unreadCounts.value.value(appId, 0)));
         return reply;
     };
 }
@@ -165,9 +173,132 @@ storage::StorageCommand SteamGameUpdatesService::recordNewsCheck(
         const auto updated = repositories.gameUpdates.recordNewsCheck(
             appId, attemptedAtUtc, succeeded, safeError);
         if (!updated.succeeded()) return failed(updated.error);
+        const auto unreadCounts = repositories.gameUpdates.unreadNewsCounts();
+        if (!unreadCounts.succeeded()) return failed(unreadCounts.error);
         storage::StorageReply reply;
         reply.values.insert(QStringLiteral("game"),
-                            followValue(updated.value, profileDirectory));
+                            followValue(updated.value, profileDirectory,
+                                        unreadCounts.value.value(appId, 0)));
+        return reply;
+    };
+}
+
+storage::StorageCommand SteamGameUpdatesService::loadNewsPage(
+    std::optional<quint32> appId, bool unreadOnly, int pageSize,
+    storage::SteamGameUpdateNewsCursor before)
+{
+    return [appId, unreadOnly, pageSize, before](
+               storage::StorageRepositories &repositories,
+               const std::function<bool()> &cancelled) {
+        if (cancelled()) return failed(domain::AppError::cancelled());
+        const auto page = repositories.gameUpdates.newsPage(
+            appId, unreadOnly, pageSize, before, cancelled);
+        if (!page.succeeded()) return failed(page.error);
+        QVariantList items;
+        items.reserve(page.value.items.size());
+        for (const storage::SteamGameUpdateNewsItem &item : page.value.items) {
+            const domain::SteamNewsArticle &article = item.article;
+            QVariantMap value{
+                {QStringLiteral("appId"), article.appId},
+                {QStringLiteral("gameName"), item.gameName},
+                {QStringLiteral("newsId"), article.newsId},
+                {QStringLiteral("title"), article.title},
+                {QStringLiteral("publishedAtUnixSeconds"), article.publishedAtUnixSeconds},
+                {QStringLiteral("sourceUrl"), article.sourceUrl},
+                {QStringLiteral("author"), article.author},
+                {QStringLiteral("feedLabel"), article.feedLabel},
+                {QStringLiteral("feedName"), article.feedName},
+                {QStringLiteral("feedType"), article.feedType
+                     ? QVariant(*article.feedType) : QVariant()},
+                {QStringLiteral("contentText"), article.contentText},
+                {QStringLiteral("externalUrl"), article.externalUrl},
+                {QStringLiteral("isRead"), item.isRead},
+                {QStringLiteral("discoveredAtUtc"), item.discoveredAtUtc},
+            };
+            items.push_back(std::move(value));
+        }
+        storage::StorageReply reply;
+        reply.values.insert(QStringLiteral("items"), items);
+        reply.values.insert(QStringLiteral("hasMore"), page.value.hasMore);
+        if (page.value.hasMore) {
+            reply.values.insert(QStringLiteral("nextCursor"), QVariantMap{
+                {QStringLiteral("publishedAtUnixSeconds"),
+                 page.value.nextCursor.publishedAtUnixSeconds},
+                {QStringLiteral("appId"), page.value.nextCursor.appId},
+                {QStringLiteral("newsId"), page.value.nextCursor.newsId},
+            });
+        }
+        return reply;
+    };
+}
+
+storage::StorageCommand SteamGameUpdatesService::saveNewsPage(
+    quint32 appId, QVector<domain::SteamNewsArticle> articles,
+    QString discoveredAtUtc)
+{
+    return [appId, articles = std::move(articles),
+            discoveredAtUtc = std::move(discoveredAtUtc)](
+               storage::StorageRepositories &repositories,
+               const std::function<bool()> &cancelled) mutable {
+        if (cancelled()) return failed(domain::AppError::cancelled());
+        for (domain::SteamNewsArticle &article : articles) {
+            if (article.contentText.size()
+                > storage::SteamGameUpdatesRepository::maximumArticleContentCharacters) {
+                article.contentText.truncate(
+                    storage::SteamGameUpdatesRepository::maximumArticleContentCharacters);
+            }
+        }
+        const auto saved = repositories.gameUpdates.upsertNewsPage(
+            appId, articles, discoveredAtUtc, cancelled);
+        if (!saved.succeeded()) return failed(saved.error);
+        const auto unreadCounts = repositories.gameUpdates.unreadNewsCounts();
+        if (!unreadCounts.succeeded()) return failed(unreadCounts.error);
+        storage::StorageReply reply;
+        reply.values.insert(QStringLiteral("insertedCount"), saved.value.insertedCount);
+        reply.values.insert(QStringLiteral("refreshedCount"), saved.value.refreshedCount);
+        reply.values.insert(QStringLiteral("unreadNewsCount"),
+                            unreadCounts.value.value(appId, 0));
+        return reply;
+    };
+}
+
+storage::StorageCommand SteamGameUpdatesService::setNewsRead(
+    quint32 appId, QString newsId, bool isRead)
+{
+    return [appId, newsId = std::move(newsId), isRead](
+               storage::StorageRepositories &repositories,
+               const std::function<bool()> &cancelled) {
+        if (cancelled()) return failed(domain::AppError::cancelled());
+        const auto updated = repositories.gameUpdates.setNewsRead(appId, newsId, isRead);
+        if (!updated.succeeded()) return failed(updated.error);
+        const auto unreadCounts = repositories.gameUpdates.unreadNewsCounts();
+        if (!unreadCounts.succeeded()) return failed(unreadCounts.error);
+        storage::StorageReply reply;
+        reply.values.insert(QStringLiteral("appId"), appId);
+        reply.values.insert(QStringLiteral("newsId"), newsId);
+        reply.values.insert(QStringLiteral("isRead"), isRead);
+        reply.values.insert(QStringLiteral("unreadNewsCount"),
+                            unreadCounts.value.value(appId, 0));
+        return reply;
+    };
+}
+
+storage::StorageCommand SteamGameUpdatesService::setAllNewsRead(
+    quint32 appId, bool isRead)
+{
+    return [appId, isRead](storage::StorageRepositories &repositories,
+                           const std::function<bool()> &cancelled) {
+        if (cancelled()) return failed(domain::AppError::cancelled());
+        const auto updated = repositories.gameUpdates.setAllNewsRead(appId, isRead);
+        if (!updated.succeeded()) return failed(updated.error);
+        const auto unreadCounts = repositories.gameUpdates.unreadNewsCounts();
+        if (!unreadCounts.succeeded()) return failed(unreadCounts.error);
+        storage::StorageReply reply;
+        reply.values.insert(QStringLiteral("appId"), appId);
+        reply.values.insert(QStringLiteral("isRead"), isRead);
+        reply.values.insert(QStringLiteral("changedCount"), updated.value);
+        reply.values.insert(QStringLiteral("unreadNewsCount"),
+                            unreadCounts.value.value(appId, 0));
         return reply;
     };
 }
@@ -253,9 +384,12 @@ storage::StorageCommand SteamGameUpdatesService::saveArtwork(
         }
         const auto refreshed = repositories.gameUpdates.get(appId);
         if (!refreshed.succeeded()) return failed(refreshed.error);
+        const auto unreadCounts = repositories.gameUpdates.unreadNewsCounts();
+        if (!unreadCounts.succeeded()) return failed(unreadCounts.error);
         storage::StorageReply reply;
         reply.values.insert(QStringLiteral("game"),
-                            followValue(refreshed.value, profileDirectory));
+                            followValue(refreshed.value, profileDirectory,
+                                        unreadCounts.value.value(appId, 0)));
         return reply;
     };
 }
