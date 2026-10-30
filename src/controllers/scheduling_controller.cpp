@@ -33,7 +33,7 @@ SchedulingController::SchedulingController(application::ApplicationServiceGraph 
 
 void SchedulingController::generatePreview()
 {
-    if (m_applying) return;
+    if (m_applying || m_preferencesSaving) return;
     m_previewVisible = true;
     m_errorMessage.clear();
     m_statusMessage.clear();
@@ -44,6 +44,8 @@ void SchedulingController::generatePreview()
     m_recommendations.clear();
     m_previewAvailable = false;
     m_previewStale = false;
+    m_preferencesAvailable = false;
+    m_preferencesErrorMessage.clear();
 
     if (m_graph->lifecycle().state() != application::ApplicationLifecycle::State::Running) {
         m_loading = false;
@@ -191,9 +193,55 @@ void SchedulingController::applyAccepted()
     }
 }
 
+void SchedulingController::savePreferences(QVariantMap values)
+{
+    if (!m_preferencesAvailable || m_preferencesSaving || m_loading || m_applying
+        || m_graph->lifecycle().state() != application::ApplicationLifecycle::State::Running)
+        return;
+
+    values.insert(QStringLiteral("revision"), m_preferences.value(QStringLiteral("revision")));
+    values.insert(QStringLiteral("updatedAt"), m_preferences.value(QStringLiteral("updatedAt")));
+    domain::SchedulingPreferences preferences;
+    const domain::AppError validationError = services::SchedulingService::preferencesFromVariantMap(
+        values, &preferences);
+    if (validationError.isError()) {
+        m_preferencesErrorMessage = QStringLiteral(
+            "Check the working days, HH:mm work hours, daily capacity, estimate, and break values.");
+        emit stateChanged();
+        return;
+    }
+
+    const qint64 expectedRevision = preferences.revision;
+    const auto operation = m_graph->beginOperation(
+        QStringLiteral("save smart scheduling preferences"),
+        QStringLiteral("smart-schedule-save-preferences"));
+    if (!operation.isValid()) {
+        m_preferencesErrorMessage = QStringLiteral("Scheduling settings could not be saved right now.");
+        emit stateChanged();
+        return;
+    }
+
+    const quint64 id = operation.id.value;
+    m_currentOperationId = id;
+    m_pending.insert(id, Action::SavePreferences);
+    m_preferencesSaving = true;
+    m_preferencesErrorMessage.clear();
+    emit stateChanged();
+    if (!m_graph->submitStorage(operation, services::SchedulingService::savePreferences(
+            std::move(preferences), expectedRevision))) {
+        const bool wasPending = m_pending.remove(id) > 0;
+        if (m_currentOperationId == id) m_currentOperationId = 0;
+        if (wasPending) {
+            m_preferencesSaving = false;
+            m_preferencesErrorMessage = QStringLiteral("Scheduling settings could not be submitted.");
+            emit stateChanged();
+        }
+    }
+}
+
 void SchedulingController::rejectProposal()
 {
-    if (m_applying) return;
+    if (m_applying || m_preferencesSaving) return;
     cancelCurrentOperation();
     m_recommendations.clear();
     m_daySummaries.clear();
@@ -233,6 +281,38 @@ void SchedulingController::onStorageFinished(quint64 operationId,
     const Action action = found.value();
     m_pending.erase(found);
     m_currentOperationId = 0;
+    if (action == Action::SavePreferences) {
+        m_preferencesSaving = false;
+        if (error.isCancelled()) {
+            m_preferencesErrorMessage = QStringLiteral("Saving settings was cancelled; no changes were saved.");
+            emit stateChanged();
+            return;
+        }
+        if (error.isError()) {
+            m_preferencesErrorMessage = error.category() == domain::ErrorCategory::Conflict
+                ? QStringLiteral("Scheduling settings changed since they were loaded. Discard changes to reload them, then try again.")
+                : (error.userMessage().isEmpty()
+                       ? QStringLiteral("Scheduling settings could not be saved.")
+                       : error.userMessage());
+            emit stateChanged();
+            return;
+        }
+        domain::SchedulingPreferences savedPreferences;
+        const domain::AppError parseError = services::SchedulingService::preferencesFromVariantMap(
+            values.value(QStringLiteral("preferences")).toMap(), &savedPreferences);
+        if (parseError.isError()) {
+            m_preferencesErrorMessage = QStringLiteral("Saved settings could not be read back.");
+            emit stateChanged();
+            return;
+        }
+        m_preferences = services::SchedulingService::toVariantMap(savedPreferences);
+        m_preferencesAvailable = true;
+        m_preferencesErrorMessage.clear();
+        emit preferencesSaved();
+        emit stateChanged();
+        generatePreview();
+        return;
+    }
     if (action == Action::ApplySchedules) {
         finishApply(values, error);
         return;
@@ -283,10 +363,16 @@ bool SchedulingController::submitCalculation(const QVariantMap &snapshot)
         services::SchedulingService::preferencesFromVariantMap(
             snapshot.value(QStringLiteral("preferences")).toMap(), &input.preferences);
     if (preferencesError.isError()) {
+        m_preferencesAvailable = false;
+        m_preferencesErrorMessage = QStringLiteral("Scheduling preferences could not be read.");
         m_errorMessage = QStringLiteral("Scheduling preferences could not be read.");
         return false;
     }
+    m_preferences = services::SchedulingService::toVariantMap(input.preferences);
+    m_preferencesAvailable = true;
+    m_preferencesErrorMessage.clear();
     m_previewPreferencesRevision = input.preferences.revision;
+    emit preferencesLoaded();
 
     const auto operation = m_graph->beginOperation(
         QStringLiteral("calculate smart schedule preview"),
@@ -358,10 +444,11 @@ void SchedulingController::onLifecycleChanged(application::ApplicationLifecycle:
         && state != application::ApplicationLifecycle::State::ShuttingDown
         && state != application::ApplicationLifecycle::State::Stopped) return;
     cancelCurrentOperation();
-    if (m_loading || m_applying) {
+    if (m_loading || m_applying || m_preferencesSaving) {
         const bool wasLoading = m_loading;
         m_loading = false;
         m_applying = false;
+        m_preferencesSaving = false;
         if (wasLoading) m_previewAvailable = false;
         if (state == application::ApplicationLifecycle::State::Failed)
             m_errorMessage = m_graph->lifecycle().startupError().userMessage();
@@ -430,6 +517,14 @@ void SchedulingController::invalidatePreview()
     if (m_applying) {
         m_statusMessage = QStringLiteral(
             "Task data changed while applying. The stored revisions are being checked.");
+        emit stateChanged();
+        return;
+    }
+    if (m_preferencesSaving) {
+        m_previewStale = true;
+        m_recommendations.clearAcceptance();
+        m_statusMessage = QStringLiteral(
+            "Task data changed while settings were saving. Recommendations will refresh after the save completes.");
         emit stateChanged();
         return;
     }

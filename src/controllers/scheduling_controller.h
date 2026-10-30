@@ -10,6 +10,7 @@
 #include <QStringList>
 #include <QTimeZone>
 #include <QVariantList>
+#include <QVariantMap>
 
 namespace something::controllers {
 
@@ -17,6 +18,7 @@ class SchedulingController final : public QObject {
     Q_OBJECT
     Q_PROPERTY(something::models::SchedulingPreviewModel *recommendations
                READ recommendations CONSTANT)
+    Q_PROPERTY(QVariantMap preferences READ preferences NOTIFY stateChanged)
     Q_PROPERTY(QVariantList daySummaries READ daySummaries NOTIFY stateChanged)
     Q_PROPERTY(QStringList warnings READ warnings NOTIFY stateChanged)
     Q_PROPERTY(bool loading READ loading NOTIFY stateChanged)
@@ -24,11 +26,14 @@ class SchedulingController final : public QObject {
     Q_PROPERTY(bool previewAvailable READ previewAvailable NOTIFY stateChanged)
     Q_PROPERTY(bool previewStale READ previewStale NOTIFY stateChanged)
     Q_PROPERTY(bool applying READ applying NOTIFY stateChanged)
+    Q_PROPERTY(bool preferencesAvailable READ preferencesAvailable NOTIFY stateChanged)
+    Q_PROPERTY(bool preferencesSaving READ preferencesSaving NOTIFY stateChanged)
     Q_PROPERTY(bool canStage READ canStage NOTIFY stateChanged)
     Q_PROPERTY(bool canApply READ canApply NOTIFY stateChanged)
     Q_PROPERTY(int acceptedCount READ acceptedCount NOTIFY stateChanged)
     Q_PROPERTY(int validCount READ validCount NOTIFY stateChanged)
     Q_PROPERTY(QString errorMessage READ errorMessage NOTIFY stateChanged)
+    Q_PROPERTY(QString preferencesErrorMessage READ preferencesErrorMessage NOTIFY stateChanged)
     Q_PROPERTY(QString statusMessage READ statusMessage NOTIFY stateChanged)
     Q_PROPERTY(QString todayDate READ todayDate NOTIFY stateChanged)
 
@@ -38,6 +43,7 @@ public:
                                   QObject *parent = nullptr);
 
     models::SchedulingPreviewModel *recommendations() noexcept { return &m_recommendations; }
+    QVariantMap preferences() const { return m_preferences; }
     QVariantList daySummaries() const { return m_daySummaries; }
     QStringList warnings() const { return m_warnings; }
     bool loading() const noexcept { return m_loading; }
@@ -45,12 +51,16 @@ public:
     bool previewAvailable() const noexcept { return m_previewAvailable; }
     bool previewStale() const noexcept { return m_previewStale; }
     bool applying() const noexcept { return m_applying; }
+    bool preferencesAvailable() const noexcept { return m_preferencesAvailable; }
+    bool preferencesSaving() const noexcept { return m_preferencesSaving; }
     bool canStage() const noexcept
-    { return m_previewAvailable && !m_loading && !m_applying && !m_previewStale; }
+    { return m_previewAvailable && !m_loading && !m_applying
+             && !m_preferencesSaving && !m_previewStale; }
     bool canApply() const noexcept { return canStage() && acceptedCount() > 0; }
     int acceptedCount() const noexcept { return m_recommendations.acceptedCount(); }
     int validCount() const noexcept { return m_recommendations.validCount(); }
     QString errorMessage() const { return m_errorMessage; }
+    QString preferencesErrorMessage() const { return m_preferencesErrorMessage; }
     QString statusMessage() const { return m_statusMessage; }
     QString todayDate() const { return m_todayDate; }
 
@@ -58,6 +68,7 @@ public:
     Q_INVOKABLE void setRecommendationAccepted(qint64 taskId, bool accepted);
     Q_INVOKABLE void acceptAllValid();
     Q_INVOKABLE void applyAccepted();
+    Q_INVOKABLE void savePreferences(QVariantMap preferences);
     Q_INVOKABLE void rejectProposal();
 
 public slots:
@@ -67,9 +78,11 @@ public slots:
 signals:
     void stateChanged();
     void schedulesSaved();
+    void preferencesLoaded();
+    void preferencesSaved();
 
 private:
-    enum class Action { LoadSnapshot, Calculate, ApplySchedules };
+    enum class Action { LoadSnapshot, Calculate, ApplySchedules, SavePreferences };
 
     void onStorageFinished(quint64 operationId, const QVariantMap &values,
                            domain::AppError error);
@@ -86,6 +99,7 @@ private:
     const domain::Clock *m_clock{nullptr};
     models::SchedulingPreviewModel m_recommendations;
     QHash<quint64, Action> m_pending;
+    QVariantMap m_preferences;
     QVariantList m_daySummaries;
     QStringList m_warnings;
     quint64 m_currentOperationId{0};
@@ -94,9 +108,12 @@ private:
     qint64 m_previewPreferencesRevision{0};
     QString m_todayDate;
     QString m_errorMessage;
+    QString m_preferencesErrorMessage;
     QString m_statusMessage;
     bool m_loading{false};
     bool m_applying{false};
+    bool m_preferencesAvailable{false};
+    bool m_preferencesSaving{false};
     bool m_previewVisible{false};
     bool m_previewAvailable{false};
     bool m_previewStale{false};

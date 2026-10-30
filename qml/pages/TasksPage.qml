@@ -12,10 +12,23 @@ Item {
     property var historyController: taskHistoryController
     property var filterState: taskController.filters
     property string activeView: "tasks"
+    property var schedulingSettingsDraft: ({})
+    property bool schedulingSettingsDirty: false
+    property string schedulingSettingsStatus: ""
+    readonly property var schedulingWeekdays: [
+        { label: qsTr("Mon"), accessibleLabel: qsTr("Monday"), value: 1 },
+        { label: qsTr("Tue"), accessibleLabel: qsTr("Tuesday"), value: 2 },
+        { label: qsTr("Wed"), accessibleLabel: qsTr("Wednesday"), value: 3 },
+        { label: qsTr("Thu"), accessibleLabel: qsTr("Thursday"), value: 4 },
+        { label: qsTr("Fri"), accessibleLabel: qsTr("Friday"), value: 5 },
+        { label: qsTr("Sat"), accessibleLabel: qsTr("Saturday"), value: 6 },
+        { label: qsTr("Sun"), accessibleLabel: qsTr("Sunday"), value: 7 }
+    ]
     Component.onCompleted: {
         controller.setPageVisible(visible)
         historyController.setVisible(false)
         refreshControls()
+        if (schedulingController.preferencesAvailable) captureSchedulingSettings()
     }
     Component.onDestruction: {
         controller.setPageVisible(false)
@@ -153,6 +166,60 @@ Item {
                                            String(historyTypeBox.currentValue || ""))
     }
 
+    function captureSchedulingSettings() {
+        if (!schedulingController.preferencesAvailable) return
+        const preferences = schedulingController.preferences
+        const breakValue = preferences.breakBetweenWorkBlocksMinutes
+        schedulingSettingsDraft = {
+            preferredWorkingDays: (preferences.preferredWorkingDays || []).map(function(day) {
+                return Number(day)
+            }),
+            workdayStart: String(preferences.workdayStart || ""),
+            workdayEnd: String(preferences.workdayEnd || ""),
+            maximumPlannedWorkMinutesPerDay: String(preferences.maximumPlannedWorkMinutesPerDay || ""),
+            defaultEstimatedDurationMinutes: String(preferences.defaultEstimatedDurationMinutes || ""),
+            breakBetweenWorkBlocksMinutes: breakValue === null || breakValue === undefined
+                ? "" : String(breakValue)
+        }
+        schedulingSettingsDirty = false
+    }
+
+    function updateSchedulingSetting(name, value) {
+        const next = Object.assign({}, schedulingSettingsDraft)
+        next[name] = value
+        schedulingSettingsDraft = next
+        schedulingSettingsDirty = true
+        schedulingSettingsStatus = ""
+    }
+
+    function toggleSchedulingDay(day) {
+        const days = (schedulingSettingsDraft.preferredWorkingDays || []).slice()
+        const index = days.indexOf(Number(day))
+        if (index >= 0) days.splice(index, 1)
+        else days.push(Number(day))
+        days.sort(function(left, right) { return left - right })
+        updateSchedulingSetting("preferredWorkingDays", days)
+    }
+
+    function hasSchedulingDay(day) {
+        return (schedulingSettingsDraft.preferredWorkingDays || []).indexOf(Number(day)) >= 0
+    }
+
+    function schedulingSettingsValues() {
+        const draft = schedulingSettingsDraft
+        const breakText = String(draft.breakBetweenWorkBlocksMinutes || "").trim()
+        return {
+            preferredWorkingDays: (draft.preferredWorkingDays || []).map(function(day) {
+                return Number(day)
+            }),
+            workdayStart: String(draft.workdayStart || "").trim(),
+            workdayEnd: String(draft.workdayEnd || "").trim(),
+            maximumPlannedWorkMinutesPerDay: Number(draft.maximumPlannedWorkMinutesPerDay),
+            defaultEstimatedDurationMinutes: Number(draft.defaultEstimatedDurationMinutes),
+            breakBetweenWorkBlocksMinutes: breakText.length > 0 ? Number(breakText) : null
+        }
+    }
+
     function dateSummary(date, overdue) {
         if (!date) return qsTr("No due date")
         if (overdue) return qsTr("Overdue · due %1").arg(date)
@@ -186,6 +253,26 @@ Item {
     Connections {
         target: taskController
         function onFiltersChanged() { root.refreshControls() }
+    }
+
+    Connections {
+        target: schedulingController
+        function onPreferencesLoaded() {
+            root.captureSchedulingSettings()
+            if (root.schedulingSettingsStatus.length > 0)
+                root.schedulingSettingsStatus = qsTr("Settings saved. Recommendations use the new preferences.")
+        }
+        function onPreferencesSaved() {
+            root.captureSchedulingSettings()
+            root.schedulingSettingsStatus = qsTr("Settings saved. Refreshing recommendations…")
+        }
+        function onStateChanged() {
+            if (!schedulingController.previewVisible) {
+                root.schedulingSettingsDraft = ({})
+                root.schedulingSettingsDirty = false
+                root.schedulingSettingsStatus = ""
+            }
+        }
     }
 
     Timer {
@@ -251,6 +338,7 @@ Item {
                     quiet: true
                     enabled: taskController.ready && !schedulingController.loading
                              && !schedulingController.applying
+                             && !root.schedulingSettingsDirty
                     onClicked: schedulingController.generatePreview()
                 }
                 Shared.AppButton {
@@ -410,13 +498,254 @@ Item {
                         quiet: true
                         enabled: taskController.ready && !schedulingController.loading
                                  && !schedulingController.applying
+                                 && !root.schedulingSettingsDirty
                         onClicked: schedulingController.generatePreview()
                     }
                     Shared.AppButton {
-                        text: qsTr("Reject proposal")
+                        text: qsTr("Cancel preview")
                         quiet: true
                         enabled: !schedulingController.applying
+                                 && !schedulingController.preferencesSaving
                         onClicked: schedulingController.rejectProposal()
+                    }
+                }
+
+                Rectangle {
+                    Layout.fillWidth: true
+                    height: 1
+                    color: ThemeModule.Theme.borderColor
+                }
+
+                Label {
+                    text: qsTr("Scheduling settings")
+                    color: ThemeModule.Theme.textPrimary
+                    font.family: ThemeModule.Theme.fontFamily
+                    font.pixelSize: 16
+                    font.weight: Font.DemiBold
+                }
+
+                Label {
+                    Layout.fillWidth: true
+                    text: qsTr("Recommendations use local dates and these working hours. Settings are saved to this profile.")
+                    color: ThemeModule.Theme.textSecondary
+                    font.family: ThemeModule.Theme.fontFamily
+                    font.pixelSize: ThemeModule.Theme.metadataFontSize
+                    wrapMode: Text.Wrap
+                }
+
+                Shared.StatePanel {
+                    Layout.fillWidth: true
+                    visible: !schedulingController.preferencesAvailable
+                    state: schedulingController.loading ? "loading"
+                           : schedulingController.errorMessage.length > 0 ? "error" : "empty"
+                    title: schedulingController.loading ? qsTr("Loading scheduling settings")
+                           : schedulingController.errorMessage.length > 0
+                             ? qsTr("Scheduling settings could not be loaded")
+                             : qsTr("Settings are not available")
+                    message: schedulingController.loading
+                             ? qsTr("Reading the saved workdays, hours, and capacity from this profile.")
+                             : qsTr("Refresh the schedule preview to load profile settings.")
+                }
+
+                GridLayout {
+                    id: schedulingSettingsGrid
+                    Layout.fillWidth: true
+                    visible: schedulingController.preferencesAvailable
+                    columns: width >= 900 ? 3 : width >= 600 ? 2 : 1
+                    columnSpacing: 12
+                    rowSpacing: 10
+
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        Layout.columnSpan: schedulingSettingsGrid.columns
+                        Label {
+                            text: qsTr("Preferred working days")
+                            color: ThemeModule.Theme.textPrimary
+                            font.family: ThemeModule.Theme.fontFamily
+                            font.pixelSize: ThemeModule.Theme.metadataFontSize
+                        }
+                        Flow {
+                            Layout.fillWidth: true
+                            spacing: 5
+                            Repeater {
+                                model: root.schedulingWeekdays
+                                delegate: ThemeModule.AppCheckBox {
+                                    required property var modelData
+                                    text: modelData.label
+                                    Accessible.name: modelData.accessibleLabel
+                                    checked: root.hasSchedulingDay(modelData.value)
+                                    enabled: !schedulingController.loading
+                                             && !schedulingController.applying
+                                             && !schedulingController.preferencesSaving
+                                    onClicked: root.toggleSchedulingDay(modelData.value)
+                                }
+                            }
+                        }
+                        Label {
+                            Layout.fillWidth: true
+                            visible: (root.schedulingSettingsDraft.preferredWorkingDays || []).length === 0
+                            text: qsTr("No working days are selected. Recommendations will be marked unschedulable.")
+                            color: ThemeModule.Theme.warning
+                            font.family: ThemeModule.Theme.fontFamily
+                            font.pixelSize: ThemeModule.Theme.metadataFontSize
+                            wrapMode: Text.Wrap
+                        }
+                    }
+
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        Label {
+                            text: qsTr("Workday starts · HH:mm")
+                            color: ThemeModule.Theme.textSecondary
+                            font.family: ThemeModule.Theme.fontFamily
+                            font.pixelSize: ThemeModule.Theme.metadataFontSize
+                        }
+                        Shared.AppTextField {
+                            Layout.fillWidth: true
+                            text: String(root.schedulingSettingsDraft.workdayStart || "")
+                            placeholderText: qsTr("09:00")
+                            accessibleLabel: qsTr("Workday start time in 24-hour HH:mm format")
+                            maximumLength: 5
+                            enabled: !schedulingController.loading && !schedulingController.applying
+                                     && !schedulingController.preferencesSaving
+                            onTextEdited: root.updateSchedulingSetting("workdayStart", text)
+                        }
+                    }
+
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        Label {
+                            text: qsTr("Workday ends · HH:mm")
+                            color: ThemeModule.Theme.textSecondary
+                            font.family: ThemeModule.Theme.fontFamily
+                            font.pixelSize: ThemeModule.Theme.metadataFontSize
+                        }
+                        Shared.AppTextField {
+                            Layout.fillWidth: true
+                            text: String(root.schedulingSettingsDraft.workdayEnd || "")
+                            placeholderText: qsTr("17:00")
+                            accessibleLabel: qsTr("Workday end time in 24-hour HH:mm format")
+                            maximumLength: 5
+                            enabled: !schedulingController.loading && !schedulingController.applying
+                                     && !schedulingController.preferencesSaving
+                            onTextEdited: root.updateSchedulingSetting("workdayEnd", text)
+                        }
+                    }
+
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        Label {
+                            text: qsTr("Maximum planned work per day · minutes")
+                            color: ThemeModule.Theme.textSecondary
+                            font.family: ThemeModule.Theme.fontFamily
+                            font.pixelSize: ThemeModule.Theme.metadataFontSize
+                            wrapMode: Text.Wrap
+                        }
+                        Shared.AppTextField {
+                            Layout.fillWidth: true
+                            text: String(root.schedulingSettingsDraft.maximumPlannedWorkMinutesPerDay || "")
+                            placeholderText: qsTr("360")
+                            accessibleLabel: qsTr("Maximum planned work minutes per day")
+                            maximumLength: 4
+                            inputMethodHints: Qt.ImhDigitsOnly
+                            enabled: !schedulingController.loading && !schedulingController.applying
+                                     && !schedulingController.preferencesSaving
+                            onTextEdited: root.updateSchedulingSetting(
+                                              "maximumPlannedWorkMinutesPerDay", text)
+                        }
+                    }
+
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        Label {
+                            text: qsTr("Default task estimate · minutes")
+                            color: ThemeModule.Theme.textSecondary
+                            font.family: ThemeModule.Theme.fontFamily
+                            font.pixelSize: ThemeModule.Theme.metadataFontSize
+                            wrapMode: Text.Wrap
+                        }
+                        Shared.AppTextField {
+                            Layout.fillWidth: true
+                            text: String(root.schedulingSettingsDraft.defaultEstimatedDurationMinutes || "")
+                            placeholderText: qsTr("60")
+                            accessibleLabel: qsTr("Default estimated task duration in minutes")
+                            maximumLength: 6
+                            inputMethodHints: Qt.ImhDigitsOnly
+                            enabled: !schedulingController.loading && !schedulingController.applying
+                                     && !schedulingController.preferencesSaving
+                            onTextEdited: root.updateSchedulingSetting(
+                                              "defaultEstimatedDurationMinutes", text)
+                        }
+                    }
+
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        Label {
+                            text: qsTr("Break between work blocks · minutes, optional")
+                            color: ThemeModule.Theme.textSecondary
+                            font.family: ThemeModule.Theme.fontFamily
+                            font.pixelSize: ThemeModule.Theme.metadataFontSize
+                            wrapMode: Text.Wrap
+                        }
+                        Shared.AppTextField {
+                            Layout.fillWidth: true
+                            text: String(root.schedulingSettingsDraft.breakBetweenWorkBlocksMinutes || "")
+                            placeholderText: qsTr("15, or leave blank")
+                            accessibleLabel: qsTr("Optional break between work blocks in minutes")
+                            maximumLength: 3
+                            inputMethodHints: Qt.ImhDigitsOnly
+                            enabled: !schedulingController.loading && !schedulingController.applying
+                                     && !schedulingController.preferencesSaving
+                            onTextEdited: root.updateSchedulingSetting(
+                                              "breakBetweenWorkBlocksMinutes", text)
+                        }
+                    }
+                }
+
+                Label {
+                    Layout.fillWidth: true
+                    visible: schedulingController.preferencesErrorMessage.length > 0
+                    text: schedulingController.preferencesErrorMessage
+                    color: ThemeModule.Theme.error
+                    font.family: ThemeModule.Theme.fontFamily
+                    wrapMode: Text.Wrap
+                    Accessible.role: Accessible.AlertMessage
+                }
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    visible: schedulingController.preferencesAvailable
+                    Label {
+                        Layout.fillWidth: true
+                        text: root.schedulingSettingsDirty
+                              ? qsTr("Unsaved settings · saving them refreshes the recommendation preview")
+                              : root.schedulingSettingsStatus.length > 0
+                                ? root.schedulingSettingsStatus
+                                : qsTr("Leave the break blank to allow no required break between blocks.")
+                        color: root.schedulingSettingsDirty ? ThemeModule.Theme.warning
+                               : root.schedulingSettingsStatus.length > 0
+                                 ? ThemeModule.Theme.success : ThemeModule.Theme.textSecondary
+                        font.family: ThemeModule.Theme.fontFamily
+                        font.pixelSize: ThemeModule.Theme.metadataFontSize
+                        wrapMode: Text.Wrap
+                    }
+                    Shared.AppButton {
+                        text: qsTr("Discard changes")
+                        quiet: true
+                        visible: root.schedulingSettingsDirty
+                        enabled: !schedulingController.preferencesSaving
+                        onClicked: root.captureSchedulingSettings()
+                    }
+                    Shared.AppButton {
+                        text: schedulingController.preferencesSaving
+                              ? qsTr("Saving…") : qsTr("Save settings")
+                        enabled: root.schedulingSettingsDirty
+                                 && taskController.ready
+                                 && !schedulingController.loading
+                                 && !schedulingController.applying
+                                 && !schedulingController.preferencesSaving
+                        onClicked: schedulingController.savePreferences(
+                                       root.schedulingSettingsValues())
                     }
                 }
 
@@ -463,12 +792,14 @@ Item {
                     Shared.AppButton {
                         text: qsTr("Accept all valid")
                         enabled: schedulingController.canStage
+                                 && !root.schedulingSettingsDirty
                                  && schedulingController.validCount > 0
                         onClicked: schedulingController.acceptAllValid()
                     }
                     Shared.AppButton {
                         text: qsTr("Apply accepted")
                         enabled: schedulingController.canApply
+                                 && !root.schedulingSettingsDirty
                         onClicked: schedulingController.applyAccepted()
                     }
                 }
@@ -647,6 +978,7 @@ Item {
                                     text: accepted ? qsTr("Accepted") : qsTr("Accept")
                                     quiet: accepted
                                     enabled: schedulingController.canStage && canAccept
+                                             && !root.schedulingSettingsDirty
                                     Accessible.name: accepted
                                                     ? qsTr("Remove staged acceptance for %1").arg(title)
                                                     : qsTr("Accept recommendation for %1").arg(title)
