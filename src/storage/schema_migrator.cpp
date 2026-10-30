@@ -229,6 +229,36 @@ constexpr const char *steam[] = {
     ))SQL",
 };
 
+constexpr const char *steamPriceObservations[] = {
+    R"SQL(CREATE TABLE steam_price_observations (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        steam_game_id INTEGER NOT NULL REFERENCES steam_games(id) ON DELETE CASCADE,
+        steam_app_id INTEGER NOT NULL CHECK(steam_app_id > 0),
+        country_code TEXT NOT NULL CHECK(length(country_code) = 2 AND country_code GLOB '[A-Z][A-Z]'),
+        currency_code TEXT CHECK(currency_code IS NULL OR (length(currency_code) = 3 AND currency_code GLOB '[A-Z][A-Z][A-Z]')),
+        price_state TEXT NOT NULL CHECK(price_state IN ('priced', 'free', 'unavailable', 'unsupported')),
+        current_price_minor INTEGER CHECK(current_price_minor IS NULL OR current_price_minor >= 0),
+        regular_price_minor INTEGER CHECK(regular_price_minor IS NULL OR regular_price_minor >= 0),
+        discount_percent INTEGER NOT NULL DEFAULT 0 CHECK(discount_percent BETWEEN 0 AND 100),
+        observed_at_utc TEXT NOT NULL CHECK(
+            length(trim(observed_at_utc)) >= 20
+            AND substr(observed_at_utc, -1, 1) = 'Z'
+            AND julianday(observed_at_utc) IS NOT NULL
+        ),
+        CHECK(
+            (price_state = 'priced' AND currency_code IS NOT NULL
+                AND current_price_minor IS NOT NULL)
+            OR (price_state = 'free' AND current_price_minor IS 0
+                AND regular_price_minor IS 0 AND discount_percent = 0)
+            OR (price_state IN ('unavailable', 'unsupported')
+                AND current_price_minor IS NULL AND regular_price_minor IS NULL
+                AND discount_percent = 0)
+        )
+    ))SQL",
+    "CREATE INDEX idx_steam_price_observations_game_market_time ON steam_price_observations(steam_game_id, country_code, currency_code, observed_at_utc, id)",
+    "CREATE INDEX idx_steam_price_observations_game_time ON steam_price_observations(steam_game_id, observed_at_utc, id)",
+};
+
 constexpr const char *favoriteOrdering[] = {
     "DROP INDEX idx_favorite_categories_order",
     "CREATE INDEX idx_favorite_categories_order ON favorite_categories(source, display_order, name_normalized, id)",
@@ -384,6 +414,8 @@ constexpr std::array migrations{
               qsizetype(std::size(taskScheduling))},
     Migration{11, "weather comparison cities and forecast cache", weatherComparison,
               qsizetype(std::size(weatherComparison))},
+    Migration{12, "Steam price observations", steamPriceObservations,
+              qsizetype(std::size(steamPriceObservations))},
 };
 
 bool fail(QString *diagnostic, const QString &message)
@@ -439,7 +471,8 @@ bool hasUnexpectedTables(const QSqlDatabase &database, QString *diagnostic, bool
         QStringLiteral("desktop_app_icons"), QStringLiteral("setups"),
         QStringLiteral("setup_apps"), QStringLiteral("setup_icons"),
         QStringLiteral("steam_game_settings"), QStringLiteral("steam_games"),
-        QStringLiteral("steam_game_images"), QStringLiteral("data_imports"),
+        QStringLiteral("steam_game_images"),
+        QStringLiteral("steam_price_observations"), QStringLiteral("data_imports"),
         QStringLiteral("task_history"), QStringLiteral("task_schedules"),
         QStringLiteral("scheduling_preferences"),
         QStringLiteral("weather_comparison_cities")
