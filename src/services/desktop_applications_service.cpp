@@ -4,6 +4,8 @@
 
 #include <QFileInfo>
 
+#include <functional>
+
 namespace something::services {
 namespace {
 
@@ -22,16 +24,154 @@ storage::StorageReply withApplication(const storage::RepositoryResult<storage::D
     return reply;
 }
 
+QVariantMap categoryMap(const storage::DesktopApplicationCategory &category)
+{
+    QVariantMap result{{QStringLiteral("id"), category.id},
+                       {QStringLiteral("name"), category.name},
+                       {QStringLiteral("displayOrder"), category.displayOrder},
+                       {QStringLiteral("createdAt"), category.createdAt},
+                       {QStringLiteral("updatedAt"), category.updatedAt},
+                       {QStringLiteral("applicationCount"), category.applicationCount}};
+    if (category.description) result.insert(QStringLiteral("description"), *category.description);
+    if (category.color) result.insert(QStringLiteral("color"), *category.color);
+    if (category.iconIdentifier)
+        result.insert(QStringLiteral("iconIdentifier"), *category.iconIdentifier);
+    return result;
+}
+
+QVariantList categoryList(const QVector<storage::DesktopApplicationCategory> &categories)
+{
+    QVariantList result;
+    result.reserve(categories.size());
+    for (const auto &category : categories) result.push_back(categoryMap(category));
+    return result;
+}
+
+storage::StorageCommand listCommand(
+    std::function<storage::RepositoryResult<QVector<storage::DesktopApplication>>(
+        storage::DesktopApplicationsRepository &)> query)
+{
+    return [query = std::move(query)](storage::StorageRepositories &repositories,
+                                      const std::function<bool()> &cancelled) {
+        if (cancelled()) return failed(domain::AppError::cancelled());
+        const auto result = query(repositories.applications);
+        if (!result.succeeded()) return failed(result.error);
+        storage::StorageReply reply;
+        reply.values.insert(QStringLiteral("applications"),
+                            DesktopApplicationsService::toVariantList(result.value));
+        return reply;
+    };
+}
+
 } // namespace
 
 storage::StorageCommand DesktopApplicationsService::list()
 {
+    return listCommand([](storage::DesktopApplicationsRepository &repository) {
+        return repository.list();
+    });
+}
+
+storage::StorageCommand DesktopApplicationsService::listByCategory(qint64 categoryId)
+{
+    return listCommand([categoryId](storage::DesktopApplicationsRepository &repository) {
+        return repository.listByCategory(categoryId);
+    });
+}
+
+storage::StorageCommand DesktopApplicationsService::listUncategorized()
+{
+    return listCommand([](storage::DesktopApplicationsRepository &repository) {
+        return repository.listUncategorized();
+    });
+}
+
+storage::StorageCommand DesktopApplicationsService::listCategories()
+{
     return [](storage::StorageRepositories &repositories, const std::function<bool()> &cancelled) {
         if (cancelled()) return failed(domain::AppError::cancelled());
-        const auto result = repositories.applications.list();
+        const auto result = repositories.applications.listCategories();
         if (!result.succeeded()) return failed(result.error);
         storage::StorageReply reply;
-        reply.values.insert(QStringLiteral("applications"), toVariantList(result.value));
+        reply.values.insert(QStringLiteral("categories"), categoryList(result.value));
+        return reply;
+    };
+}
+
+storage::StorageCommand DesktopApplicationsService::createCategory(
+    QString name, QString description, QString color, QString iconIdentifier)
+{
+    return [name = std::move(name), description = std::move(description),
+            color = std::move(color), iconIdentifier = std::move(iconIdentifier)](
+               storage::StorageRepositories &repositories, const std::function<bool()> &cancelled) {
+        if (cancelled()) return failed(domain::AppError::cancelled());
+        const auto result = repositories.applications.createCategory(
+            name, description, color, iconIdentifier);
+        if (!result.succeeded()) return failed(result.error);
+        storage::StorageReply reply;
+        reply.values.insert(QStringLiteral("category"), categoryMap(result.value));
+        return reply;
+    };
+}
+
+storage::StorageCommand DesktopApplicationsService::updateCategory(
+    qint64 id, QString name, QString description, QString color, QString iconIdentifier)
+{
+    return [id, name = std::move(name), description = std::move(description),
+            color = std::move(color), iconIdentifier = std::move(iconIdentifier)](
+               storage::StorageRepositories &repositories, const std::function<bool()> &cancelled) {
+        if (cancelled()) return failed(domain::AppError::cancelled());
+        const auto result = repositories.applications.updateCategory(
+            id, name, description, color, iconIdentifier);
+        if (!result.succeeded()) return failed(result.error);
+        storage::StorageReply reply;
+        reply.values.insert(QStringLiteral("category"), categoryMap(result.value));
+        return reply;
+    };
+}
+
+storage::StorageCommand DesktopApplicationsService::reorderCategories(QVector<qint64> orderedIds)
+{
+    return [orderedIds = std::move(orderedIds)](storage::StorageRepositories &repositories,
+                                                const std::function<bool()> &cancelled) {
+        if (cancelled()) return failed(domain::AppError::cancelled());
+        const auto result = repositories.applications.reorderCategories(orderedIds);
+        return result.succeeded() ? storage::StorageReply{} : failed(result.error);
+    };
+}
+
+storage::StorageCommand DesktopApplicationsService::assignCategory(
+    qint64 applicationId, qint64 categoryId)
+{
+    return [applicationId, categoryId](storage::StorageRepositories &repositories,
+                                       const std::function<bool()> &cancelled) {
+        if (cancelled()) return failed(domain::AppError::cancelled());
+        const auto result = repositories.applications.assignCategory(applicationId, categoryId);
+        return result.succeeded() ? storage::StorageReply{} : failed(result.error);
+    };
+}
+
+storage::StorageCommand DesktopApplicationsService::clearCategory(qint64 applicationId)
+{
+    return [applicationId](storage::StorageRepositories &repositories,
+                           const std::function<bool()> &cancelled) {
+        if (cancelled()) return failed(domain::AppError::cancelled());
+        const auto result = repositories.applications.assignCategory(applicationId, std::nullopt);
+        return result.succeeded() ? storage::StorageReply{} : failed(result.error);
+    };
+}
+
+storage::StorageCommand DesktopApplicationsService::deleteCategory(qint64 categoryId)
+{
+    return [categoryId](storage::StorageRepositories &repositories,
+                        const std::function<bool()> &cancelled) {
+        if (cancelled()) return failed(domain::AppError::cancelled());
+        const auto result = repositories.applications.deleteCategory(categoryId);
+        if (!result.succeeded()) return failed(result.error);
+        storage::StorageReply reply;
+        reply.values.insert(QStringLiteral("deletedId"), result.value.deletedId);
+        reply.values.insert(QStringLiteral("affectedApplications"),
+                            result.value.affectedApplications);
         return reply;
     };
 }

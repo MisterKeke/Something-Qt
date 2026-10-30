@@ -19,10 +19,12 @@ namespace {
 QString safeError(domain::AppError error, const QString &fallback)
 {
     switch (error.category()) {
-    case domain::ErrorCategory::Conflict: return QStringLiteral("That executable is already saved.");
+    case domain::ErrorCategory::Conflict: return fallback.isEmpty()
+        ? QStringLiteral("That executable is already saved.") : fallback;
     case domain::ErrorCategory::Validation: return fallback.isEmpty()
         ? QStringLiteral("Check the selected application and try again.") : fallback;
-    case domain::ErrorCategory::NotFound: return QStringLiteral("The saved application could not be found.");
+    case domain::ErrorCategory::NotFound: return fallback.isEmpty()
+        ? QStringLiteral("The saved application could not be found.") : fallback;
     case domain::ErrorCategory::CapabilityUnavailable:
         return QStringLiteral("Saved application launching is supported only on Windows.");
     case domain::ErrorCategory::Platform: return QStringLiteral("The application action could not be completed.");
@@ -67,6 +69,7 @@ DesktopApplicationsController::DesktopApplicationsController(
     , m_platform(platform)
     , m_images(images)
     , m_applications(this)
+    , m_categories(this)
 {
     Q_ASSERT(m_graph && m_platform);
     Q_ASSERT(QThread::currentThread() == thread());
@@ -150,7 +153,10 @@ void DesktopApplicationsController::onLifecycleChanged(application::ApplicationL
             services::DesktopAppIconStore::removeAbandonedStagingFiles(m_graph->profileDirectory());
             m_stagingCleanupDone = true;
         }
-        if (m_pageVisible && m_applications.rowCount() == 0) reload();
+        if (m_pageVisible) {
+            if (m_applications.rowCount() == 0) reload();
+            if (m_categories.count() == 0) loadCategories();
+        }
     }
     emit stateChanged();
 }
@@ -170,8 +176,16 @@ void DesktopApplicationsController::setPageVisible(bool visible)
             }
             m_loading = false;
         }
+        if (m_categoriesOperation) {
+            const quint64 id = m_categoriesOperation;
+            m_categoriesOperation = 0;
+            m_pending.remove(id);
+            m_graph->cancelOperation({id});
+            m_categoriesLoading = false;
+        }
     } else if (m_ready) {
         reload();
+        loadCategories();
     }
     emit stateChanged();
 }
@@ -185,13 +199,120 @@ void DesktopApplicationsController::reload()
         m_pending.remove(old);
         m_graph->cancelOperation({old});
     }
-    const auto operation = begin(Kind::List, QStringLiteral("list saved applications"));
+    const QString listFallback = m_applicationFilter == ApplicationFilter::Category
+        ? QStringLiteral("That category no longer exists.") : QString();
+    const auto operation = begin(Kind::List, QStringLiteral("list saved applications"),
+                                 0, false, listFallback);
     if (!operation.isValid()) return;
     m_listOperation = operation.id.value;
     m_loading = true;
     m_errorMessage.clear();
     emit stateChanged();
-    submitStorage(operation.id.value, services::DesktopApplicationsService::list());
+    storage::StorageCommand command;
+    if (m_applicationFilter == ApplicationFilter::Category)
+        command = services::DesktopApplicationsService::listByCategory(m_filterCategoryId);
+    else if (m_applicationFilter == ApplicationFilter::Uncategorized)
+        command = services::DesktopApplicationsService::listUncategorized();
+    else
+        command = services::DesktopApplicationsService::list();
+    submitStorage(operation.id.value, std::move(command));
+}
+
+void DesktopApplicationsController::loadCategories()
+{
+    if (!m_ready || !m_pageVisible) return;
+    if (m_categoriesOperation) {
+        const quint64 old = m_categoriesOperation;
+        m_categoriesOperation = 0;
+        m_pending.remove(old);
+        m_graph->cancelOperation({old});
+    }
+    const auto operation = begin(Kind::CategoriesList, QStringLiteral("list application categories"));
+    if (!operation.isValid()) return;
+    m_categoriesOperation = operation.id.value;
+    m_categoriesLoading = true;
+    emit stateChanged();
+    submitStorage(operation.id.value, services::DesktopApplicationsService::listCategories());
+}
+
+void DesktopApplicationsController::loadApplicationsByCategory(qint64 categoryId)
+{
+    if (categoryId <= 0) {
+        setError(QStringLiteral("Choose a valid application category."));
+        return;
+    }
+    m_applicationFilter = ApplicationFilter::Category;
+    m_filterCategoryId = categoryId;
+    reload();
+}
+
+void DesktopApplicationsController::loadUncategorizedApplications()
+{
+    m_applicationFilter = ApplicationFilter::Uncategorized;
+    m_filterCategoryId = 0;
+    reload();
+}
+
+void DesktopApplicationsController::createCategory(QString name, QString description,
+                                                     QString color, QString iconIdentifier)
+{
+    if (m_busy) return;
+    const auto operation = begin(Kind::CategoryCreate, QStringLiteral("create application category"),
+        0, true, QStringLiteral("A category with that name already exists or its details are invalid."));
+    if (operation.isValid()) submitStorage(operation.id.value,
+        services::DesktopApplicationsService::createCategory(std::move(name), std::move(description),
+                                                               std::move(color), std::move(iconIdentifier)));
+}
+
+void DesktopApplicationsController::updateCategory(qint64 id, QString name, QString description,
+                                                     QString color, QString iconIdentifier)
+{
+    if (m_busy) return;
+    const auto operation = begin(Kind::CategoryUpdate, QStringLiteral("update application category"),
+        0, true, QStringLiteral("A category with that name already exists or its details are invalid."));
+    if (operation.isValid()) submitStorage(operation.id.value,
+        services::DesktopApplicationsService::updateCategory(id, std::move(name), std::move(description),
+                                                               std::move(color), std::move(iconIdentifier)));
+}
+
+void DesktopApplicationsController::reorderCategories(QVariantList orderedIds)
+{
+    if (m_busy) return;
+    QVector<qint64> ids;
+    ids.reserve(orderedIds.size());
+    for (const QVariant &value : orderedIds) ids.push_back(value.toLongLong());
+    const auto operation = begin(Kind::CategoryReorder, QStringLiteral("reorder application categories"),
+        0, true, QStringLiteral("Refresh the category list and try reordering again."));
+    if (operation.isValid()) submitStorage(operation.id.value,
+        services::DesktopApplicationsService::reorderCategories(std::move(ids)));
+}
+
+void DesktopApplicationsController::assignApplicationCategory(qint64 applicationId, qint64 categoryId)
+{
+    if (m_busy) return;
+    const auto operation = begin(Kind::CategoryAssign, QStringLiteral("assign application category"),
+        applicationId, true, QStringLiteral("Choose an existing category and saved application."));
+    if (operation.isValid()) submitStorage(operation.id.value,
+        services::DesktopApplicationsService::assignCategory(applicationId, categoryId));
+}
+
+void DesktopApplicationsController::removeApplicationCategory(qint64 applicationId)
+{
+    if (m_busy) return;
+    const auto operation = begin(Kind::CategoryClear, QStringLiteral("remove application category"),
+        applicationId, true, QStringLiteral("Choose an existing saved application."));
+    if (operation.isValid()) submitStorage(operation.id.value,
+        services::DesktopApplicationsService::clearCategory(applicationId));
+}
+
+void DesktopApplicationsController::deleteCategory(qint64 categoryId)
+{
+    if (m_busy) return;
+    const auto operation = begin(Kind::CategoryDelete, QStringLiteral("delete application category"),
+        0, true, QStringLiteral("The category could not be found."));
+    if (!operation.isValid()) return;
+    m_pending[operation.id.value].categoryId = categoryId;
+    submitStorage(operation.id.value, services::DesktopApplicationsService::deleteCategory(categoryId));
 }
 
 void DesktopApplicationsController::addFromFile(const QUrl &selectedFile)
@@ -345,6 +466,13 @@ void DesktopApplicationsController::onStorageFinished(quint64 id, const QVariant
         fail(id, error);
         return;
     }
+    if (it->kind == Kind::CategoriesList) {
+        m_categories.replace(values.value(QStringLiteral("categories")).toList());
+        m_categoriesLoading = false;
+        m_categoriesOperation = 0;
+        succeed(id);
+        return;
+    }
     switch (it->kind) {
     case Kind::List:
     case Kind::LaunchGet:
@@ -423,6 +551,23 @@ void DesktopApplicationsController::onStorageFinished(quint64 id, const QVariant
         }
         m_applications.removeById(it->applicationId);
         succeed(id, QStringLiteral("Saved entry removed. The executable remains on your computer."));
+        return;
+    case Kind::CategoryCreate:
+    case Kind::CategoryUpdate:
+    case Kind::CategoryReorder:
+    case Kind::CategoryAssign:
+    case Kind::CategoryClear:
+        loadCategories();
+        succeed(id);
+        return;
+    case Kind::CategoryDelete:
+        if (m_applicationFilter == ApplicationFilter::Category
+            && m_filterCategoryId == it->categoryId) {
+            m_applicationFilter = ApplicationFilter::Uncategorized;
+            m_filterCategoryId = 0;
+        }
+        loadCategories();
+        succeed(id, QStringLiteral("Category deleted. Its applications are now Uncategorized."));
         return;
     default:
         fail(id, domain::AppError(domain::ErrorCategory::Internal));
@@ -567,6 +712,10 @@ void DesktopApplicationsController::fail(quint64 id, domain::AppError error, QSt
         services::DesktopAppIconStore::restoreDeletion(m_graph->profileDirectory(), pending.stagedDeletion);
     if (m_listOperation == id) m_listOperation = 0;
     if (pending.kind == Kind::List || pending.kind == Kind::ListAvailability) m_loading = false;
+    if (pending.kind == Kind::CategoriesList) {
+        if (m_categoriesOperation == id) m_categoriesOperation = 0;
+        m_categoriesLoading = false;
+    }
     if (pending.mutation) {
         m_busy = false;
         emit mutationFinished(false);
@@ -601,7 +750,9 @@ void DesktopApplicationsController::cancelAll()
     const auto pending = m_pending;
     m_pending.clear();
     m_listOperation = 0;
+    m_categoriesOperation = 0;
     m_loading = false;
+    m_categoriesLoading = false;
     m_busy = false;
     for (auto it = pending.cbegin(); it != pending.cend(); ++it) {
         if (!it->stagedIcon.stagingFilename.isEmpty() && !it->installedIcon)

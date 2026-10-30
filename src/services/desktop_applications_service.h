@@ -6,6 +6,7 @@
 
 #include <QVariantList>
 #include <QVariantMap>
+#include <QVector>
 
 #include <optional>
 
@@ -14,7 +15,18 @@ namespace something::services {
 class DesktopApplicationsService final {
 public:
     static storage::StorageCommand list();
+    static storage::StorageCommand listByCategory(qint64 categoryId);
+    static storage::StorageCommand listUncategorized();
     static storage::StorageCommand get(qint64 id);
+    static storage::StorageCommand listCategories();
+    static storage::StorageCommand createCategory(QString name, QString description,
+                                                   QString color, QString iconIdentifier);
+    static storage::StorageCommand updateCategory(qint64 id, QString name, QString description,
+                                                   QString color, QString iconIdentifier);
+    static storage::StorageCommand reorderCategories(QVector<qint64> orderedIds);
+    static storage::StorageCommand assignCategory(qint64 applicationId, qint64 categoryId);
+    static storage::StorageCommand clearCategory(qint64 applicationId);
+    static storage::StorageCommand deleteCategory(qint64 categoryId);
     static storage::StorageCommand add(QString displayName, QString executablePath,
                                        std::optional<storage::AssetMetadata> icon = std::nullopt);
     static storage::StorageCommand rename(qint64 id, QString displayName);

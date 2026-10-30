@@ -134,6 +134,7 @@ qt_add_executable(SomethingQt WIN32
     src/models/calendar_months_model.cpp
     src/models/currency_rates_model.cpp
     src/models/dashboard_news_model.cpp
+    src/models/desktop_application_categories_model.cpp
     src/models/desktop_applications_model.cpp
     src/models/file_explorer_model.cpp
     src/models/setups_model.cpp

@@ -123,6 +123,12 @@ struct DesktopApplicationCategory {
     int displayOrder{0};
     QString createdAt;
     QString updatedAt;
+    int applicationCount{0};
+};
+
+struct DesktopApplicationCategoryDeleteResult {
+    qint64 deletedId{0};
+    int affectedApplications{0};
 };
 
 struct DesktopApplication {

@@ -1305,9 +1305,43 @@ DesktopApplicationsRepository::DesktopApplicationsRepository(QSqlDatabase &datab
 RepositoryResult<QVector<DesktopApplication>> DesktopApplicationsRepository::list() const
 {
     Q_ASSERT(QThread::currentThread() == m_database.driver()->thread());
+    return listFiltered(std::nullopt, false);
+}
+
+RepositoryResult<QVector<DesktopApplication>> DesktopApplicationsRepository::listByCategory(qint64 categoryId) const
+{
+    Q_ASSERT(QThread::currentThread() == m_database.driver()->thread());
+    if (categoryId <= 0) return failure<QVector<DesktopApplication>>(domain::ErrorCategory::Validation);
+    QSqlQuery exists(m_database);
+    exists.prepare(QStringLiteral("SELECT 1 FROM application_categories WHERE id=?"));
+    exists.addBindValue(categoryId);
+    if (!exists.exec()) return failure<QVector<DesktopApplication>>(queryFailure(exists));
+    if (!exists.next()) return failure<QVector<DesktopApplication>>(domain::ErrorCategory::NotFound);
+    exists.finish();
+    return listFiltered(categoryId, false);
+}
+
+RepositoryResult<QVector<DesktopApplication>> DesktopApplicationsRepository::listUncategorized() const
+{
+    Q_ASSERT(QThread::currentThread() == m_database.driver()->thread());
+    return listFiltered(std::nullopt, true);
+}
+
+RepositoryResult<QVector<DesktopApplication>> DesktopApplicationsRepository::listFiltered(
+    std::optional<qint64> categoryId, bool uncategorized) const
+{
     QSqlQuery query(m_database);
-    if (!query.exec(QStringLiteral("SELECT id FROM desktop_apps ORDER BY display_name COLLATE NOCASE,id")))
+    QString sql = QStringLiteral("SELECT id FROM desktop_apps");
+    if (categoryId) sql += QStringLiteral(" WHERE category_id=?");
+    else if (uncategorized) sql += QStringLiteral(" WHERE category_id IS NULL");
+    sql += QStringLiteral(" ORDER BY display_name COLLATE NOCASE,id");
+    if (categoryId) {
+        query.prepare(sql);
+        query.addBindValue(*categoryId);
+    } else if (!query.exec(sql)) {
         return failure<QVector<DesktopApplication>>(queryFailure(query));
+    }
+    if (categoryId && !query.exec()) return failure<QVector<DesktopApplication>>(queryFailure(query));
     QVector<qint64> ids;
     while (query.next()) ids.push_back(query.value(0).toLongLong());
     query.finish();
@@ -1320,6 +1354,209 @@ RepositoryResult<QVector<DesktopApplication>> DesktopApplicationsRepository::lis
     return result;
 }
 
+RepositoryResult<QVector<DesktopApplicationCategory>> DesktopApplicationsRepository::listCategories() const
+{
+    Q_ASSERT(QThread::currentThread() == m_database.driver()->thread());
+    QSqlQuery query(m_database);
+    if (!query.exec(QStringLiteral(
+        "SELECT c.id,c.name,c.description,c.color,c.icon_identifier,c.display_order,"
+        "c.created_at,c.updated_at,COUNT(a.id) "
+        "FROM application_categories c LEFT JOIN desktop_apps a ON a.category_id=c.id "
+        "GROUP BY c.id ORDER BY c.display_order,c.name_normalized,c.id")))
+        return failure<QVector<DesktopApplicationCategory>>(queryFailure(query));
+    RepositoryResult<QVector<DesktopApplicationCategory>> result;
+    while (query.next()) {
+        DesktopApplicationCategory category;
+        category.id = query.value(0).toLongLong();
+        category.name = query.value(1).toString();
+        if (!query.value(2).isNull()) category.description = query.value(2).toString();
+        if (!query.value(3).isNull()) category.color = query.value(3).toString();
+        if (!query.value(4).isNull()) category.iconIdentifier = query.value(4).toString();
+        category.displayOrder = query.value(5).toInt();
+        category.createdAt = query.value(6).toString();
+        category.updatedAt = query.value(7).toString();
+        category.applicationCount = query.value(8).toInt();
+        result.value.push_back(std::move(category));
+    }
+    return result;
+}
+
+RepositoryResult<DesktopApplicationCategory> DesktopApplicationsRepository::loadCategory(qint64 id) const
+{
+    QSqlQuery query(m_database);
+    query.prepare(QStringLiteral(
+        "SELECT c.id,c.name,c.description,c.color,c.icon_identifier,c.display_order,"
+        "c.created_at,c.updated_at,COUNT(a.id) "
+        "FROM application_categories c LEFT JOIN desktop_apps a ON a.category_id=c.id "
+        "WHERE c.id=? GROUP BY c.id"));
+    query.addBindValue(id);
+    if (!query.exec()) return failure<DesktopApplicationCategory>(queryFailure(query));
+    if (!query.next()) return failure<DesktopApplicationCategory>(domain::ErrorCategory::NotFound);
+    DesktopApplicationCategory category;
+    category.id = query.value(0).toLongLong();
+    category.name = query.value(1).toString();
+    if (!query.value(2).isNull()) category.description = query.value(2).toString();
+    if (!query.value(3).isNull()) category.color = query.value(3).toString();
+    if (!query.value(4).isNull()) category.iconIdentifier = query.value(4).toString();
+    category.displayOrder = query.value(5).toInt();
+    category.createdAt = query.value(6).toString();
+    category.updatedAt = query.value(7).toString();
+    category.applicationCount = query.value(8).toInt();
+    return {std::move(category), {}};
+}
+
+RepositoryResult<DesktopApplicationCategory> DesktopApplicationsRepository::createCategory(
+    QString name, QString description, QString color, QString iconIdentifier)
+{
+    Q_ASSERT(QThread::currentThread() == m_database.driver()->thread());
+    name = name.trimmed();
+    description = description.trimmed();
+    iconIdentifier = iconIdentifier.trimmed();
+    QString normalizedColor;
+    if (name.isEmpty() || name.toUcs4().size() > 80 || description.toUcs4().size() > 300
+        || iconIdentifier.toUcs4().size() > 80
+        || !normalizeCategoryColor(std::move(color), &normalizedColor))
+        return failure<DesktopApplicationCategory>(domain::ErrorCategory::Validation);
+
+    Transaction transaction(m_database);
+    if (!transaction.active()) return failure<DesktopApplicationCategory>(domain::ErrorCategory::Storage);
+    QSqlQuery order(m_database);
+    if (!order.exec(QStringLiteral("SELECT COALESCE(MAX(display_order),-1)+1 FROM application_categories"))
+        || !order.next()) return failure<DesktopApplicationCategory>(queryFailure(order));
+    const int nextOrder = order.value(0).toInt();
+    order.finish();
+    QSqlQuery insert(m_database);
+    insert.prepare(QStringLiteral(
+        "INSERT INTO application_categories(name,name_normalized,description,color,icon_identifier,display_order) "
+        "VALUES(?,?,?,?,?,?)"));
+    insert.addBindValue(name);
+    insert.addBindValue(normalizedName(name));
+    insert.addBindValue(nullableString(description));
+    insert.addBindValue(nullableString(normalizedColor));
+    insert.addBindValue(nullableString(iconIdentifier));
+    insert.addBindValue(nextOrder);
+    if (!insert.exec()) return failure<DesktopApplicationCategory>(queryFailure(insert));
+    const qint64 id = insert.lastInsertId().toLongLong();
+    if (!transaction.commit()) return failure<DesktopApplicationCategory>(domain::ErrorCategory::Storage);
+    return loadCategory(id);
+}
+
+RepositoryResult<DesktopApplicationCategory> DesktopApplicationsRepository::updateCategory(
+    qint64 id, QString name, QString description, QString color, QString iconIdentifier)
+{
+    Q_ASSERT(QThread::currentThread() == m_database.driver()->thread());
+    name = name.trimmed();
+    description = description.trimmed();
+    iconIdentifier = iconIdentifier.trimmed();
+    QString normalizedColor;
+    if (id <= 0 || name.isEmpty() || name.toUcs4().size() > 80 || description.toUcs4().size() > 300
+        || iconIdentifier.toUcs4().size() > 80
+        || !normalizeCategoryColor(std::move(color), &normalizedColor))
+        return failure<DesktopApplicationCategory>(domain::ErrorCategory::Validation);
+    Transaction transaction(m_database);
+    if (!transaction.active()) return failure<DesktopApplicationCategory>(domain::ErrorCategory::Storage);
+    QSqlQuery update(m_database);
+    update.prepare(QStringLiteral(
+        "UPDATE application_categories SET name=?,name_normalized=?,description=?,color=?,"
+        "icon_identifier=?,updated_at=CURRENT_TIMESTAMP WHERE id=?"));
+    update.addBindValue(name);
+    update.addBindValue(normalizedName(name));
+    update.addBindValue(nullableString(description));
+    update.addBindValue(nullableString(normalizedColor));
+    update.addBindValue(nullableString(iconIdentifier));
+    update.addBindValue(id);
+    if (!update.exec()) return failure<DesktopApplicationCategory>(queryFailure(update));
+    if (update.numRowsAffected() != 1) return failure<DesktopApplicationCategory>(domain::ErrorCategory::NotFound);
+    if (!transaction.commit()) return failure<DesktopApplicationCategory>(domain::ErrorCategory::Storage);
+    return loadCategory(id);
+}
+
+RepositoryResult<void> DesktopApplicationsRepository::reorderCategories(const QVector<qint64> &orderedIds)
+{
+    Q_ASSERT(QThread::currentThread() == m_database.driver()->thread());
+    Transaction transaction(m_database);
+    if (!transaction.active()) return failureVoid(domain::ErrorCategory::Storage);
+    QSqlQuery existing(m_database);
+    if (!existing.exec(QStringLiteral("SELECT id FROM application_categories ORDER BY display_order,id")))
+        return failureVoid(queryFailure(existing));
+    QSet<qint64> expected;
+    while (existing.next()) expected.insert(existing.value(0).toLongLong());
+    existing.finish();
+    QSet<qint64> supplied;
+    for (qint64 id : orderedIds) {
+        if (id <= 0 || supplied.contains(id) || !expected.contains(id))
+            return failureVoid(domain::ErrorCategory::Validation);
+        supplied.insert(id);
+    }
+    if (supplied != expected) return failureVoid(domain::ErrorCategory::Validation);
+    for (int position = 0; position < orderedIds.size(); ++position) {
+        QSqlQuery update(m_database);
+        update.prepare(QStringLiteral(
+            "UPDATE application_categories SET display_order=?,updated_at=CURRENT_TIMESTAMP WHERE id=?"));
+        update.addBindValue(position);
+        update.addBindValue(orderedIds[position]);
+        if (!update.exec()) return failureVoid(queryFailure(update));
+        if (update.numRowsAffected() != 1) return failureVoid(domain::ErrorCategory::Conflict);
+    }
+    if (!transaction.commit()) return failureVoid(domain::ErrorCategory::Storage);
+    return {};
+}
+
+RepositoryResult<void> DesktopApplicationsRepository::assignCategory(
+    qint64 applicationId, std::optional<qint64> categoryId)
+{
+    Q_ASSERT(QThread::currentThread() == m_database.driver()->thread());
+    if (applicationId <= 0 || (categoryId && *categoryId <= 0))
+        return failureVoid(domain::ErrorCategory::Validation);
+    Transaction transaction(m_database);
+    if (!transaction.active()) return failureVoid(domain::ErrorCategory::Storage);
+    if (categoryId) {
+        QSqlQuery category(m_database);
+        category.prepare(QStringLiteral("SELECT 1 FROM application_categories WHERE id=?"));
+        category.addBindValue(*categoryId);
+        if (!category.exec()) return failureVoid(queryFailure(category));
+        if (!category.next()) return failureVoid(domain::ErrorCategory::Validation);
+        category.finish();
+    }
+    QSqlQuery update(m_database);
+    update.prepare(QStringLiteral(
+        "UPDATE desktop_apps SET category_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=?"));
+    update.addBindValue(categoryId ? QVariant(*categoryId) : QVariant());
+    update.addBindValue(applicationId);
+    if (!update.exec()) return failureVoid(queryFailure(update));
+    if (update.numRowsAffected() != 1) return failureVoid(domain::ErrorCategory::NotFound);
+    if (!transaction.commit()) return failureVoid(domain::ErrorCategory::Storage);
+    return {};
+}
+
+RepositoryResult<DesktopApplicationCategoryDeleteResult>
+DesktopApplicationsRepository::deleteCategory(qint64 id)
+{
+    Q_ASSERT(QThread::currentThread() == m_database.driver()->thread());
+    if (id <= 0) return failure<DesktopApplicationCategoryDeleteResult>(domain::ErrorCategory::Validation);
+    Transaction transaction(m_database);
+    if (!transaction.active()) return failure<DesktopApplicationCategoryDeleteResult>(domain::ErrorCategory::Storage);
+    QSqlQuery count(m_database);
+    count.prepare(QStringLiteral("SELECT COUNT(*) FROM desktop_apps WHERE category_id=?"));
+    count.addBindValue(id);
+    if (!count.exec() || !count.next()) return failure<DesktopApplicationCategoryDeleteResult>(queryFailure(count));
+    const int affected = count.value(0).toInt();
+    count.finish();
+    QSqlQuery unassign(m_database);
+    unassign.prepare(QStringLiteral(
+        "UPDATE desktop_apps SET category_id=NULL,updated_at=CURRENT_TIMESTAMP WHERE category_id=?"));
+    unassign.addBindValue(id);
+    if (!unassign.exec()) return failure<DesktopApplicationCategoryDeleteResult>(queryFailure(unassign));
+    QSqlQuery remove(m_database);
+    remove.prepare(QStringLiteral("DELETE FROM application_categories WHERE id=?"));
+    remove.addBindValue(id);
+    if (!remove.exec()) return failure<DesktopApplicationCategoryDeleteResult>(queryFailure(remove));
+    if (remove.numRowsAffected() != 1)
+        return failure<DesktopApplicationCategoryDeleteResult>(domain::ErrorCategory::NotFound);
+    if (!transaction.commit()) return failure<DesktopApplicationCategoryDeleteResult>(domain::ErrorCategory::Storage);
+    return {{id, affected}, {}};
+}
+
 RepositoryResult<DesktopApplication> DesktopApplicationsRepository::get(qint64 id) const
 {
     Q_ASSERT(QThread::currentThread() == m_database.driver()->thread());
@@ -1329,12 +1566,13 @@ RepositoryResult<DesktopApplication> DesktopApplicationsRepository::get(qint64 i
 RepositoryResult<DesktopApplication> DesktopApplicationsRepository::load(qint64 id) const
 {
     QSqlQuery query(m_database);
-    query.prepare(QStringLiteral("SELECT id,display_name,executable_path,created_at,updated_at FROM desktop_apps WHERE id=?"));
+    query.prepare(QStringLiteral("SELECT id,display_name,executable_path,created_at,updated_at,category_id FROM desktop_apps WHERE id=?"));
     query.addBindValue(id);
     if (!query.exec()) return failure<DesktopApplication>(queryFailure(query));
     if (!query.next()) return failure<DesktopApplication>(domain::ErrorCategory::NotFound);
     DesktopApplication app{query.value(0).toLongLong(), query.value(1).toString(), query.value(2).toString(),
                            query.value(3).toString(), query.value(4).toString(), std::nullopt};
+    if (!query.value(5).isNull()) app.categoryId = query.value(5).toLongLong();
     query.finish();
     QSqlQuery icon(m_database);
     icon.prepare(QStringLiteral("SELECT filename,mime_type,byte_size FROM desktop_app_icons WHERE app_id=?"));

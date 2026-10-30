@@ -111,7 +111,18 @@ class DesktopApplicationsRepository final {
 public:
     explicit DesktopApplicationsRepository(QSqlDatabase &database);
     RepositoryResult<QVector<DesktopApplication>> list() const;
+    RepositoryResult<QVector<DesktopApplication>> listByCategory(qint64 categoryId) const;
+    RepositoryResult<QVector<DesktopApplication>> listUncategorized() const;
     RepositoryResult<DesktopApplication> get(qint64 id) const;
+    RepositoryResult<QVector<DesktopApplicationCategory>> listCategories() const;
+    RepositoryResult<DesktopApplicationCategory> createCategory(
+        QString name, QString description, QString color, QString iconIdentifier);
+    RepositoryResult<DesktopApplicationCategory> updateCategory(
+        qint64 id, QString name, QString description, QString color, QString iconIdentifier);
+    RepositoryResult<void> reorderCategories(const QVector<qint64> &orderedIds);
+    RepositoryResult<void> assignCategory(qint64 applicationId,
+                                          std::optional<qint64> categoryId);
+    RepositoryResult<DesktopApplicationCategoryDeleteResult> deleteCategory(qint64 id);
     RepositoryResult<DesktopApplication> add(QString displayName, QString executablePath,
                                               std::optional<AssetMetadata> icon = std::nullopt);
     RepositoryResult<DesktopApplication> update(qint64 id, QString displayName,
@@ -121,6 +132,9 @@ public:
     RepositoryResult<void> remove(qint64 id);
 private:
     RepositoryResult<DesktopApplication> load(qint64 id) const;
+    RepositoryResult<QVector<DesktopApplication>> listFiltered(
+        std::optional<qint64> categoryId, bool uncategorized) const;
+    RepositoryResult<DesktopApplicationCategory> loadCategory(qint64 id) const;
     QSqlDatabase &m_database;
 };
 
