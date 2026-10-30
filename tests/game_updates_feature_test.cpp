@@ -18,6 +18,7 @@
 #include <QSqlQuery>
 #include <QStringList>
 #include <QTemporaryDir>
+#include <QTimer>
 #include <QUuid>
 #include <QUrlQuery>
 #include <QVector>
@@ -172,6 +173,7 @@ private slots:
     void cacheRetentionIsBoundedPerGameAndOverall();
     void gameUpdatesMigrationsPreserveExistingPriceRows();
     void offlineStartupLoadsCachedNewsWithoutSteamRequests();
+    void offlineArtworkAndRefreshYieldAndCompleteEachGameOnce();
 };
 
 void GameUpdatesFeatureTest::steamNewsRequestsUseTheFixedBoundedEndpoint()
@@ -456,6 +458,7 @@ void GameUpdatesFeatureTest::cacheRetentionIsBoundedPerGameAndOverall()
         constexpr int gameCount = 13;
         constexpr int articlesPerGame = 250;
         constexpr quint32 firstAppId = 991100;
+        QVariantMap lastUnreadCounts;
 
         for (int gameIndex = 0; gameIndex < gameCount; ++gameIndex) {
             const quint32 appId = firstAppId + static_cast<quint32>(gameIndex);
@@ -473,8 +476,10 @@ void GameUpdatesFeatureTest::cacheRetentionIsBoundedPerGameAndOverall()
                         QStringLiteral("Retention article %1").arg(sequence),
                         1000000 + static_cast<qint64>(gameIndex * 1000 + sequence)));
                 }
-                QVERIFY(repositories.gameUpdates.upsertNewsPage(
-                    appId, batch, kDiscoveredAt).succeeded());
+                const auto saved = runStorage(services::SteamGameUpdatesService::saveNewsPage(
+                    appId, batch, kDiscoveredAt), repositories);
+                QVERIFY(!saved.error.isError());
+                lastUnreadCounts = saved.values.value(QStringLiteral("unreadNewsCounts")).toMap();
             }
             if (gameIndex == 0) {
                 QCOMPARE(articleCount(database, appId), qint64(250));
@@ -485,6 +490,11 @@ void GameUpdatesFeatureTest::cacheRetentionIsBoundedPerGameAndOverall()
             storage::SteamGameUpdatesRepository::maximumArticlesOverall));
         QCOMPARE(articleCount(database, firstAppId), qint64(0));
         QCOMPARE(articleCount(database, firstAppId + 12), qint64(250));
+        QCOMPARE(lastUnreadCounts.value(QString::number(firstAppId), 0).toInt(), 0);
+        QCOMPARE(lastUnreadCounts.value(QString::number(firstAppId + 12)).toInt(), 250);
+        int totalUnread = 0;
+        for (const QVariant &count : lastUnreadCounts) totalUnread += count.toInt();
+        QCOMPARE(totalUnread, storage::SteamGameUpdatesRepository::maximumArticlesOverall);
     }
     closeDatabase(&database, connectionName);
 }
@@ -517,7 +527,7 @@ void GameUpdatesFeatureTest::gameUpdatesMigrationsPreserveExistingPriceRows()
 
     QString diagnostic;
     QVERIFY2(storage::SchemaMigrator::apply(database, &diagnostic), qPrintable(diagnostic));
-    QCOMPARE(storage::SchemaMigrator::latestVersion(), 18);
+    QCOMPARE(storage::SchemaMigrator::latestVersion(), 19);
     {
         storage::StorageRepositories repositories(database);
         const auto preservedPrice = repositories.steam.get(priceId);
@@ -603,6 +613,78 @@ void GameUpdatesFeatureTest::offlineStartupLoadsCachedNewsWithoutSteamRequests()
              QStringLiteral("The original Steam news article could not be opened."));
     QCOMPARE(httpsFinished.count(), 0);
 
+    graph.shutdown();
+    QTRY_VERIFY_WITH_TIMEOUT(graph.isShutdownComplete(), 10000);
+}
+
+void GameUpdatesFeatureTest::offlineArtworkAndRefreshYieldAndCompleteEachGameOnce()
+{
+    QTemporaryDir temporary;
+    QVERIFY(temporary.isValid());
+    const QString profileId = QStringLiteral("game-updates-offline-batch");
+    const QString profileDirectory = QDir(temporary.path()).filePath(
+        QStringLiteral("profiles/") + profileId);
+    QVERIFY(QDir().mkpath(profileDirectory));
+    QString connectionName;
+    QSqlDatabase database;
+    QVERIFY(openDatabaseAt(&database, &connectionName,
+                          QDir(profileDirectory).filePath(QStringLiteral("something.sqlite"))));
+    constexpr int gameCount = 96;
+    {
+        storage::StorageRepositories repositories(database);
+        for (int index = 0; index < gameCount; ++index) {
+            auto game = follow(994000 + index, QStringLiteral("Offline game %1").arg(index));
+            game.artwork.sourceUrl = QStringLiteral("https://shared.steamstatic.com/store_item_assets/steam/apps/%1/header.jpg")
+                .arg(game.appId);
+            QVERIFY(repositories.gameUpdates.add(game).succeeded());
+        }
+    }
+    closeDatabase(&database, connectionName);
+
+    application::ApplicationServiceGraph graph(profileId, temporary.path());
+    connect(&graph.capabilities(), &application::CapabilityRegistry::capabilitiesChanged,
+            &graph, [&graph] {
+        if (graph.capabilities().isAvailable(QStringLiteral("external-network")))
+            graph.reportCapabilityUnavailable(QStringLiteral("external-network"),
+                domain::AppError(domain::ErrorCategory::CapabilityUnavailable));
+    });
+    int totalRequests = 0;
+    int requestsInTurn = 0;
+    int maximumRequestsInTurn = 0;
+    bool resetScheduled = false;
+    connect(&graph, &application::ApplicationServiceGraph::httpsFinished, &graph,
+            [&](quint64, const QByteArray &, domain::AppError error) {
+        QCOMPARE(error.category(), domain::ErrorCategory::CapabilityUnavailable);
+        ++totalRequests;
+        maximumRequestsInTurn = qMax(maximumRequestsInTurn, ++requestsInTurn);
+        if (!resetScheduled) {
+            resetScheduled = true;
+            QTimer::singleShot(0, &graph, [&] {
+                requestsInTurn = 0;
+                resetScheduled = false;
+            });
+        }
+    });
+    controllers::SteamGameUpdatesController controller(&graph);
+    graph.start();
+    QTRY_VERIFY_WITH_TIMEOUT(controller.snapshotLoaded(), 10000);
+    QTRY_COMPARE_WITH_TIMEOUT(totalRequests, gameCount, 10000);
+    QTRY_VERIFY_WITH_TIMEOUT(!controller.newsLoading(), 10000);
+    QVERIFY(maximumRequestsInTurn <= 32);
+
+    maximumRequestsInTurn = requestsInTurn = 0;
+    controller.refreshAll();
+    QTRY_VERIFY_WITH_TIMEOUT(!controller.refreshBusy(), 10000);
+    QCOMPARE(totalRequests, gameCount * 2);
+    QVERIFY(maximumRequestsInTurn <= 3);
+    QCOMPARE(controller.refreshStatus(), QStringLiteral("Updated 0 of 96 games; 96 failed."));
+    QCOMPARE(controller.games().size(), gameCount);
+    for (const QVariant &value : controller.games()) {
+        const QVariantMap game = value.toMap();
+        QCOMPARE(game.value(QStringLiteral("refreshState")).toString(), QStringLiteral("failed"));
+        QVERIFY(!game.value(QStringLiteral("lastAttemptedNewsCheckAtUtc")).toString().isEmpty());
+    }
+    QTRY_COMPARE_WITH_TIMEOUT(graph.operations().activeCount(), 0, 10000);
     graph.shutdown();
     QTRY_VERIFY_WITH_TIMEOUT(graph.isShutdownComplete(), 10000);
 }

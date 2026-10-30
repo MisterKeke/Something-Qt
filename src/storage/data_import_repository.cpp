@@ -179,6 +179,8 @@ bool DataImportRepository::targetIsEmpty(bool *empty, QString *blockingReason) c
         "'favorite_updates.previous_refresh_at','favorite_updates.last_refresh_at')"))) return false;
     while (baseline.next()) {
         const QString key = baseline.value(0).toString();
+        if (key == QStringLiteral("calendar.game_releases_visible")
+            && baseline.value(1).toString() == QStringLiteral("1")) continue;
         if (key == QStringLiteral("appearance.selected_wallpaper")
             && isBuiltInWallpaper(baseline.value(1).toString())) continue;
         *empty = false;

@@ -1,3 +1,7 @@
+#include "application/application_service_graph.h"
+#include "controllers/steam_collections_controller.h"
+#include "controllers/steam_games_controller.h"
+#include "controllers/steam_release_controller.h"
 #include "domain/steam_collections.h"
 #include "domain/steam_game.h"
 #include "domain/steam_release.h"
@@ -8,6 +12,8 @@
 
 #include <QSqlDatabase>
 #include <QSqlQuery>
+#include <QDir>
+#include <QTimer>
 #include <QTemporaryDir>
 #include <QUuid>
 #include <QtTest>
@@ -116,6 +122,8 @@ private slots:
     void collectionCrudEnforcesNormalizedUniqueNames();
     void membershipConstraintsAndPersonalMetadataPersist();
     void offlineCatalogAndFeatureIndependence();
+    void startupRetriesMissingArtworkInBoundedOfflineTurns();
+    void priceAndReleaseOfflineBatchesKeepSavedData();
 };
 
 void GameCollectionsFeatureTest::storeUrlNormalizationRejectsNonstandardPorts()
@@ -166,7 +174,7 @@ void GameCollectionsFeatureTest::migrationSeedsTheCatalogWithoutChangingExisting
         QVERIFY(legacy.exec(QStringLiteral("DROP TABLE steam_collection_games")));
         QVERIFY(legacy.exec(QStringLiteral("DROP TABLE steam_collections")));
         QVERIFY(legacy.exec(QStringLiteral("DROP TABLE steam_game_catalog")));
-        QVERIFY(legacy.exec(QStringLiteral("DELETE FROM schema_migrations WHERE version=18")));
+        QVERIFY(legacy.exec(QStringLiteral("DELETE FROM schema_migrations WHERE version>=18")));
         QVERIFY(legacy.exec(QStringLiteral("SELECT MAX(version) FROM schema_migrations")));
         QVERIFY(legacy.next());
         QCOMPARE(legacy.value(0).toInt(), 17);
@@ -175,7 +183,7 @@ void GameCollectionsFeatureTest::migrationSeedsTheCatalogWithoutChangingExisting
 
     QString diagnostic;
     QVERIFY2(storage::SchemaMigrator::apply(database, &diagnostic), qPrintable(diagnostic));
-    QCOMPARE(storage::SchemaMigrator::latestVersion(), 18);
+    QCOMPARE(storage::SchemaMigrator::latestVersion(), 19);
     {
         storage::StorageRepositories repositories(database);
         const auto price = repositories.steam.get(priceRowId);
@@ -425,6 +433,128 @@ void GameCollectionsFeatureTest::offlineCatalogAndFeatureIndependence()
         QVERIFY(repositories.steamCatalog.remove(appId).succeeded());
     }
     closeDatabase(&database, connectionName);
+}
+
+void GameCollectionsFeatureTest::startupRetriesMissingArtworkInBoundedOfflineTurns()
+{
+    QTemporaryDir temporary;
+    QVERIFY(temporary.isValid());
+    const QString profileId = QStringLiteral("collections-artwork");
+    const QString profileDirectory = QDir(temporary.path()).filePath(
+        QStringLiteral("profiles/") + profileId);
+    QVERIFY(QDir().mkpath(profileDirectory));
+    QString connectionName;
+    QSqlDatabase database;
+    QVERIFY(openDatabaseAt(&database, &connectionName,
+                          QDir(profileDirectory).filePath(QStringLiteral("something.sqlite"))));
+    constexpr int gameCount = 96;
+    {
+        storage::StorageRepositories repositories(database);
+        const auto collection = repositories.steamCollections.create(
+            collectionInput(QStringLiteral("Saved collection")));
+        QVERIFY(collection.succeeded());
+        for (int index = 0; index < gameCount; ++index) {
+            auto details = catalogDetails(993000 + index, QStringLiteral("Saved game %1").arg(index));
+            details.artworkUrl = QStringLiteral("https://shared.steamstatic.com/store_item_assets/steam/apps/%1/header.jpg")
+                .arg(details.appId);
+            QVERIFY(repositories.steamCatalog.upsert(details).succeeded());
+            if (index == 0) {
+                const QString missingFilename = QString::number(details.appId)
+                    + QLatin1Char('-') + QString(64, QLatin1Char('0')) + QStringLiteral(".png");
+                QVERIFY(repositories.steamCatalog.setArtwork(details.appId, details.artworkUrl,
+                    {details.artworkUrl, missingFilename, QStringLiteral("image/png"), 100}).succeeded());
+            }
+            QVERIFY(repositories.steamCollections.addGame(
+                collection.value.id, details, {details.appId}).succeeded());
+        }
+    }
+    closeDatabase(&database, connectionName);
+
+    application::ApplicationServiceGraph graph(profileId, temporary.path());
+    // Reject admission synchronously, before any request reaches the network.
+    connect(&graph.capabilities(), &application::CapabilityRegistry::capabilitiesChanged,
+            &graph, [&graph] {
+        if (graph.capabilities().isAvailable(QStringLiteral("external-network")))
+            graph.reportCapabilityUnavailable(QStringLiteral("external-network"),
+                domain::AppError(domain::ErrorCategory::CapabilityUnavailable));
+    });
+    int totalRequests = 0;
+    int requestsInTurn = 0;
+    int maximumRequestsInTurn = 0;
+    bool resetScheduled = false;
+    connect(&graph, &application::ApplicationServiceGraph::httpsFinished, &graph,
+            [&](quint64, const QByteArray &, domain::AppError error) {
+        QCOMPARE(error.category(), domain::ErrorCategory::CapabilityUnavailable);
+        ++totalRequests;
+        maximumRequestsInTurn = qMax(maximumRequestsInTurn, ++requestsInTurn);
+        if (!resetScheduled) {
+            resetScheduled = true;
+            QTimer::singleShot(0, &graph, [&] {
+                requestsInTurn = 0;
+                resetScheduled = false;
+            });
+        }
+    });
+    controllers::SteamCollectionsController controller(&graph);
+    graph.start();
+    QTRY_VERIFY_WITH_TIMEOUT(controller.snapshotLoaded(), 10000);
+    QTRY_COMPARE_WITH_TIMEOUT(totalRequests, gameCount, 10000);
+    QCOMPARE(controller.allGamesCount(), gameCount);
+    QVERIFY(maximumRequestsInTurn <= 32);
+    QTRY_COMPARE_WITH_TIMEOUT(graph.operations().activeCount(), 0, 10000);
+    graph.shutdown();
+    QTRY_VERIFY_WITH_TIMEOUT(graph.isShutdownComplete(), 10000);
+}
+
+void GameCollectionsFeatureTest::priceAndReleaseOfflineBatchesKeepSavedData()
+{
+    QTemporaryDir temporary;
+    QVERIFY(temporary.isValid());
+    const QString profileId = QStringLiteral("steam-offline-batches");
+    const QString profileDirectory = QDir(temporary.path()).filePath(
+        QStringLiteral("profiles/") + profileId);
+    QVERIFY(QDir().mkpath(profileDirectory));
+    QString connectionName;
+    QSqlDatabase database;
+    QVERIFY(openDatabaseAt(&database, &connectionName,
+                          QDir(profileDirectory).filePath(QStringLiteral("something.sqlite"))));
+    constexpr int gameCount = 12;
+    {
+        storage::StorageRepositories repositories(database);
+        for (int index = 0; index < gameCount; ++index) {
+            const quint32 appId = 995000 + index;
+            const QString name = QStringLiteral("Saved Steam game %1").arg(index);
+            QVERIFY(repositories.steam.add(priceGame(appId, name)).succeeded());
+            QVERIFY(repositories.steamReleases.add(releaseFollow(appId, name)).succeeded());
+        }
+    }
+    closeDatabase(&database, connectionName);
+    application::ApplicationServiceGraph graph(profileId, temporary.path());
+    connect(&graph.capabilities(), &application::CapabilityRegistry::capabilitiesChanged,
+            &graph, [&graph] {
+        if (graph.capabilities().isAvailable(QStringLiteral("external-network")))
+            graph.reportCapabilityUnavailable(QStringLiteral("external-network"),
+                domain::AppError(domain::ErrorCategory::CapabilityUnavailable));
+    });
+    controllers::SteamGamesController prices(&graph);
+    controllers::SteamReleaseController releases(&graph);
+    graph.start();
+    QTRY_VERIFY_WITH_TIMEOUT(prices.snapshotLoaded() && releases.snapshotLoaded(), 10000);
+    QTRY_VERIFY_WITH_TIMEOUT(!prices.refreshBusy(), 10000);
+    prices.refreshPrices();
+    releases.refreshReleases();
+    QTRY_VERIFY_WITH_TIMEOUT(!prices.refreshBusy() && !releases.refreshBusy(), 10000);
+    QCOMPARE(prices.games()->count(), gameCount);
+    QCOMPARE(releases.releases()->count(), gameCount);
+    for (int row = 0; row < gameCount; ++row) {
+        QCOMPARE(prices.games()->rowAt(row).value(QStringLiteral("currentPriceMinor")).toLongLong(), qint64(999));
+        const QVariantMap release = releases.releases()->allRows().at(row);
+        QCOMPARE(release.value(QStringLiteral("refreshState")).toString(), QStringLiteral("failed"));
+        QVERIFY(!release.value(QStringLiteral("lastAttemptedUpdateAtUtc")).toString().isEmpty());
+    }
+    QTRY_COMPARE_WITH_TIMEOUT(graph.operations().activeCount(), 0, 10000);
+    graph.shutdown();
+    QTRY_VERIFY_WITH_TIMEOUT(graph.isShutdownComplete(), 10000);
 }
 
 QTEST_GUILESS_MAIN(GameCollectionsFeatureTest)

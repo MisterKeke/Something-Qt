@@ -416,7 +416,7 @@ void SteamCollectionsController::dispatchArtworkScan()
         const QVariantMap game = m_catalog.at(m_nextArtworkIndex++).toMap();
         ++scanned;
         const quint32 appId = game.value(QStringLiteral("appId")).toUInt();
-        if (appId == 0 || !game.value(QStringLiteral("artworkFilename")).toString().isEmpty()
+        if (appId == 0 || !game.value(QStringLiteral("artworkSource")).toString().isEmpty()
             || m_activeArtworkApps.contains(appId)) {
             continue;
         }
@@ -455,7 +455,9 @@ void SteamCollectionsController::scheduleArtworkScan()
 void SteamCollectionsController::finishArtwork(quint32 appId)
 {
     m_activeArtworkApps.remove(appId);
-    dispatchArtworkScan();
+    // Network admission can fail synchronously. Resume on the next event-loop
+    // turn so a large offline catalog cannot recursively dispatch itself.
+    scheduleArtworkScan();
 }
 
 void SteamCollectionsController::selectCollection(qint64 collectionId)
@@ -947,6 +949,7 @@ void SteamCollectionsController::onStorageFinished(
         } else {
             applySnapshot(values);
             m_snapshotLoaded = true;
+            queueArtworkScan();
         }
         emit stateChanged();
         return;

@@ -278,6 +278,11 @@ storage::StorageCommand SteamGameUpdatesService::saveNewsPage(
         reply.values.insert(QStringLiteral("refreshedCount"), saved.value.refreshedCount);
         reply.values.insert(QStringLiteral("unreadNewsCount"),
                             unreadCounts.value.value(appId, 0));
+        // Overall retention can evict articles from other games as well.
+        QVariantMap allUnreadCounts;
+        for (auto it = unreadCounts.value.cbegin(); it != unreadCounts.value.cend(); ++it)
+            allUnreadCounts.insert(QString::number(it.key()), it.value());
+        reply.values.insert(QStringLiteral("unreadNewsCounts"), allUnreadCounts);
         return reply;
     };
 }

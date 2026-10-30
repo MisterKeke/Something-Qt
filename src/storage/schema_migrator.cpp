@@ -663,6 +663,42 @@ constexpr const char *steamCatalogAndCollections[] = {
                 ELSE steam_game_catalog.artwork_byte_size END)SQL",
 };
 
+constexpr const char *steamUnsupportedPriceState[] = {
+    // Keep foreign keys enabled. Preserve cascading children and the ID high
+    // water mark while rebuilding the constrained parent in one transaction.
+    "CREATE TEMP TABLE steam_images_v19 AS SELECT * FROM steam_game_images",
+    "CREATE TEMP TABLE steam_observations_v19 AS SELECT * FROM steam_price_observations",
+    "CREATE TEMP TABLE steam_sequence_v19 AS SELECT COALESCE((SELECT seq FROM sqlite_sequence WHERE name='steam_games'),0) AS seq",
+    R"SQL(CREATE TABLE steam_games_v19 (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        steam_app_id INTEGER NOT NULL UNIQUE CHECK(steam_app_id > 0),
+        store_url TEXT NOT NULL,
+        name TEXT NOT NULL CHECK(length(trim(name)) BETWEEN 1 AND 300),
+        image_source_url TEXT NOT NULL DEFAULT '',
+        price_status TEXT NOT NULL CHECK(price_status IN ('priced', 'free', 'unavailable', 'unsupported')),
+        currency TEXT CHECK(currency IS NULL OR (length(currency) = 3 AND currency GLOB '[A-Z][A-Z][A-Z]')),
+        regular_price_minor INTEGER CHECK(regular_price_minor IS NULL OR regular_price_minor >= 0),
+        current_price_minor INTEGER CHECK(current_price_minor IS NULL OR current_price_minor >= 0),
+        discount_percent INTEGER NOT NULL DEFAULT 0 CHECK(discount_percent BETWEEN 0 AND 100),
+        price_country_code TEXT NOT NULL CHECK(length(price_country_code) = 2 AND price_country_code GLOB '[A-Z][A-Z]'),
+        last_checked_at TEXT,
+        last_attempted_at TEXT,
+        last_refresh_error TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    ))SQL",
+    "INSERT INTO steam_games_v19 SELECT * FROM steam_games",
+    "DROP TABLE steam_games",
+    "ALTER TABLE steam_games_v19 RENAME TO steam_games",
+    "CREATE INDEX idx_steam_games_name ON steam_games(name COLLATE NOCASE, id)",
+    "UPDATE sqlite_sequence SET seq=MAX(seq,(SELECT seq FROM steam_sequence_v19)) WHERE name='steam_games'",
+    "INSERT INTO steam_game_images SELECT * FROM steam_images_v19",
+    "INSERT INTO steam_price_observations SELECT * FROM steam_observations_v19",
+    "DROP TABLE steam_images_v19",
+    "DROP TABLE steam_observations_v19",
+    "DROP TABLE steam_sequence_v19",
+};
+
 constexpr std::array migrations{
     Migration{1, "core tasks currencies preferences", core, qsizetype(std::size(core))},
     Migration{2, "favorites and retained update news", favorites, qsizetype(std::size(favorites))},
@@ -694,6 +730,8 @@ constexpr std::array migrations{
               qsizetype(std::size(steamGameUpdateNews))},
     Migration{18, "Steam game catalog and collections", steamCatalogAndCollections,
               qsizetype(std::size(steamCatalogAndCollections))},
+    Migration{19, "Steam unsupported price state", steamUnsupportedPriceState,
+              qsizetype(std::size(steamUnsupportedPriceState))},
 };
 
 bool fail(QString *diagnostic, const QString &message)

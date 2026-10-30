@@ -64,8 +64,9 @@ SteamGamesController::SteamGamesController(application::ApplicationServiceGraph 
     Q_ASSERT(QThread::currentThread() == thread());
     connect(m_graph, &application::ApplicationServiceGraph::storageOperationFinished,
             this, &SteamGamesController::onStorageFinished);
+    // Admission can fail inline; handle replies after submission state settles.
     connect(m_graph, &application::ApplicationServiceGraph::httpsFinished,
-            this, &SteamGamesController::onHttpsFinished);
+            this, &SteamGamesController::onHttpsFinished, Qt::QueuedConnection);
     connect(m_graph, &application::ApplicationServiceGraph::expensiveValueJobFinished,
             this, &SteamGamesController::onValueJobFinished);
     connect(&m_graph->lifecycle(), &application::ApplicationLifecycle::stateChanged,

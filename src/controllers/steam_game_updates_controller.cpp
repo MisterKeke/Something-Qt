@@ -194,8 +194,7 @@ quint64 SteamGameUpdatesController::submitStorage(
     pending.kind = kind;
     m_pending.insert(id, std::move(pending));
     if (!m_graph->submitStorage(operation, std::move(command))) {
-        m_pending.remove(id);
-        return 0;
+        if (m_pending.remove(id) > 0) return 0;
     }
     return id;
 }
@@ -210,8 +209,9 @@ quint64 SteamGameUpdatesController::submitNetwork(
     pending.kind = kind;
     m_pending.insert(id, std::move(pending));
     if (!m_graph->requestHttps(operation, std::move(request))) {
-        m_pending.remove(id);
-        return 0;
+        // Admission failures may have already delivered httpsFinished inline.
+        // Let that handler own completion rather than reporting it twice.
+        if (m_pending.remove(id) > 0) return 0;
     }
     return id;
 }
@@ -266,8 +266,7 @@ quint64 SteamGameUpdatesController::submitValueJob(
             return result;
         });
     if (!submitted) {
-        m_pending.remove(id);
-        return 0;
+        if (m_pending.remove(id) > 0) return 0;
     }
     return id;
 }
@@ -298,8 +297,7 @@ quint64 SteamGameUpdatesController::submitArtworkStage(QByteArray body, Pending 
             return result;
         });
     if (!submitted) {
-        m_pending.remove(id);
-        return 0;
+        if (m_pending.remove(id) > 0) return 0;
     }
     return id;
 }
@@ -410,15 +408,15 @@ void SteamGameUpdatesController::requestNewsPage(bool append)
     Pending pending;
     pending.appendPage = append;
     pending.generation = m_newsGeneration;
+    m_newsLoading = true;
+    m_newsError.clear();
     const auto id = submitStorage(Kind::NewsPage,
         services::SteamGameUpdatesService::loadNewsPage(
             m_newsAppFilter, m_unreadOnly, m_searchText, kNewsPageSize,
             append ? m_newsCursor : storage::SteamGameUpdateNewsCursor{}), pending);
     if (!id) {
+        m_newsLoading = false;
         m_newsError = QStringLiteral("Cached Game Updates articles could not be loaded.");
-    } else {
-        m_newsLoading = true;
-        m_newsError.clear();
     }
     emit stateChanged();
 }
@@ -536,13 +534,14 @@ void SteamGameUpdatesController::dispatchRefreshQueue()
         pending.appId = appId;
         pending.attemptedAtUtc = attemptedAt;
         pending.generation = m_refreshGeneration;
+        ++m_activeRefreshRequests;
         if (!submitNetwork(Kind::RefreshNetwork, request.providerRequest, pending)) {
+            m_activeRefreshRequests = qMax(0, m_activeRefreshRequests - 1);
             recordRefreshCheck(appId, attemptedAt, false,
                                QStringLiteral("Steam networking is unavailable right now."),
                                m_refreshGeneration);
             continue;
         }
-        ++m_activeRefreshRequests;
     }
     const bool hasMore = m_refreshSingleAppId
         ? m_refreshNextGameIndex == 0
@@ -740,7 +739,7 @@ void SteamGameUpdatesController::onHttpsFinished(
     if (pending.kind == Kind::RefreshNetwork) {
         if (pending.generation != m_refreshGeneration || !m_refreshBusy) return;
         m_activeRefreshRequests = qMax(0, m_activeRefreshRequests - 1);
-        dispatchRefreshQueue();
+        scheduleRefreshDispatch();
         if (error.isError() || error.isCancelled()) {
             recordRefreshCheck(pending.appId, pending.attemptedAtUtc, false,
                                safeNewsError(error), pending.generation);
@@ -987,6 +986,14 @@ void SteamGameUpdatesController::onStorageFinished(
                                QStringLiteral("Steam news was received but could not be saved."),
                                pending.generation);
         } else {
+            const QVariantMap counts = values.value(QStringLiteral("unreadNewsCounts")).toMap();
+            for (QVariant &value : m_games) {
+                QVariantMap game = value.toMap();
+                const QString appId = QString::number(game.value(QStringLiteral("appId")).toUInt());
+                game.insert(QStringLiteral("unreadNewsCount"), counts.value(appId, 0));
+                value = game;
+            }
+            emit stateChanged();
             recordRefreshCheck(pending.appId, pending.attemptedAtUtc, true, {},
                                pending.generation);
         }
@@ -1095,7 +1102,7 @@ void SteamGameUpdatesController::dispatchArtworkQueue()
         ++scanned;
         const quint32 appId = game.value(QStringLiteral("appId")).toUInt();
         if (appId == 0
-            || !game.value(QStringLiteral("artworkFilename")).toString().isEmpty()) {
+            || !game.value(QStringLiteral("artworkSource")).toString().isEmpty()) {
             continue;
         }
         const QString url = domain::normalizeSteamArtworkUrl(
@@ -1153,7 +1160,7 @@ void SteamGameUpdatesController::finishArtwork(quint32 appId, const QString &url
             }
         }
     }
-    dispatchArtworkQueue();
+    scheduleArtworkDispatch();
 }
 
 QString SteamGameUpdatesController::safeNewsError(domain::AppError error) const

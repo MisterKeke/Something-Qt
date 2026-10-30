@@ -28,6 +28,13 @@
 namespace something::storage {
 namespace {
 
+// A default QString is SQL NULL, not the empty text required by optional
+// NOT NULL columns. Nullable columns continue to use nullableString instead.
+QString sqlText(const QString &value)
+{
+    return value.isNull() ? QStringLiteral("") : value;
+}
+
 template<typename T>
 RepositoryResult<T> failure(domain::ErrorCategory category)
 {
@@ -612,7 +619,7 @@ RepositoryResult<void> upsertSteamCatalogDetails(
     query.addBindValue(details.appId);
     query.addBindValue(details.canonicalStoreUrl);
     query.addBindValue(details.name);
-    query.addBindValue(details.artworkUrl);
+    query.addBindValue(sqlText(details.artworkUrl));
     if (!query.exec()) return failureVoid(queryFailure(query));
     return {};
 }
@@ -631,8 +638,8 @@ RepositoryResult<void> setSteamCatalogArtwork(
         "UPDATE steam_game_catalog SET artwork_filename=?,artwork_mime_type=?,"
         "artwork_byte_size=?,updated_at=CURRENT_TIMESTAMP "
         "WHERE steam_app_id=? AND artwork_source_url=?"));
-    query.addBindValue(artwork.cachedFilename);
-    query.addBindValue(artwork.mimeType);
+    query.addBindValue(sqlText(artwork.cachedFilename));
+    query.addBindValue(sqlText(artwork.mimeType));
     query.addBindValue(artwork.byteSize);
     query.addBindValue(appId);
     query.addBindValue(expectedSourceUrl);
@@ -2466,9 +2473,9 @@ RepositoryResult<void> WeatherComparisonRepository::add(
     if (city.geocodingId > 0) query.addBindValue(city.geocodingId);
     else query.addBindValue(QVariant());
     query.addBindValue(city.name.trimmed());
-    query.addBindValue(city.administrativeArea);
-    query.addBindValue(city.country);
-    query.addBindValue(city.timezone);
+    query.addBindValue(sqlText(city.administrativeArea));
+    query.addBindValue(sqlText(city.country));
+    query.addBindValue(sqlText(city.timezone));
     query.addBindValue(city.latitude);
     query.addBindValue(city.longitude);
     query.addBindValue(existing.value.size());
@@ -2526,9 +2533,9 @@ RepositoryResult<void> WeatherComparisonRepository::replace(
     if (city.geocodingId > 0) query.addBindValue(city.geocodingId);
     else query.addBindValue(QVariant());
     query.addBindValue(city.name.trimmed());
-    query.addBindValue(city.administrativeArea);
-    query.addBindValue(city.country);
-    query.addBindValue(city.timezone);
+    query.addBindValue(sqlText(city.administrativeArea));
+    query.addBindValue(sqlText(city.country));
+    query.addBindValue(sqlText(city.timezone));
     query.addBindValue(city.latitude);
     query.addBindValue(city.longitude);
     query.addBindValue(forecastJson);
@@ -3249,14 +3256,14 @@ RepositoryResult<Setup> SetupsRepository::save(Setup setup, bool removeIcon)
         QSqlQuery insert(m_database);
         insert.prepare(QStringLiteral("INSERT INTO setups(name,description) VALUES(?,?)"));
         insert.addBindValue(setup.name);
-        insert.addBindValue(setup.description);
+        insert.addBindValue(sqlText(setup.description));
         if (!insert.exec()) return failure<Setup>(queryFailure(insert));
         setup.id = insert.lastInsertId().toLongLong();
     } else {
         QSqlQuery update(m_database);
         update.prepare(QStringLiteral("UPDATE setups SET name=?,description=?,updated_at=CURRENT_TIMESTAMP WHERE id=?"));
         update.addBindValue(setup.name);
-        update.addBindValue(setup.description);
+        update.addBindValue(sqlText(setup.description));
         update.addBindValue(setup.id);
         if (!update.exec()) return failure<Setup>(queryFailure(update));
         if (update.numRowsAffected() != 1) return failure<Setup>(domain::ErrorCategory::NotFound);
@@ -4428,7 +4435,7 @@ RepositoryResult<SteamGame> SteamRepository::add(
     query.addBindValue(game.steamAppId);
     query.addBindValue(game.storeUrl);
     query.addBindValue(game.name);
-    query.addBindValue(game.imageSourceUrl);
+    query.addBindValue(sqlText(game.imageSourceUrl));
     query.addBindValue(game.priceStatus);
     query.addBindValue(nullableString(game.currency));
     query.addBindValue(game.regularPriceMinor ? QVariant(*game.regularPriceMinor) : QVariant());
@@ -4437,7 +4444,7 @@ RepositoryResult<SteamGame> SteamRepository::add(
     query.addBindValue(game.priceCountryCode);
     query.addBindValue(nullableString(game.lastCheckedAt));
     query.addBindValue(nullableString(game.lastAttemptedAt));
-    query.addBindValue(game.lastRefreshError);
+    query.addBindValue(sqlText(game.lastRefreshError));
     if (!query.exec()) return failure<SteamGame>(queryFailure(query));
     game.id = query.lastInsertId().toLongLong();
     query.finish();
@@ -4486,7 +4493,7 @@ RepositoryResult<SteamGame> SteamRepository::updateRefresh(
     query.prepare(QStringLiteral("UPDATE steam_games SET store_url=?,name=?,image_source_url=?,price_status=?,currency=?,regular_price_minor=?,current_price_minor=?,discount_percent=?,price_country_code=?,last_checked_at=?,last_attempted_at=?,last_refresh_error=?,updated_at=CURRENT_TIMESTAMP WHERE id=?"));
     query.addBindValue(game.storeUrl);
     query.addBindValue(game.name);
-    query.addBindValue(game.imageSourceUrl);
+    query.addBindValue(sqlText(game.imageSourceUrl));
     query.addBindValue(game.priceStatus);
     query.addBindValue(nullableString(game.currency));
     query.addBindValue(game.regularPriceMinor ? QVariant(*game.regularPriceMinor) : QVariant());
@@ -4495,7 +4502,7 @@ RepositoryResult<SteamGame> SteamRepository::updateRefresh(
     query.addBindValue(game.priceCountryCode);
     query.addBindValue(nullableString(game.lastCheckedAt));
     query.addBindValue(nullableString(game.lastAttemptedAt));
-    query.addBindValue(game.lastRefreshError);
+    query.addBindValue(sqlText(game.lastRefreshError));
     query.addBindValue(game.id);
     if (!query.exec()) return failure<SteamGame>(queryFailure(query));
     if (query.numRowsAffected() != 1) return failure<SteamGame>(domain::ErrorCategory::NotFound);
@@ -4850,11 +4857,11 @@ RepositoryResult<domain::SteamTrackedRelease> SteamReleaseRepository::add(
     query.addBindValue(release.appId);
     query.addBindValue(release.canonicalStoreUrl);
     query.addBindValue(release.title);
-    query.addBindValue(release.artwork.sourceUrl);
-    query.addBindValue(release.artwork.cachedFilename);
-    query.addBindValue(release.artwork.mimeType);
+    query.addBindValue(sqlText(release.artwork.sourceUrl));
+    query.addBindValue(sqlText(release.artwork.cachedFilename));
+    query.addBindValue(sqlText(release.artwork.mimeType));
     query.addBindValue(release.artwork.byteSize);
-    query.addBindValue(release.releaseDate.announcedText);
+    query.addBindValue(sqlText(release.releaseDate.announcedText));
     query.addBindValue(domain::steamReleaseDatePrecisionName(release.releaseDate.precision));
     query.addBindValue(release.releaseDate.exactDate
         ? QVariant(release.releaseDate.exactDate->toString(Qt::ISODate)) : QVariant());
@@ -4867,7 +4874,7 @@ RepositoryResult<domain::SteamTrackedRelease> SteamReleaseRepository::add(
     query.addBindValue(nullableString(release.lastSuccessfulUpdateAtUtc));
     query.addBindValue(nullableString(release.lastAttemptedUpdateAtUtc));
     query.addBindValue(domain::steamReleaseRefreshStateName(release.refreshState));
-    query.addBindValue(release.refreshError);
+    query.addBindValue(sqlText(release.refreshError));
     if (!query.exec()) return failure<domain::SteamTrackedRelease>(queryFailure(query));
     query.finish();
     const auto catalog = upsertSteamCatalogDetails(m_database, {
@@ -4930,11 +4937,11 @@ RepositoryResult<void> SteamReleaseRepository::applyRefreshBatch(
                 "last_successful_update_at_utc=?,last_attempted_update_at_utc=?,"
                 "refresh_state='succeeded',refresh_error='',updated_at=? WHERE steam_app_id=?"));
             query.addBindValue(details.title.trimmed());
-            query.addBindValue(details.artworkUrl);
-            query.addBindValue(details.artworkUrl);
-            query.addBindValue(details.artworkUrl);
-            query.addBindValue(details.artworkUrl);
-            query.addBindValue(details.releaseDate.announcedText);
+            query.addBindValue(sqlText(details.artworkUrl));
+            query.addBindValue(sqlText(details.artworkUrl));
+            query.addBindValue(sqlText(details.artworkUrl));
+            query.addBindValue(sqlText(details.artworkUrl));
+            query.addBindValue(sqlText(details.releaseDate.announcedText));
             query.addBindValue(domain::steamReleaseDatePrecisionName(details.releaseDate.precision));
             query.addBindValue(details.releaseDate.exactDate
                 ? QVariant(details.releaseDate.exactDate->toString(Qt::ISODate)) : QVariant());
@@ -5023,8 +5030,8 @@ RepositoryResult<void> SteamReleaseRepository::setArtwork(
         "UPDATE steam_release_follows SET artwork_filename=?,artwork_mime_type=?,"
         "artwork_byte_size=?,updated_at=CURRENT_TIMESTAMP "
         "WHERE steam_app_id=? AND artwork_source_url=?"));
-    query.addBindValue(artwork.cachedFilename);
-    query.addBindValue(artwork.mimeType);
+    query.addBindValue(sqlText(artwork.cachedFilename));
+    query.addBindValue(sqlText(artwork.mimeType));
     query.addBindValue(artwork.byteSize);
     query.addBindValue(appId);
     query.addBindValue(expectedSourceUrl);
@@ -5192,16 +5199,16 @@ RepositoryResult<domain::SteamGameUpdateFollow> SteamGameUpdatesRepository::add(
     query.addBindValue(follow.appId);
     query.addBindValue(follow.canonicalStoreUrl);
     query.addBindValue(follow.name);
-    query.addBindValue(follow.artwork.sourceUrl);
-    query.addBindValue(follow.artwork.cachedFilename);
-    query.addBindValue(follow.artwork.mimeType);
+    query.addBindValue(sqlText(follow.artwork.sourceUrl));
+    query.addBindValue(sqlText(follow.artwork.cachedFilename));
+    query.addBindValue(sqlText(follow.artwork.mimeType));
     query.addBindValue(follow.artwork.byteSize);
     query.addBindValue(domain::steamGameUpdateOwnershipStatusName(follow.ownershipStatus));
     query.addBindValue(follow.addedAtUtc);
     query.addBindValue(nullableString(follow.lastSuccessfulNewsCheckAtUtc));
     query.addBindValue(nullableString(follow.lastAttemptedNewsCheckAtUtc));
     query.addBindValue(domain::steamGameUpdateRefreshStateName(follow.refreshState));
-    query.addBindValue(follow.lastRefreshError);
+    query.addBindValue(sqlText(follow.lastRefreshError));
     if (!query.exec())
         return failure<domain::SteamGameUpdateFollow>(queryFailure(query));
     query.finish();
@@ -5267,7 +5274,7 @@ SteamGameUpdatesRepository::recordNewsCheck(
     query.addBindValue(domain::steamGameUpdateRefreshStateName(
         succeeded ? domain::SteamGameUpdateRefreshState::Succeeded
                   : domain::SteamGameUpdateRefreshState::Failed));
-    query.addBindValue(safeError);
+    query.addBindValue(sqlText(safeError));
     query.addBindValue(appId);
     if (!query.exec())
         return failure<domain::SteamGameUpdateFollow>(queryFailure(query));
@@ -5303,8 +5310,8 @@ RepositoryResult<void> SteamGameUpdatesRepository::setArtwork(
         "UPDATE steam_game_update_follows SET artwork_filename=?,artwork_mime_type=?,"
         "artwork_byte_size=?,updated_at=CURRENT_TIMESTAMP "
         "WHERE steam_app_id=? AND artwork_source_url=?"));
-    query.addBindValue(artwork.cachedFilename);
-    query.addBindValue(artwork.mimeType);
+    query.addBindValue(sqlText(artwork.cachedFilename));
+    query.addBindValue(sqlText(artwork.mimeType));
     query.addBindValue(artwork.byteSize);
     query.addBindValue(appId);
     query.addBindValue(expectedSourceUrl);
@@ -5509,15 +5516,15 @@ SteamGameUpdatesRepository::upsertNewsPage(
             return failure<SteamGameUpdateNewsUpsertResult>(domain::ErrorCategory::Cancelled);
         const QVariant feedType = article.feedType ? QVariant(*article.feedType) : QVariant();
         insert.bindValue(0, appId);
-        insert.bindValue(1, article.newsId);
-        insert.bindValue(2, article.title);
+        insert.bindValue(1, sqlText(article.newsId));
+        insert.bindValue(2, sqlText(article.title));
         insert.bindValue(3, article.publishedAtUnixSeconds);
-        insert.bindValue(4, article.sourceUrl);
-        insert.bindValue(5, article.author);
-        insert.bindValue(6, article.feedLabel);
-        insert.bindValue(7, article.feedName);
+        insert.bindValue(4, sqlText(article.sourceUrl));
+        insert.bindValue(5, sqlText(article.author));
+        insert.bindValue(6, sqlText(article.feedLabel));
+        insert.bindValue(7, sqlText(article.feedName));
         insert.bindValue(8, feedType);
-        insert.bindValue(9, article.contentText);
+        insert.bindValue(9, sqlText(article.contentText));
         insert.bindValue(10, article.externalUrl ? 1 : 0);
         insert.bindValue(11, discoveredAtUtc);
         if (!insert.exec())
@@ -5529,17 +5536,17 @@ SteamGameUpdatesRepository::upsertNewsPage(
             continue;
         }
 
-        update.bindValue(0, article.title);
+        update.bindValue(0, sqlText(article.title));
         update.bindValue(1, article.publishedAtUnixSeconds);
-        update.bindValue(2, article.sourceUrl);
-        update.bindValue(3, article.author);
-        update.bindValue(4, article.feedLabel);
-        update.bindValue(5, article.feedName);
+        update.bindValue(2, sqlText(article.sourceUrl));
+        update.bindValue(3, sqlText(article.author));
+        update.bindValue(4, sqlText(article.feedLabel));
+        update.bindValue(5, sqlText(article.feedName));
         update.bindValue(6, feedType);
-        update.bindValue(7, article.contentText);
+        update.bindValue(7, sqlText(article.contentText));
         update.bindValue(8, article.externalUrl ? 1 : 0);
         update.bindValue(9, appId);
-        update.bindValue(10, article.newsId);
+        update.bindValue(10, sqlText(article.newsId));
         if (!update.exec())
             return failure<SteamGameUpdateNewsUpsertResult>(queryFailure(update));
         update.finish();

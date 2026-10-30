@@ -120,8 +120,8 @@ bool makeSourceFixture(const QString &directory, int sourceVersion = 24,
         "INSERT INTO favorite_update_seen_items VALUES('telegram','sample_channel','7','2024-02-03T04:05:06Z','2024-02-03T04:05:06Z','2024-02-03T04:05:06Z')",
         "INSERT INTO favorite_news_items VALUES('telegram','sample_channel','7','2024-02-03T04:05:06Z','2024-02-03T04:05:06Z','{\"postId\":\"7\",\"preview\":\"Retained news\",\"images\":[]}','2024-02-03T04:05:06Z')",
         "INSERT INTO favorite_news_state VALUES(1,'2024-02-03T04:05:06Z','[]','2024-02-03T04:05:06Z')",
-        "INSERT INTO desktop_apps VALUES(71,'First','C:/Fixture/First.exe','2024-02-03T04:05:06Z','2024-02-04T04:05:06Z')",
-        "INSERT INTO desktop_apps VALUES(72,'Second','C:/Fixture/Second.exe','2024-02-03T04:05:06Z','2024-02-04T04:05:06Z')",
+        "INSERT INTO desktop_apps(id,display_name,executable_path,created_at,updated_at) VALUES(71,'First','C:/Fixture/First.exe','2024-02-03T04:05:06Z','2024-02-04T04:05:06Z')",
+        "INSERT INTO desktop_apps(id,display_name,executable_path,created_at,updated_at) VALUES(72,'Second','C:/Fixture/Second.exe','2024-02-03T04:05:06Z','2024-02-04T04:05:06Z')",
         "INSERT INTO setups VALUES(61,'Work','Retained description','2024-02-03T04:05:06Z','2024-02-04T04:05:06Z')",
         "INSERT INTO setup_apps VALUES(61,72,2)", "INSERT INTO setup_apps VALUES(61,71,7)",
         "UPDATE steam_game_settings SET country_code='US',updated_at='2024-02-03T04:05:06Z' WHERE id=1",
@@ -224,6 +224,12 @@ void DataImportTest::eligibilityAcceptsStartupStateAndExplainsSavedRecords()
     QVERIFY(!repository.status(&status).isError());
     QVERIFY(status.empty);
     QVERIFY(status.blockingReason.isEmpty());
+    QVERIFY(exec(target.db, "UPDATE preferences SET value='0' WHERE key='calendar.game_releases_visible'"));
+    QVERIFY(!repository.status(&status).isError());
+    QVERIFY(!status.empty);
+    QVERIFY(exec(target.db, "UPDATE preferences SET value='1' WHERE key='calendar.game_releases_visible'"));
+    QVERIFY(!repository.status(&status).isError());
+    QVERIFY(status.empty);
     QVERIFY(exec(target.db, "INSERT INTO tasks(title) VALUES('Keep this Qt task')"));
     QVERIFY(!repository.status(&status).isError());
     QVERIFY(!status.empty);
