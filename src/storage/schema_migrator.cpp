@@ -291,6 +291,60 @@ constexpr const char *taskHistory[] = {
     "CREATE TRIGGER task_history_prevent_delete BEFORE DELETE ON task_history BEGIN SELECT RAISE(ABORT, 'task history is append-only'); END",
 };
 
+constexpr const char *taskScheduling[] = {
+    R"SQL(CREATE TABLE task_schedules (
+        task_id INTEGER PRIMARY KEY REFERENCES tasks(id) ON DELETE CASCADE,
+        planned_date TEXT CHECK(planned_date IS NULL OR
+            (length(planned_date) = 10 AND date(planned_date) = planned_date)),
+        planned_start_time TEXT CHECK(planned_start_time IS NULL OR
+            (length(planned_start_time) = 5
+             AND planned_start_time GLOB '[0-2][0-9]:[0-5][0-9]'
+             AND CAST(substr(planned_start_time, 1, 2) AS INTEGER) BETWEEN 0 AND 23)),
+        estimated_duration_minutes INTEGER CHECK(estimated_duration_minutes IS NULL OR
+            (typeof(estimated_duration_minutes) = 'integer'
+             AND estimated_duration_minutes BETWEEN 1 AND 525600)),
+        revision INTEGER NOT NULL DEFAULT 1
+            CHECK(typeof(revision) = 'integer' AND revision > 0),
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        CHECK(planned_start_time IS NULL OR planned_date IS NOT NULL)
+    ))SQL",
+    "CREATE INDEX idx_task_schedules_date_time ON task_schedules(planned_date, planned_start_time, task_id) WHERE planned_date IS NOT NULL",
+    R"SQL(CREATE TABLE scheduling_preferences (
+        id INTEGER PRIMARY KEY CHECK(id = 1),
+        preferred_working_days_mask INTEGER NOT NULL DEFAULT 31
+            CHECK(typeof(preferred_working_days_mask) = 'integer'
+                  AND preferred_working_days_mask BETWEEN 0 AND 127),
+        workday_start_time TEXT NOT NULL DEFAULT '09:00'
+            CHECK(length(workday_start_time) = 5
+                  AND workday_start_time GLOB '[0-2][0-9]:[0-5][0-9]'
+                  AND CAST(substr(workday_start_time, 1, 2) AS INTEGER) BETWEEN 0 AND 23),
+        workday_end_time TEXT NOT NULL DEFAULT '17:00'
+            CHECK(length(workday_end_time) = 5
+                  AND workday_end_time GLOB '[0-2][0-9]:[0-5][0-9]'
+                  AND CAST(substr(workday_end_time, 1, 2) AS INTEGER) BETWEEN 0 AND 23),
+        maximum_planned_work_minutes_per_day INTEGER NOT NULL DEFAULT 360
+            CHECK(typeof(maximum_planned_work_minutes_per_day) = 'integer'
+                  AND maximum_planned_work_minutes_per_day BETWEEN 1 AND 1440),
+        default_estimated_duration_minutes INTEGER NOT NULL DEFAULT 60
+            CHECK(typeof(default_estimated_duration_minutes) = 'integer'
+                  AND default_estimated_duration_minutes BETWEEN 1 AND 525600),
+        break_between_work_blocks_minutes INTEGER DEFAULT 15
+            CHECK(break_between_work_blocks_minutes IS NULL OR
+                  (typeof(break_between_work_blocks_minutes) = 'integer'
+                   AND break_between_work_blocks_minutes BETWEEN 1 AND 240)),
+        revision INTEGER NOT NULL DEFAULT 1
+            CHECK(typeof(revision) = 'integer' AND revision > 0),
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        CHECK(workday_end_time > workday_start_time),
+        CHECK(maximum_planned_work_minutes_per_day <=
+            ((CAST(substr(workday_end_time, 1, 2) AS INTEGER) * 60)
+              + CAST(substr(workday_end_time, 4, 2) AS INTEGER))
+            - ((CAST(substr(workday_start_time, 1, 2) AS INTEGER) * 60)
+              + CAST(substr(workday_start_time, 4, 2) AS INTEGER)))
+    ))SQL",
+    "INSERT INTO scheduling_preferences(id) VALUES(1)",
+};
+
 constexpr std::array migrations{
     Migration{1, "core tasks currencies preferences", core, qsizetype(std::size(core))},
     Migration{2, "favorites and retained update news", favorites, qsizetype(std::size(favorites))},
@@ -304,6 +358,8 @@ constexpr std::array migrations{
               qsizetype(std::size(applicationCategories))},
     Migration{9, "persistent task history", taskHistory,
               qsizetype(std::size(taskHistory))},
+    Migration{10, "task scheduling data and preferences", taskScheduling,
+              qsizetype(std::size(taskScheduling))},
 };
 
 bool fail(QString *diagnostic, const QString &message)
@@ -360,7 +416,8 @@ bool hasUnexpectedTables(const QSqlDatabase &database, QString *diagnostic, bool
         QStringLiteral("setup_apps"), QStringLiteral("setup_icons"),
         QStringLiteral("steam_game_settings"), QStringLiteral("steam_games"),
         QStringLiteral("steam_game_images"), QStringLiteral("data_imports"),
-        QStringLiteral("task_history")
+        QStringLiteral("task_history"), QStringLiteral("task_schedules"),
+        QStringLiteral("scheduling_preferences")
     };
     QSqlQuery query(database);
     if (!query.exec(QStringLiteral("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"))) {

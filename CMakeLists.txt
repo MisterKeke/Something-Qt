@@ -91,6 +91,7 @@ qt_add_executable(SomethingQt WIN32
     src/domain/task_date_rules.cpp
     src/domain/task_history.cpp
     src/domain/task_rules.cpp
+    src/domain/task_scheduling.cpp
     src/domain/steam_game.cpp
     src/domain/weather_currency.cpp
     src/platform/profile_instance_lock.cpp
@@ -125,6 +126,7 @@ qt_add_executable(SomethingQt WIN32
     src/services/application_command_service.cpp
     src/services/application_mutation_workflow.cpp
     src/services/preferences_service.cpp
+    src/services/scheduling_service.cpp
     src/services/weather_service.cpp
     src/services/wallpaper_asset_store.cpp
     src/services/wallpaper_service.cpp

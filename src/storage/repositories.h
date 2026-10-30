@@ -47,6 +47,21 @@ private:
     QSqlDatabase &m_database;
 };
 
+class SchedulingRepository final {
+public:
+    explicit SchedulingRepository(QSqlDatabase &database);
+    RepositoryResult<TaskSchedule> taskSchedule(qint64 taskId) const;
+    RepositoryResult<QVector<TaskSchedule>> taskSchedules() const;
+    RepositoryResult<TaskSchedule> setTaskSchedule(const TaskSchedule &schedule,
+                                                   qint64 expectedRevision);
+    RepositoryResult<SchedulingPreferences> schedulingPreferences() const;
+    RepositoryResult<SchedulingPreferences> setSchedulingPreferences(
+        const SchedulingPreferences &preferences, qint64 expectedRevision);
+private:
+    RepositoryResult<TaskSchedule> loadTaskSchedule(qint64 taskId) const;
+    QSqlDatabase &m_database;
+};
+
 class CurrencyFavoritesRepository final {
 public:
     explicit CurrencyFavoritesRepository(QSqlDatabase &database);
@@ -212,6 +227,7 @@ public:
     explicit StorageRepositories(QSqlDatabase &database);
     TaskRepository tasks;
     TaskHistoryRepository taskHistory;
+    SchedulingRepository scheduling;
     CurrencyFavoritesRepository currencies;
     FavoritesRepository favorites;
     FavoriteNewsRepository news;

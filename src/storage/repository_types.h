@@ -3,6 +3,7 @@
 #include "../domain/app_error.h"
 #include "../domain/task.h"
 #include "../domain/task_history.h"
+#include "../domain/task_scheduling.h"
 
 #include <QString>
 #include <QStringList>
@@ -30,6 +31,8 @@ using domain::SubtaskInput;
 using domain::Task;
 using domain::TaskFilter;
 using domain::TaskInput;
+using domain::TaskSchedule;
+using domain::SchedulingPreferences;
 
 struct TaskHistoryCursor final {
     QString occurredAtUtc;

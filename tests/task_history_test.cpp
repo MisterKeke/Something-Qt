@@ -581,8 +581,10 @@ void TaskHistoryTest::versionEightDatabaseMigratesWithoutFabricatedHistory()
     QVERIFY(legacyTask.succeeded());
 
     QSqlQuery migration(fixture.database);
+    QVERIFY(migration.exec(QStringLiteral("DROP TABLE task_schedules")));
+    QVERIFY(migration.exec(QStringLiteral("DROP TABLE scheduling_preferences")));
     QVERIFY(migration.exec(QStringLiteral("DROP TABLE task_history")));
-    QVERIFY(migration.exec(QStringLiteral("DELETE FROM schema_migrations WHERE version=9")));
+    QVERIFY(migration.exec(QStringLiteral("DELETE FROM schema_migrations WHERE version>=9")));
     QVERIFY(migration.exec(QStringLiteral("SELECT MAX(version) FROM schema_migrations")));
     QVERIFY(migration.next());
     QCOMPARE(migration.value(0).toInt(), 8);
@@ -591,7 +593,7 @@ void TaskHistoryTest::versionEightDatabaseMigratesWithoutFabricatedHistory()
     QString diagnostic;
     QVERIFY2(storage::SchemaMigrator::apply(fixture.database, &diagnostic),
              qPrintable(diagnostic));
-    QCOMPARE(storage::SchemaMigrator::latestVersion(), 9);
+    QCOMPARE(storage::SchemaMigrator::latestVersion(), 10);
 
     const auto preserved = repositories.tasks.get(legacyTask.value.id);
     QVERIFY(preserved.succeeded());

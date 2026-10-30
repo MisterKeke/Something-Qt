@@ -55,15 +55,15 @@ void StorageRepositoryTest::migrationsAreTransactionalIndependentAndRepeatable()
     QString connectionName;
     QSqlDatabase database;
     QVERIFY(openTestDatabase(&database, &connectionName));
-    QCOMPARE(storage::SchemaMigrator::latestVersion(), 9);
+    QCOMPARE(storage::SchemaMigrator::latestVersion(), 10);
     QVERIFY(storage::SchemaMigrator::apply(database));
 
     QSqlQuery history(database);
     QVERIFY(history.exec(QStringLiteral("SELECT COUNT(*),MIN(version),MAX(version) FROM schema_migrations")));
     QVERIFY(history.next());
-    QCOMPARE(history.value(0).toInt(), 9);
+    QCOMPARE(history.value(0).toInt(), 10);
     QCOMPARE(history.value(1).toInt(), 1);
-    QCOMPARE(history.value(2).toInt(), 9);
+    QCOMPARE(history.value(2).toInt(), 10);
 
     const QStringList tables = tableNames(database);
     for (const QString &retained : {QStringLiteral("tasks"), QStringLiteral("task_tags"),
@@ -73,6 +73,8 @@ void StorageRepositoryTest::migrationsAreTransactionalIndependentAndRepeatable()
                                     QStringLiteral("desktop_apps"), QStringLiteral("setups"),
                                     QStringLiteral("steam_games"), QStringLiteral("wallpapers"),
                                     QStringLiteral("task_history"),
+                                    QStringLiteral("task_schedules"),
+                                    QStringLiteral("scheduling_preferences"),
                                     QStringLiteral("preferences")}) {
         QVERIFY2(tables.contains(retained), qPrintable(retained));
     }
