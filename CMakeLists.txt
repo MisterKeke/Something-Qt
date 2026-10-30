@@ -98,6 +98,7 @@ qt_add_executable(SomethingQt WIN32
     src/domain/scheduling_engine.cpp
     src/domain/steam_game.cpp
     src/domain/steam_game_updates.cpp
+    src/domain/steam_collections.cpp
     src/domain/steam_release.cpp
     src/domain/weather_currency.cpp
     src/platform/profile_instance_lock.cpp
