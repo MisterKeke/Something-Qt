@@ -1,5 +1,8 @@
 #include "weather_forecast_model.h"
 
+#include <QLocale>
+
+#include <cmath>
 #include <utility>
 
 namespace something::models {
@@ -24,6 +27,16 @@ QVariant WeatherForecastModel::data(const QModelIndex &index, int role) const
     case MaximumRole: return day.maximumCelsius;
     case MinimumRole: return day.minimumCelsius;
     case PrecipitationRole: return day.precipitationProbability;
+    case SunriseRole: return locationTimeText(day.sunriseUtc);
+    case SunsetRole: return locationTimeText(day.sunsetUtc);
+    case DaylightDurationRole:
+        return day.daylightDurationSeconds ? QVariant(*day.daylightDurationSeconds) : QVariant{};
+    case HasSunriseRole:
+        return day.sunriseUtc && day.sunriseUtc->isValid() && m_locationTimeZone.isValid();
+    case HasSunsetRole:
+        return day.sunsetUtc && day.sunsetUtc->isValid() && m_locationTimeZone.isValid();
+    case HasDaylightDurationRole:
+        return day.daylightDurationSeconds && std::isfinite(*day.daylightDurationSeconds);
     default: return {};
     }
 }
@@ -33,14 +46,19 @@ QHash<int, QByteArray> WeatherForecastModel::roleNames() const
     return {{DateRole, "date"}, {WeatherCodeRole, "weatherCode"},
             {ConditionRole, "condition"}, {IconRole, "icon"},
             {MaximumRole, "maximum"}, {MinimumRole, "minimum"},
-            {PrecipitationRole, "precipitationProbability"}};
+            {PrecipitationRole, "precipitationProbability"},
+            {SunriseRole, "sunrise"}, {SunsetRole, "sunset"},
+            {DaylightDurationRole, "daylightDurationSeconds"},
+            {HasSunriseRole, "hasSunrise"}, {HasSunsetRole, "hasSunset"},
+            {HasDaylightDurationRole, "hasDaylightDuration"}};
 }
 
-void WeatherForecastModel::replace(QVector<domain::WeatherDay> days)
+void WeatherForecastModel::replace(QVector<domain::WeatherDay> days, QString timezone)
 {
     const int previousCount = m_days.size();
     beginResetModel();
     m_days = std::move(days);
+    m_locationTimeZone = QTimeZone(timezone.toUtf8());
     endResetModel();
     if (previousCount != m_days.size()) emit countChanged();
 }
@@ -50,8 +68,17 @@ void WeatherForecastModel::clear()
     if (m_days.isEmpty()) return;
     beginResetModel();
     m_days.clear();
+    m_locationTimeZone = QTimeZone();
     endResetModel();
     emit countChanged();
+}
+
+QString WeatherForecastModel::locationTimeText(
+    const std::optional<QDateTime> &timestamp) const
+{
+    if (!timestamp || !timestamp->isValid() || !m_locationTimeZone.isValid()) return {};
+    const QDateTime localTime = timestamp->toUTC().toTimeZone(m_locationTimeZone);
+    return QLocale().toString(localTime.time(), QLocale::ShortFormat);
 }
 
 QString WeatherForecastModel::conditionForCode(int code)

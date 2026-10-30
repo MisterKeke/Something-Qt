@@ -1,5 +1,6 @@
 #pragma once
 
+#include <QDateTime>
 #include <QVector>
 #include <QString>
 
@@ -20,8 +21,8 @@ struct WeatherDay final {
     double maximumCelsius{0.0};
     double minimumCelsius{0.0};
     double precipitationProbability{0.0};
-    std::optional<QString> sunriseTimestamp; // Provider-local ISO 8601 value, preserved as received.
-    std::optional<QString> sunsetTimestamp;
+    std::optional<QDateTime> sunriseUtc;
+    std::optional<QDateTime> sunsetUtc;
     std::optional<double> daylightDurationSeconds;
 };
 

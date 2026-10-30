@@ -1,6 +1,7 @@
 #include "feature_parsers.h"
 
 #include <QDate>
+#include <QDateTime>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -8,6 +9,8 @@
 #include <QJsonValue>
 #include <QHash>
 #include <QRegularExpression>
+#include <QTime>
+#include <QTimeZone>
 
 #include <algorithm>
 #include <cmath>
@@ -105,22 +108,57 @@ bool validDate(const QString &value)
     return date.isValid() && date.toString(Qt::ISODate) == value;
 }
 
-bool validSolarTimestamp(const QString &value, const QString &expectedDate)
+bool parseUnixTimestamp(const QJsonValue &value, QDateTime *output)
 {
+    if (!output || !value.isDouble() || !std::isfinite(value.toDouble())) return false;
+    const double seconds = value.toDouble();
+    constexpr double minimumSeconds = -62135596800.0;
+    constexpr double maximumSeconds = 253402300799.0;
+    if (seconds < minimumSeconds || seconds > maximumSeconds) return false;
+    const qint64 milliseconds = static_cast<qint64>(std::llround(seconds * 1000.0));
+    *output = QDateTime::fromMSecsSinceEpoch(milliseconds, Qt::UTC);
+    return output->isValid();
+}
+
+bool parseProviderDate(const QJsonValue &value, const QTimeZone &timeZone, QString *output)
+{
+    if (!output) return false;
+    if (value.isString()) {
+        if (!validDate(value.toString())) return false;
+        *output = value.toString();
+        return true;
+    }
+
+    QDateTime timestamp;
+    if (!timeZone.isValid() || !parseUnixTimestamp(value, &timestamp)) return false;
+    *output = timestamp.toTimeZone(timeZone).date().toString(Qt::ISODate);
+    return !output->isEmpty();
+}
+
+bool parseSolarTimestamp(const QJsonValue &value, const QTimeZone &timeZone,
+                         QDateTime *output)
+{
+    if (!output) return false;
+    if (value.isDouble()) return parseUnixTimestamp(value, output);
+    if (!value.isString() || !timeZone.isValid()) return false;
+
+    // Older cached Open-Meteo responses contain local ISO wall times. Their
+    // fixed request-time offset can be stale across DST, so use the wall clock
+    // components with the saved IANA timezone instead of applying that offset.
     static const QRegularExpression pattern(QStringLiteral(
         R"(^([0-9]{4}-[0-9]{2}-[0-9]{2})T([0-9]{2}):([0-9]{2})(?::([0-9]{2})(?:\.[0-9]{1,9})?)?(?:[Zz]|([+-])([0-9]{2}):([0-9]{2}))?$)"));
-    const QRegularExpressionMatch match = pattern.match(value);
-    if (!match.hasMatch() || match.captured(1) != expectedDate
-        || !validDate(match.captured(1))) return false;
+    const QRegularExpressionMatch match = pattern.match(value.toString());
+    if (!match.hasMatch() || !validDate(match.captured(1))) return false;
 
     bool hourOk = false;
     bool minuteOk = false;
     const int hour = match.captured(2).toInt(&hourOk);
     const int minute = match.captured(3).toInt(&minuteOk);
     if (!hourOk || !minuteOk || hour > 23 || minute > 59) return false;
+    int second = 0;
     if (!match.captured(4).isEmpty()) {
         bool secondOk = false;
-        const int second = match.captured(4).toInt(&secondOk);
+        second = match.captured(4).toInt(&secondOk);
         if (!secondOk || second > 59) return false;
     }
     if (!match.captured(5).isEmpty()) {
@@ -131,6 +169,12 @@ bool validSolarTimestamp(const QString &value, const QString &expectedDate)
         if (!offsetHourOk || !offsetMinuteOk || offsetHour > 23 || offsetMinute > 59)
             return false;
     }
+
+    const QDate date = QDate::fromString(match.captured(1), Qt::ISODate);
+    const QTime time(hour, minute, second);
+    const QDateTime localTime(date, time, timeZone);
+    if (!localTime.isValid()) return false;
+    *output = localTime.toUTC();
     return true;
 }
 
@@ -239,6 +283,7 @@ FeatureParseResult<WeatherForecast> parseWeatherForecast(const QByteArray &body)
         result.error = invalidResponse();
         return result;
     }
+    const QTimeZone locationTimeZone(result.value.timezone.toUtf8());
 
     QVector<QString> dates;
     QVector<int> codes;
@@ -246,9 +291,8 @@ FeatureParseResult<WeatherForecast> parseWeatherForecast(const QByteArray &body)
     QVector<double> lows;
     QVector<double> precipitation;
     const bool parsed = parseArray<QString>(daily.value(QStringLiteral("time")), &dates,
-        [](const QJsonValue &v, QString *out) {
-            if (!v.isString() || !validDate(v.toString())) return false;
-            *out = v.toString(); return true;
+        [&locationTimeZone](const QJsonValue &v, QString *out) {
+            return parseProviderDate(v, locationTimeZone, out);
         })
         && parseArray<int>(daily.value(QStringLiteral("weather_code")), &codes, parseDailyCode)
         && parseArray<double>(daily.value(QStringLiteral("temperature_2m_max")), &highs, parseDailyNumber)
@@ -262,19 +306,15 @@ FeatureParseResult<WeatherForecast> parseWeatherForecast(const QByteArray &body)
         return result;
     }
 
-    const auto sunrises = parseOptionalSolarArray<QString>(
+    const auto sunrises = parseOptionalSolarArray<QDateTime>(
         daily.value(QStringLiteral("sunrise")), count,
-        [](const QJsonValue &value, QString *out) {
-            if (!value.isString()) return false;
-            *out = value.toString();
-            return true;
+        [&locationTimeZone](const QJsonValue &value, QDateTime *out) {
+            return parseSolarTimestamp(value, locationTimeZone, out);
         });
-    const auto sunsets = parseOptionalSolarArray<QString>(
+    const auto sunsets = parseOptionalSolarArray<QDateTime>(
         daily.value(QStringLiteral("sunset")), count,
-        [](const QJsonValue &value, QString *out) {
-            if (!value.isString()) return false;
-            *out = value.toString();
-            return true;
+        [&locationTimeZone](const QJsonValue &value, QDateTime *out) {
+            return parseSolarTimestamp(value, locationTimeZone, out);
         });
     const auto daylightDurations = parseOptionalSolarArray<double>(
         daily.value(QStringLiteral("daylight_duration")), count,
@@ -288,10 +328,13 @@ FeatureParseResult<WeatherForecast> parseWeatherForecast(const QByteArray &body)
     for (qsizetype i = 0; i < count; ++i) {
         WeatherDay day{dates.at(i), codes.at(i), highs.at(i), lows.at(i),
                        precipitation.at(i)};
-        if (sunrises.at(i) && validSolarTimestamp(*sunrises.at(i), dates.at(i)))
-            day.sunriseTimestamp = sunrises.at(i);
-        if (sunsets.at(i) && validSolarTimestamp(*sunsets.at(i), dates.at(i)))
-            day.sunsetTimestamp = sunsets.at(i);
+        const QDate localDate = QDate::fromString(dates.at(i), Qt::ISODate);
+        if (sunrises.at(i) && locationTimeZone.isValid()
+            && sunrises.at(i)->toTimeZone(locationTimeZone).date() == localDate)
+            day.sunriseUtc = sunrises.at(i)->toUTC();
+        if (sunsets.at(i) && locationTimeZone.isValid()
+            && sunsets.at(i)->toTimeZone(locationTimeZone).date() == localDate)
+            day.sunsetUtc = sunsets.at(i)->toUTC();
         day.daylightDurationSeconds = daylightDurations.at(i);
         result.value.days.push_back(std::move(day));
     }
@@ -434,14 +477,14 @@ QByteArray serializeWeatherForecast(const WeatherForecast &forecast)
         maximum.push_back(day.maximumCelsius);
         minimum.push_back(day.minimumCelsius);
         precipitation.push_back(day.precipitationProbability);
-        if (day.sunriseTimestamp) {
-            sunrise.push_back(*day.sunriseTimestamp);
+        if (day.sunriseUtc && day.sunriseUtc->isValid()) {
+            sunrise.push_back(static_cast<double>(day.sunriseUtc->toMSecsSinceEpoch()) / 1000.0);
             hasSunrise = true;
         } else {
             sunrise.push_back(QJsonValue(QJsonValue::Null));
         }
-        if (day.sunsetTimestamp) {
-            sunset.push_back(*day.sunsetTimestamp);
+        if (day.sunsetUtc && day.sunsetUtc->isValid()) {
+            sunset.push_back(static_cast<double>(day.sunsetUtc->toMSecsSinceEpoch()) / 1000.0);
             hasSunset = true;
         } else {
             sunset.push_back(QJsonValue(QJsonValue::Null));

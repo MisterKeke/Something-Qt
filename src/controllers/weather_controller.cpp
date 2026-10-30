@@ -62,6 +62,7 @@ QUrl forecastUrl(double latitude, double longitude)
     query.addQueryItem(QStringLiteral("current"), QStringLiteral("temperature_2m,apparent_temperature,weather_code,wind_speed_10m"));
     query.addQueryItem(QStringLiteral("daily"), QStringLiteral("weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max,sunrise,sunset,daylight_duration"));
     query.addQueryItem(QStringLiteral("timezone"), QStringLiteral("auto"));
+    query.addQueryItem(QStringLiteral("timeformat"), QStringLiteral("unixtime"));
     query.addQueryItem(QStringLiteral("forecast_days"), QStringLiteral("6"));
     url.setQuery(query);
     return url;
@@ -104,10 +105,10 @@ QVariantMap weatherDayMap(const domain::WeatherDay &day)
         {QStringLiteral("minimum"), day.minimumCelsius},
         {QStringLiteral("precipitation"), day.precipitationProbability},
     };
-    if (day.sunriseTimestamp)
-        row.insert(QStringLiteral("sunriseTimestamp"), *day.sunriseTimestamp);
-    if (day.sunsetTimestamp)
-        row.insert(QStringLiteral("sunsetTimestamp"), *day.sunsetTimestamp);
+    if (day.sunriseUtc)
+        row.insert(QStringLiteral("sunriseUtc"), *day.sunriseUtc);
+    if (day.sunsetUtc)
+        row.insert(QStringLiteral("sunsetUtc"), *day.sunsetUtc);
     if (day.daylightDurationSeconds)
         row.insert(QStringLiteral("daylightDurationSeconds"), *day.daylightDurationSeconds);
     return row;
@@ -120,10 +121,10 @@ domain::WeatherDay weatherDayFromMap(const QVariantMap &row)
                            row.value(QStringLiteral("maximum")).toDouble(),
                            row.value(QStringLiteral("minimum")).toDouble(),
                            row.value(QStringLiteral("precipitation")).toDouble()};
-    if (row.contains(QStringLiteral("sunriseTimestamp")))
-        day.sunriseTimestamp = row.value(QStringLiteral("sunriseTimestamp")).toString();
-    if (row.contains(QStringLiteral("sunsetTimestamp")))
-        day.sunsetTimestamp = row.value(QStringLiteral("sunsetTimestamp")).toString();
+    const QDateTime sunrise = row.value(QStringLiteral("sunriseUtc")).toDateTime();
+    if (sunrise.isValid()) day.sunriseUtc = sunrise.toUTC();
+    const QDateTime sunset = row.value(QStringLiteral("sunsetUtc")).toDateTime();
+    if (sunset.isValid()) day.sunsetUtc = sunset.toUTC();
     if (row.contains(QStringLiteral("daylightDurationSeconds")))
         day.daylightDurationSeconds = row.value(QStringLiteral("daylightDurationSeconds")).toDouble();
     return day;
@@ -684,7 +685,7 @@ void WeatherController::onNativeLocationReady(quint64 id, double latitude, doubl
 void WeatherController::publishPrimary(const domain::WeatherForecast &forecast,
                                        QString updatedAt, bool fromCache)
 {
-    m_primaryForecast.replace(forecast.days);
+    m_primaryForecast.replace(forecast.days, forecast.timezone);
     m_primaryCurrent = currentMap(forecast.current);
     m_primaryToday.clear();
     if (!forecast.days.isEmpty()) {
@@ -713,7 +714,7 @@ void WeatherController::publishPrimary(const domain::WeatherForecast &forecast,
 void WeatherController::publishCity(const domain::WeatherCity &city,
                                     const domain::WeatherForecast &forecast)
 {
-    m_cityForecast.replace(forecast.days);
+    m_cityForecast.replace(forecast.days, forecast.timezone);
     m_cityCurrent = currentMap(forecast.current);
     m_cityLocation = cityLabel(city);
     m_cityError.clear();
