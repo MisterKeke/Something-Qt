@@ -10,6 +10,7 @@ Item {
     property var controller
     property var releaseController
     property var collectionsController
+    property var gameUpdatesController
     property var savedViewState: ({})
     property string currentSection: "prices"
 
@@ -115,6 +116,9 @@ Item {
                     id: collectionPanel
                     width: parent.width
                     controller: root.collectionsController
+                    priceController: root.controller
+                    releaseController: root.releaseController
+                    updatesController: root.gameUpdatesController
                 }
             }
         }

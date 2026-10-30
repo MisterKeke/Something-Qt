@@ -243,6 +243,7 @@ ApplicationWindow {
             controller: steamGamesController
             releaseController: steamReleaseController
             collectionsController: steamCollectionsController
+            gameUpdatesController: steamGameUpdatesController
         }
     }
 

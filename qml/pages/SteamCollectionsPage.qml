@@ -8,6 +8,9 @@ Item {
     id: root
 
     property var controller
+    property var priceController
+    property var releaseController
+    property var updatesController
     property var savedViewState: ({})
     property real selectedEditCollectionId: 0
     property real pendingDeleteCollectionId: 0
@@ -18,6 +21,9 @@ Item {
     property string sortSelection: "name_asc"
     property string statusSelection: "all"
     property string lastHandledNotification: ""
+    property string pendingCrossFeature: ""
+    property real pendingCrossFeatureAppId: 0
+    property string crossFeatureMessage: ""
 
     implicitHeight: content.implicitHeight + 8
     Accessible.name: qsTr("Steam Game Collections")
@@ -156,6 +162,69 @@ Item {
             }
         }
         return actions
+    }
+
+    function storeUrlForAppId(appId) {
+        const stableId = Number(appId)
+        if (!isFinite(stableId) || stableId <= 0
+                || Math.floor(stableId) !== stableId || stableId > 4294967295)
+            return ""
+        return "https://store.steampowered.com/app/" + stableId + "/"
+    }
+
+    function isPriceTracked(appId) {
+        if (!priceController || !priceController.snapshotLoaded
+                || !priceController.games) return false
+        for (let i = 0; i < priceController.games.count; ++i) {
+            if (Number(priceController.games.rowAt(i).steamAppId) === Number(appId))
+                return true
+        }
+        return false
+    }
+
+    function isReleaseTracked(appId) {
+        if (!releaseController || !releaseController.snapshotLoaded
+                || !releaseController.releases) return false
+        return releaseController.releases.rowForAppId(Number(appId)) >= 0
+    }
+
+    function isUpdatesFollowed(appId) {
+        if (!updatesController || !updatesController.snapshotLoaded) return false
+        for (let i = 0; i < updatesController.games.length; ++i) {
+            if (Number(updatesController.games[i].appId) === Number(appId))
+                return true
+        }
+        return false
+    }
+
+    function requestCrossFeature(feature, appId) {
+        const stableStoreUrl = storeUrlForAppId(appId)
+        if (stableStoreUrl.length === 0) return
+        const target = feature === "price" ? priceController
+                     : feature === "release" ? releaseController
+                     : feature === "updates" ? updatesController : null
+        if (!target) return
+        pendingCrossFeature = feature
+        pendingCrossFeatureAppId = Number(appId)
+        crossFeatureMessage = qsTr("Sending game to the selected Steam feature…")
+        if (feature === "price") target.addGame(stableStoreUrl)
+        else if (feature === "release") target.addRelease(stableStoreUrl)
+        else target.addGame(stableStoreUrl)
+    }
+
+    function finishCrossFeature(feature, target) {
+        if (pendingCrossFeature !== feature || !target || target.addBusy)
+            return
+        if (pendingCrossFeatureAppId <= 0)
+            return
+        if (String(target.addError || "").length > 0)
+            crossFeatureMessage = target.addError
+        else if (String(target.notification || "").length > 0)
+            crossFeatureMessage = target.notification
+        else
+            return
+        pendingCrossFeature = ""
+        pendingCrossFeatureAppId = 0
     }
 
     ColumnLayout {
@@ -571,8 +640,15 @@ Item {
 
         Shared.NotificationToast {
             Layout.alignment: Qt.AlignHCenter
-            message: root.controller ? root.controller.notification : ""
-            onDismissed: if (root.controller) root.controller.clearNotification()
+            message: root.crossFeatureMessage.length > 0
+                     ? root.crossFeatureMessage
+                     : root.controller ? root.controller.notification : ""
+            onDismissed: {
+                if (root.crossFeatureMessage.length > 0)
+                    root.crossFeatureMessage = ""
+                else if (root.controller)
+                    root.controller.clearNotification()
+            }
         }
     }
 
@@ -583,6 +659,49 @@ Item {
             text: qsTr("Open Steam Store")
             onTriggered: if (root.controller)
                 root.controller.openStore(Number(gameActionMenu.game.appId))
+        }
+        MenuSeparator {
+            visible: root.priceController && root.priceController.snapshotLoaded
+                     || root.releaseController && root.releaseController.snapshotLoaded
+                     || root.updatesController && root.updatesController.snapshotLoaded
+        }
+        MenuItem {
+            visible: root.priceController && root.priceController.snapshotLoaded
+            text: root.isPriceTracked(gameActionMenu.game.appId)
+                  ? qsTr("Already in Price Tracker") : qsTr("Add to Price Tracker")
+            enabled: root.priceController && root.priceController.snapshotLoaded
+                     && !root.isPriceTracked(gameActionMenu.game.appId)
+                     && root.pendingCrossFeature.length === 0
+                     && !root.priceController.addBusy
+            onTriggered: root.requestCrossFeature(
+                "price", Number(gameActionMenu.game.appId))
+        }
+        MenuItem {
+            visible: root.updatesController && root.updatesController.snapshotLoaded
+            text: root.isUpdatesFollowed(gameActionMenu.game.appId)
+                  ? qsTr("Already followed in Game Updates") : qsTr("Follow in Game Updates")
+            enabled: root.updatesController && root.updatesController.snapshotLoaded
+                     && !root.isUpdatesFollowed(gameActionMenu.game.appId)
+                     && root.pendingCrossFeature.length === 0
+                     && !root.updatesController.addBusy
+                     && !root.updatesController.removeBusy
+                     && !root.updatesController.refreshBusy
+            onTriggered: root.requestCrossFeature(
+                "updates", Number(gameActionMenu.game.appId))
+        }
+        MenuItem {
+            visible: root.releaseController && root.releaseController.snapshotLoaded
+            text: root.isReleaseTracked(gameActionMenu.game.appId)
+                  ? qsTr("Already in Release Radar") : qsTr("Track in Release Radar")
+            enabled: root.releaseController && root.releaseController.snapshotLoaded
+                     && !root.isReleaseTracked(gameActionMenu.game.appId)
+                     && root.pendingCrossFeature.length === 0
+                     && !root.releaseController.addBusy
+                     && !root.releaseController.refreshBusy
+                     && !root.releaseController.deleteBusy
+                     && !root.releaseController.dateChangeAcknowledgeBusy
+            onTriggered: root.requestCrossFeature(
+                "release", Number(gameActionMenu.game.appId))
         }
         MenuItem {
             text: qsTr("Edit personal details")
@@ -927,6 +1046,27 @@ Item {
                     root.lastHandledNotification = notification
                 }
             }
+        }
+    }
+
+    Connections {
+        target: root.priceController
+        function onStateChanged() {
+            root.finishCrossFeature("price", root.priceController)
+        }
+    }
+
+    Connections {
+        target: root.releaseController
+        function onStateChanged() {
+            root.finishCrossFeature("release", root.releaseController)
+        }
+    }
+
+    Connections {
+        target: root.updatesController
+        function onStateChanged() {
+            root.finishCrossFeature("updates", root.updatesController)
         }
     }
 }

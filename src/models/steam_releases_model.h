@@ -30,7 +30,7 @@ public:
     int count() const noexcept { return m_all.size(); }
     int visibleCount() const noexcept { return m_visible.size(); }
     QVariantMap rowAt(int row) const;
-    int rowForAppId(quint32 appId) const;
+    Q_INVOKABLE int rowForAppId(quint32 appId) const;
     Q_INVOKABLE int visibleRowForAppId(quint32 appId) const;
     QVector<QVariantMap> allRows() const { return m_all; }
 
