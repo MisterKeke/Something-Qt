@@ -1,8 +1,6 @@
 #include "steam_game_updates.h"
 
 #include <QDateTime>
-#include <QRegularExpression>
-
 namespace something::domain {
 namespace {
 
@@ -11,32 +9,6 @@ bool validUtcInstant(const QString &value)
     if (value.isEmpty() || !value.endsWith(QLatin1Char('Z'))) return false;
     const QDateTime parsed = QDateTime::fromString(value, Qt::ISODateWithMs);
     return parsed.isValid() && parsed.timeSpec() == Qt::UTC;
-}
-
-bool validArtwork(quint32 appId, const SteamGameUpdateArtworkMetadata &artwork)
-{
-    if (!artwork.sourceUrl.isEmpty()
-        && normalizeSteamArtworkUrl(artwork.sourceUrl) != artwork.sourceUrl) {
-        return false;
-    }
-    if (artwork.cachedFilename.isEmpty())
-        return artwork.mimeType.isEmpty() && artwork.byteSize == 0;
-    if (appId == 0 || artwork.sourceUrl.isEmpty() || artwork.byteSize <= 0
-        || artwork.byteSize > 2LL * 1024 * 1024) {
-        return false;
-    }
-
-    static const QRegularExpression filenamePattern(
-        QStringLiteral("^[1-9][0-9]{0,9}-[a-f0-9]{64}\\.(jpg|png|webp)$"));
-    const bool mimeMatchesExtension =
-        (artwork.cachedFilename.endsWith(QStringLiteral(".jpg"))
-         && artwork.mimeType == QStringLiteral("image/jpeg"))
-        || (artwork.cachedFilename.endsWith(QStringLiteral(".png"))
-            && artwork.mimeType == QStringLiteral("image/png"))
-        || (artwork.cachedFilename.endsWith(QStringLiteral(".webp"))
-            && artwork.mimeType == QStringLiteral("image/webp"));
-    return mimeMatchesExtension && filenamePattern.match(artwork.cachedFilename).hasMatch()
-        && artwork.cachedFilename.startsWith(QString::number(appId) + QLatin1Char('-'));
 }
 
 } // namespace
@@ -87,7 +59,8 @@ bool isValidSteamGameUpdateFollow(const SteamGameUpdateFollow &follow)
         || follow.name.trimmed().isEmpty() || follow.name.trimmed().toUcs4().size() > 300
         || (follow.ownershipStatus != SteamGameUpdateOwnershipStatus::Owned
             && follow.ownershipStatus != SteamGameUpdateOwnershipStatus::NotOwned)
-        || !validArtwork(follow.appId, follow.artwork) || !validUtcInstant(follow.addedAtUtc)) {
+        || !isValidSteamGameCatalogArtwork(follow.appId, follow.artwork)
+        || !validUtcInstant(follow.addedAtUtc)) {
         return false;
     }
 

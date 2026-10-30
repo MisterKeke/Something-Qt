@@ -2,7 +2,7 @@
 
 #include "../providers/feature_parsers.h"
 #include "../providers/steam_news_provider.h"
-#include "../providers/steam_release_provider.h"
+#include "../providers/steam_game_catalog_provider.h"
 #include "../services/bounded_worker_pool.h"
 #include "../services/steam_game_updates_service.h"
 #include "../services/steam_artwork_store.h"
@@ -236,12 +236,13 @@ quint64 SteamGameUpdatesController::submitValueJob(
                 return result;
             }
             if (kind == Kind::AddParse) {
-                const auto parsed = providers::parseSteamGameDetails(body, expectedAppId);
+                const auto parsed = providers::parseSteamGameCatalogDetails(body, expectedAppId);
                 if (!parsed.succeeded()) {
                     result.error = parsed.error;
                     return result;
                 }
-                if (parsed.value.appId != expectedAppId || parsed.value.name.trimmed().isEmpty()) {
+                if (parsed.value.appId != expectedAppId
+                    || !domain::isValidSteamGameCatalogDetails(parsed.value)) {
                     result.error = domain::AppError(domain::ErrorCategory::InvalidResponse);
                     return result;
                 }
@@ -322,7 +323,7 @@ void SteamGameUpdatesController::addGame(QString storeUrl)
     if (!m_ready || !m_snapshotLoaded || m_addBusy || m_removeBusy || m_refreshBusy) return;
     m_addError.clear();
     m_notification.clear();
-    const auto request = providers::makeSteamReleaseProviderRequest(std::move(storeUrl));
+    const auto request = providers::makeSteamGameCatalogProviderRequest(std::move(storeUrl));
     if (!request.succeeded()) {
         m_addError = QStringLiteral("Enter a valid Steam Store /app/<id> URL.");
         emit stateChanged();

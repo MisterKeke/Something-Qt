@@ -1,6 +1,7 @@
 #pragma once
 
 #include "app_error.h"
+#include "steam_game_catalog.h"
 
 #include <QString>
 #include <QtGlobal>
@@ -37,9 +38,6 @@ struct SteamCollection final {
 
 struct SteamCollectionGameInput final {
     quint32 steamAppId{0};
-    QString displayName;
-    // A managed Steam artwork filename. Empty when no cached artwork is set.
-    QString artworkReference;
     std::optional<SteamCollectionGameStatus> status;
     std::optional<int> personalRating; // Optional five-point rating (1–5).
     QString personalComment;
@@ -49,9 +47,7 @@ struct SteamCollectionGameInput final {
 // (collectionId, steamAppId) pair is its stable membership identity.
 struct SteamCollectionGameEntry final {
     qint64 collectionId{0};
-    quint32 steamAppId{0};
-    QString displayName;
-    QString artworkReference;
+    SteamGameCatalogEntry game;
     std::optional<SteamCollectionGameStatus> status;
     std::optional<int> personalRating;
     QString personalComment;

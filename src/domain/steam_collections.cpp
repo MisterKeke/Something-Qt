@@ -1,7 +1,5 @@
 #include "steam_collections.h"
 
-#include "steam_game.h"
-
 #include <QRegularExpression>
 
 #include <utility>
@@ -12,7 +10,6 @@ namespace {
 constexpr int maximumCollectionNameCharacters = 80;
 constexpr int maximumCollectionDescriptionCharacters = 2000;
 constexpr int maximumCollectionIconCharacters = 16;
-constexpr int maximumGameNameCharacters = 300;
 constexpr int maximumPersonalCommentCharacters = 4000;
 constexpr int minimumPersonalRating = 1;
 constexpr int maximumPersonalRating = 5;
@@ -53,15 +50,6 @@ bool isSupportedStatus(SteamCollectionGameStatus status)
         return true;
     }
     return false;
-}
-
-bool validArtworkReference(quint32 appId, const QString &reference)
-{
-    if (reference.isEmpty()) return true;
-    static const QRegularExpression filenamePattern(
-        QStringLiteral("^[1-9][0-9]{0,9}-[a-f0-9]{64}\\.(jpg|png|webp)$"));
-    return appId != 0 && filenamePattern.match(reference).hasMatch()
-        && reference.startsWith(QString::number(appId) + QLatin1Char('-'));
 }
 
 bool validIconText(const QString &icon)
@@ -127,16 +115,11 @@ AppError normalizeSteamCollectionInput(SteamCollectionInput &input)
 
 AppError normalizeSteamCollectionGameInput(SteamCollectionGameInput &input)
 {
-    input.displayName = input.displayName.trimmed().normalized(QString::NormalizationForm_C);
-    input.artworkReference = input.artworkReference.trimmed();
     input.personalComment = input.personalComment.trimmed()
         .normalized(QString::NormalizationForm_C);
-    if (input.artworkReference.isNull()) input.artworkReference = QStringLiteral("");
     if (input.personalComment.isNull()) input.personalComment = QStringLiteral("");
 
-    if (input.steamAppId == 0 || input.displayName.isEmpty()
-        || characterCount(input.displayName) > maximumGameNameCharacters
-        || !validArtworkReference(input.steamAppId, input.artworkReference)
+    if (input.steamAppId == 0
         || characterCount(input.personalComment) > maximumPersonalCommentCharacters
         || (input.personalRating
             && (*input.personalRating < minimumPersonalRating
@@ -165,17 +148,14 @@ bool isValidSteamCollection(const SteamCollection &collection)
 bool isValidSteamCollectionGameEntry(const SteamCollectionGameEntry &entry)
 {
     if (entry.collectionId <= 0 || entry.createdAt.trimmed().isEmpty()
-        || entry.updatedAt.trimmed().isEmpty()) {
+        || entry.updatedAt.trimmed().isEmpty() || !isValidSteamGameCatalogEntry(entry.game)) {
         return false;
     }
 
-    SteamCollectionGameInput input{entry.steamAppId, entry.displayName,
-                                   entry.artworkReference, entry.status,
+    SteamCollectionGameInput input{entry.game.appId, entry.status,
                                    entry.personalRating, entry.personalComment};
     if (normalizeSteamCollectionGameInput(input).isError()) return false;
-    return input.displayName == entry.displayName
-        && input.artworkReference == entry.artworkReference
-        && input.personalComment == entry.personalComment;
+    return input.personalComment == entry.personalComment;
 }
 
 } // namespace something::domain

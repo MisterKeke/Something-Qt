@@ -711,6 +711,88 @@ QByteArray serializeWeatherForecast(const WeatherForecast &forecast)
     return QJsonDocument(root).toJson(QJsonDocument::Compact);
 }
 
+FeatureParseResult<something::domain::SteamGameCatalogDetails> parseSteamGameCatalogDetails(
+    const QByteArray &body, quint32 expectedAppId)
+{
+    FeatureParseResult<something::domain::SteamGameCatalogDetails> result;
+    if (expectedAppId == 0 || body.isEmpty() || body.size() > 2 * 1024 * 1024) {
+        result.error = invalidResponse();
+        return result;
+    }
+
+    QJsonObject root;
+    if (!parseObject(body, &root)) {
+        result.error = invalidResponse();
+        return result;
+    }
+    const QJsonValue envelopeValue = root.value(QString::number(expectedAppId));
+    if (!envelopeValue.isObject()) {
+        result.error = invalidResponse();
+        return result;
+    }
+    const QJsonObject envelope = envelopeValue.toObject();
+    const QJsonValue success = envelope.value(QStringLiteral("success"));
+    if (!success.isBool()) {
+        result.error = invalidResponse();
+        return result;
+    }
+    if (!success.toBool()) {
+        result.error = something::domain::AppError(ErrorCategory::NotFound);
+        return result;
+    }
+
+    const QJsonValue dataValue = envelope.value(QStringLiteral("data"));
+    if (!dataValue.isObject()) {
+        result.error = invalidResponse();
+        return result;
+    }
+    const QJsonObject data = dataValue.toObject();
+    QString type;
+    QString name;
+    double returnedAppId = 0.0;
+    if (!requiredString(data, QStringLiteral("type"), &type)
+        || !requiredString(data, QStringLiteral("name"), &name)
+        || !requiredNumber(data, QStringLiteral("steam_appid"), &returnedAppId)
+        || std::floor(returnedAppId) != returnedAppId || returnedAppId <= 0.0
+        || returnedAppId > std::numeric_limits<quint32>::max()) {
+        result.error = invalidResponse();
+        return result;
+    }
+    if (type.trimmed().compare(QStringLiteral("game"), Qt::CaseInsensitive) != 0) {
+        result.error = something::domain::AppError(ErrorCategory::CapabilityUnavailable);
+        return result;
+    }
+    name = name.trimmed().normalized(QString::NormalizationForm_C);
+    if (static_cast<quint32>(returnedAppId) != expectedAppId
+        || name.isEmpty() || name.toUcs4().size() > 300) {
+        result.error = invalidResponse();
+        return result;
+    }
+
+    QString headerImage;
+    QString capsuleImage;
+    if (!optionalString(data, QStringLiteral("header_image"), &headerImage)
+        || !optionalString(data, QStringLiteral("capsule_image"), &capsuleImage)) {
+        result.error = invalidResponse();
+        return result;
+    }
+
+    something::domain::SteamGameCatalogDetails details;
+    details.appId = expectedAppId;
+    details.canonicalStoreUrl = QStringLiteral("https://store.steampowered.com/app/%1/")
+                                    .arg(expectedAppId);
+    details.name = std::move(name);
+    details.artworkUrl = something::domain::normalizeSteamArtworkUrl(headerImage);
+    if (details.artworkUrl.isEmpty())
+        details.artworkUrl = something::domain::normalizeSteamArtworkUrl(capsuleImage);
+    if (!something::domain::isValidSteamGameCatalogDetails(details)) {
+        result.error = invalidResponse();
+        return result;
+    }
+    result.value = std::move(details);
+    return result;
+}
+
 FeatureParseResult<SteamGameDetails> parseSteamGameDetails(const QByteArray &body,
                                                            quint32 expectedAppId)
 {
@@ -840,6 +922,11 @@ FeatureParseResult<SteamReleaseDetails> parseSteamReleaseDetails(const QByteArra
                                                                  quint32 expectedAppId)
 {
     FeatureParseResult<SteamReleaseDetails> result;
+    const auto catalog = parseSteamGameCatalogDetails(body, expectedAppId);
+    if (!catalog.succeeded()) {
+        result.error = catalog.error;
+        return result;
+    }
     if (expectedAppId == 0 || body.isEmpty() || body.size() > 2 * 1024 * 1024) {
         result.error = invalidResponse();
         return result;
@@ -873,42 +960,10 @@ FeatureParseResult<SteamReleaseDetails> parseSteamReleaseDetails(const QByteArra
     }
     const QJsonObject data = dataValue.toObject();
 
-    QString type;
-    QString title;
-    double returnedAppId = 0.0;
-    if (!requiredString(data, QStringLiteral("type"), &type)
-        || !requiredString(data, QStringLiteral("name"), &title)
-        || !requiredNumber(data, QStringLiteral("steam_appid"), &returnedAppId)
-        || std::floor(returnedAppId) != returnedAppId || returnedAppId <= 0.0
-        || returnedAppId > std::numeric_limits<quint32>::max()) {
-        result.error = invalidResponse();
-        return result;
-    }
-    if (type.trimmed().compare(QStringLiteral("game"), Qt::CaseInsensitive) != 0) {
-        result.error = something::domain::AppError(ErrorCategory::CapabilityUnavailable);
-        return result;
-    }
-    title = title.trimmed();
-    if (static_cast<quint32>(returnedAppId) != expectedAppId
-        || title.isEmpty() || title.toUcs4().size() > 300) {
-        result.error = invalidResponse();
-        return result;
-    }
-
-    QString headerImage;
-    QString capsuleImage;
-    if (!optionalString(data, QStringLiteral("header_image"), &headerImage)
-        || !optionalString(data, QStringLiteral("capsule_image"), &capsuleImage)) {
-        result.error = invalidResponse();
-        return result;
-    }
-
     SteamReleaseDetails details;
     details.appId = expectedAppId;
-    details.title = std::move(title);
-    details.artworkUrl = something::domain::normalizeSteamArtworkUrl(headerImage);
-    if (details.artworkUrl.isEmpty())
-        details.artworkUrl = something::domain::normalizeSteamArtworkUrl(capsuleImage);
+    details.title = catalog.value.name;
+    details.artworkUrl = catalog.value.artworkUrl;
 
     const QJsonValue releaseDateValue = data.value(QStringLiteral("release_date"));
     if (releaseDateValue.isUndefined() || releaseDateValue.isNull()) {

@@ -1,5 +1,7 @@
 #pragma once
 
+#include "steam_game_catalog.h"
+
 #include <QDate>
 #include <QString>
 #include <QtGlobal>
@@ -60,12 +62,7 @@ struct SteamReleaseDateInfo final {
     }
 };
 
-struct SteamReleaseArtworkMetadata final {
-    QString sourceUrl;
-    QString cachedFilename;
-    QString mimeType;
-    qint64 byteSize{0};
-};
+using SteamReleaseArtworkMetadata = SteamGameCatalogArtwork;
 
 // Detached Steam Store fields used when adding or refreshing a release. The
 // tracked record adds local membership and refresh timestamps around these.

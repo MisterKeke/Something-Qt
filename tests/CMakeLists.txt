@@ -274,6 +274,8 @@ add_executable(SomethingQtWeatherCurrencyTests
     ../src/domain/app_error.cpp
     ../src/domain/task_rules.cpp
     ../src/domain/weather_currency.cpp
+    ../src/domain/steam_game.cpp
+    ../src/domain/steam_game_catalog.cpp
     ../src/models/currency_rates_model.cpp
     ../src/models/weather_comparison_model.cpp
     ../src/models/weather_forecast_model.cpp
@@ -445,11 +447,13 @@ add_executable(SomethingQtSteamFeatureTests
     ../src/domain/task_date_rules.cpp
     ../src/domain/task_rules.cpp
     ../src/domain/steam_game.cpp
+    ../src/domain/steam_game_catalog.cpp
     ../src/domain/steam_release.cpp
     ../src/domain/weather_currency.cpp
     ../src/models/steam_games_model.cpp
     ../src/providers/feature_parsers.cpp
     ../src/providers/provider_policy.cpp
+    ../src/providers/steam_game_catalog_provider.cpp
     ../src/providers/steam_release_provider.cpp
     ../src/providers/steam_artwork_image_provider.cpp
     ../src/services/calendar_service.cpp
@@ -480,6 +484,7 @@ add_executable(SomethingQtGameUpdatesTests
     ../src/domain/task_rules.cpp
     ../src/domain/task_scheduling.cpp
     ../src/domain/steam_game.cpp
+    ../src/domain/steam_game_catalog.cpp
     ../src/domain/steam_game_updates.cpp
     ../src/domain/steam_release.cpp
     ../src/domain/weather_currency.cpp
@@ -490,6 +495,7 @@ add_executable(SomethingQtGameUpdatesTests
     ../src/providers/provider_response_cache.cpp
     ../src/providers/steam_news_parser.cpp
     ../src/providers/steam_news_provider.cpp
+    ../src/providers/steam_game_catalog_provider.cpp
     ../src/providers/steam_release_provider.cpp
     ../src/services/bounded_worker_pool.cpp
     ../src/services/steam_artwork_store.cpp
@@ -521,6 +527,7 @@ add_executable(SomethingQtDataImportTests
     ../src/domain/app_error.cpp
     ../src/domain/favorite_rules.cpp
     ../src/domain/steam_game.cpp
+    ../src/domain/steam_game_catalog.cpp
     ../src/domain/task_rules.cpp
     ../src/domain/desktop_application_rules.cpp
     ../src/domain/weather_currency.cpp

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "steam_game_catalog.h"
 #include "steam_game.h"
 
 #include <QString>
@@ -12,12 +13,7 @@ enum class SteamGameUpdateOwnershipStatus { Owned, NotOwned };
 
 enum class SteamGameUpdateRefreshState { NeverAttempted, Succeeded, Failed };
 
-struct SteamGameUpdateArtworkMetadata final {
-    QString sourceUrl;
-    QString cachedFilename;
-    QString mimeType;
-    qint64 byteSize{0};
-};
+using SteamGameUpdateArtworkMetadata = SteamGameCatalogArtwork;
 
 // Presence in the independent follow table means news updates are followed.
 // ownershipStatus only controls the user's local Owned/Following label.

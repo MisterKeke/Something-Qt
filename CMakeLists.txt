@@ -97,6 +97,7 @@ qt_add_executable(SomethingQt WIN32
     src/domain/task_scheduling.cpp
     src/domain/scheduling_engine.cpp
     src/domain/steam_game.cpp
+    src/domain/steam_game_catalog.cpp
     src/domain/steam_game_updates.cpp
     src/domain/steam_collections.cpp
     src/domain/steam_release.cpp
@@ -112,6 +113,7 @@ qt_add_executable(SomethingQt WIN32
     src/providers/provider_parsers.cpp
     src/providers/feature_parsers.cpp
     src/providers/steam_news_parser.cpp
+    src/providers/steam_game_catalog_provider.cpp
     src/providers/provider_image_provider.cpp
     src/providers/wallpaper_image_provider.cpp
     src/providers/application_icon_image_provider.cpp

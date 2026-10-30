@@ -2,7 +2,7 @@
 
 #include "../domain/steam_game.h"
 #include "../providers/feature_parsers.h"
-#include "../providers/steam_release_provider.h"
+#include "../providers/steam_game_catalog_provider.h"
 #include "../services/steam_release_service.h"
 
 #include <QDateTime>
@@ -196,8 +196,8 @@ void SteamReleaseController::addRelease(QString storeUrl)
         || m_dateChangeAcknowledgeBusy) return;
     m_addError.clear();
     m_notification.clear();
-    const providers::SteamReleaseProviderRequest request =
-        providers::makeSteamReleaseProviderRequest(std::move(storeUrl));
+    const providers::SteamGameCatalogProviderRequest request =
+        providers::makeSteamGameCatalogProviderRequest(std::move(storeUrl));
     if (!request.succeeded()) {
         m_addError = QStringLiteral("Enter a valid Steam Store /app/<id> URL.");
         emit stateChanged();
@@ -303,8 +303,8 @@ void SteamReleaseController::dispatchRefreshQueue()
            && m_nextRefreshIndex < m_refreshWork.size()) {
         const int index = m_nextRefreshIndex++;
         const RefreshWork &work = m_refreshWork.at(index);
-        const providers::SteamReleaseProviderRequest request =
-            providers::makeSteamReleaseProviderRequest(work.canonicalStoreUrl);
+        const providers::SteamGameCatalogProviderRequest request =
+            providers::makeSteamGameCatalogProviderRequest(work.canonicalStoreUrl);
         if (!request.succeeded()) {
             completeRefreshItem(index, nullptr,
                                 QStringLiteral("The saved Steam Store URL is invalid."));
