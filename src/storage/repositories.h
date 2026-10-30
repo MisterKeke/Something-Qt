@@ -256,6 +256,7 @@ public:
     RepositoryResult<SteamCollectionDeleteResult> remove(qint64 collectionId);
     RepositoryResult<QVector<domain::SteamCollectionGameEntry>> games(
         qint64 collectionId) const;
+    RepositoryResult<QVector<domain::SteamCollectionGameEntry>> allGames() const;
     RepositoryResult<domain::SteamCollectionGameEntry> addGame(
         qint64 collectionId, domain::SteamGameCatalogDetails catalogDetails,
         domain::SteamCollectionGameInput input);

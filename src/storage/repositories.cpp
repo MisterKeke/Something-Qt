@@ -679,7 +679,8 @@ QString steamCollectionGameSelect()
         "cg.created_at,cg.updated_at,c.steam_app_id,c.store_url,c.name,"
         "c.artwork_source_url,c.artwork_filename,c.artwork_mime_type,c.artwork_byte_size,"
         "c.created_at,c.updated_at FROM steam_collection_games cg "
-        "JOIN steam_game_catalog c ON c.steam_app_id=cg.steam_app_id");
+        "JOIN steam_game_catalog c ON c.steam_app_id=cg.steam_app_id "
+        "JOIN steam_collections col ON col.id=cg.collection_id");
 }
 
 } // namespace
@@ -3779,6 +3780,28 @@ SteamCollectionsRepository::games(qint64 collectionId) const
     query.addBindValue(collectionId);
     if (!query.exec())
         return failure<QVector<domain::SteamCollectionGameEntry>>(queryFailure(query));
+    QVector<domain::SteamCollectionGameEntry> entries;
+    while (query.next()) {
+        domain::SteamCollectionGameEntry entry;
+        if (!decodeSteamCollectionGame(query, &entry))
+            return failure<QVector<domain::SteamCollectionGameEntry>>(
+                domain::ErrorCategory::Storage);
+        entries.push_back(std::move(entry));
+    }
+    RepositoryResult<QVector<domain::SteamCollectionGameEntry>> result;
+    result.value = std::move(entries);
+    return result;
+}
+
+RepositoryResult<QVector<domain::SteamCollectionGameEntry>>
+SteamCollectionsRepository::allGames() const
+{
+    Q_ASSERT(QThread::currentThread() == m_database.driver()->thread());
+    QSqlQuery query(m_database);
+    if (!query.exec(steamCollectionGameSelect()
+            + QStringLiteral(" ORDER BY c.name COLLATE NOCASE,c.steam_app_id,cg.collection_id"))) {
+        return failure<QVector<domain::SteamCollectionGameEntry>>(queryFailure(query));
+    }
     QVector<domain::SteamCollectionGameEntry> entries;
     while (query.next()) {
         domain::SteamCollectionGameEntry entry;

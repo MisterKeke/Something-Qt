@@ -77,6 +77,7 @@ qt_add_executable(SomethingQt WIN32
     src/controllers/legacy_data_import_controller.cpp
     src/controllers/setups_controller.cpp
     src/controllers/steam_release_controller.cpp
+    src/controllers/steam_collections_controller.cpp
     src/controllers/steam_game_updates_controller.cpp
     src/controllers/steam_games_controller.cpp
     src/controllers/favorites_controller.cpp
@@ -131,6 +132,7 @@ qt_add_executable(SomethingQt WIN32
     src/services/setup_icon_store.cpp
     src/services/setups_service.cpp
     src/services/steam_artwork_store.cpp
+    src/services/steam_collections_service.cpp
     src/services/steam_game_updates_service.cpp
     src/services/steam_release_service.cpp
     src/services/steam_service.cpp
@@ -213,6 +215,7 @@ qt_add_qml_module(SomethingQt
         qml/pages/SteamReleaseRadarPage.qml
         qml/pages/GameUpdatesPage.qml
         qml/pages/SteamGamesPage.qml
+        qml/pages/SteamCollectionsPage.qml
         qml/pages/TasksPage.qml
         qml/pages/TerminalPage.qml
         qml/pages/WeatherPage.qml

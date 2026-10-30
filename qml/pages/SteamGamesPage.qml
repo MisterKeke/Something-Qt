@@ -9,6 +9,7 @@ Item {
 
     property var controller
     property var releaseController
+    property var collectionsController
     property var savedViewState: ({})
     property string currentSection: "prices"
 
@@ -19,7 +20,8 @@ Item {
         return {
             section: currentSection,
             prices: pricePanel.captureViewState(),
-            releases: releasePanel.captureViewState()
+            releases: releasePanel.captureViewState(),
+            collections: collectionPanel.captureViewState()
         }
     }
 
@@ -28,10 +30,12 @@ Item {
         currentSection = releaseController
                          && Number(releaseController.pendingReleaseDetailsAppId) > 0
                          ? "releases"
-                         : savedViewState.section === "releases" ? "releases" : "prices"
+                         : savedViewState.section === "releases" ? "releases"
+                         : savedViewState.section === "collections" ? "collections" : "prices"
         Qt.callLater(function() {
             pricePanel.restoreViewState(root.savedViewState.prices || {})
             releasePanel.restoreViewState(root.savedViewState.releases || {})
+            collectionPanel.restoreViewState(root.savedViewState.collections || {})
             root.focusPendingReleaseDetails()
         })
     }
@@ -64,6 +68,12 @@ Item {
                 tint: ThemeModule.Theme.accentCyan
                 onClicked: root.currentSection = "releases"
             }
+            Shared.FilterChip {
+                text: qsTr("Collections")
+                selected: root.currentSection === "collections"
+                tint: ThemeModule.Theme.accentCyan
+                onClicked: root.currentSection = "collections"
+            }
             Item { Layout.fillWidth: true }
         }
 
@@ -71,8 +81,11 @@ Item {
             id: sectionStack
             Layout.fillWidth: true
             Layout.preferredHeight: root.currentSection === "releases"
-                                    ? releasePanel.implicitHeight : pricePanel.implicitHeight
-            currentIndex: root.currentSection === "releases" ? 1 : 0
+                                    ? releasePanel.implicitHeight
+                                    : root.currentSection === "collections"
+                                      ? collectionPanel.implicitHeight : pricePanel.implicitHeight
+            currentIndex: root.currentSection === "releases" ? 1
+                          : root.currentSection === "collections" ? 2 : 0
 
             Item {
                 Layout.fillWidth: true
@@ -92,6 +105,16 @@ Item {
                     width: parent.width
                     controller: root.releaseController
                     active: root.currentSection === "releases"
+                }
+            }
+
+            Item {
+                Layout.fillWidth: true
+                implicitHeight: collectionPanel.implicitHeight
+                ThemeModule.SteamCollectionsPage {
+                    id: collectionPanel
+                    width: parent.width
+                    controller: root.collectionsController
                 }
             }
         }

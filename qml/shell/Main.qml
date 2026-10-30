@@ -242,6 +242,7 @@ ApplicationWindow {
         Pages.SteamGamesPage {
             controller: steamGamesController
             releaseController: steamReleaseController
+            collectionsController: steamCollectionsController
         }
     }
 

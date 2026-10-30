@@ -31,6 +31,7 @@
 #include "controllers/settings_controller.h"
 #include "controllers/setups_controller.h"
 #include "controllers/steam_release_controller.h"
+#include "controllers/steam_collections_controller.h"
 #include "controllers/steam_games_controller.h"
 #include "controllers/steam_game_updates_controller.h"
 #include "controllers/tasks_controller.h"
@@ -156,6 +157,7 @@ int main(int argc, char *argv[])
         &services, &fileExplorerService, &fileExplorerShell);
     something::controllers::SteamGamesController steamGamesController(&services);
     something::controllers::SteamReleaseController steamReleaseController(&services);
+    something::controllers::SteamCollectionsController steamCollectionsController(&services);
     something::controllers::SteamGameUpdatesController steamGameUpdatesController(&services);
     commandService.setSnapshotProvider(QStringLiteral("settings"), [&settingsController, &wallpaperController,
                                                                      &steamGamesController] {
@@ -295,6 +297,8 @@ int main(int argc, char *argv[])
                                              &steamGamesController);
     engine.rootContext()->setContextProperty(QStringLiteral("steamReleaseController"),
                                              &steamReleaseController);
+    engine.rootContext()->setContextProperty(QStringLiteral("steamCollectionsController"),
+                                             &steamCollectionsController);
     engine.rootContext()->setContextProperty(QStringLiteral("steamGameUpdatesController"),
                                              &steamGameUpdatesController);
     engine.loadFromModule(QStringLiteral("Something.App"), QStringLiteral("Main"));
