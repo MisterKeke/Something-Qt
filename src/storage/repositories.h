@@ -229,8 +229,12 @@ public:
     RepositoryResult<void> setCountry(QString countryCode);
     RepositoryResult<QVector<SteamGame>> list() const;
     RepositoryResult<SteamGame> get(qint64 id) const;
-    RepositoryResult<SteamGame> add(SteamGame game);
-    RepositoryResult<SteamGame> updateRefresh(SteamGame game);
+    RepositoryResult<SteamGame> add(
+        SteamGame game,
+        const std::function<bool()> &cancellationRequested = {});
+    RepositoryResult<SteamGame> updateRefresh(
+        SteamGame game,
+        const std::function<bool()> &cancellationRequested = {});
     RepositoryResult<void> applyRefreshBatch(
         const QVector<SteamRefreshUpdate> &updates,
         const std::function<bool()> &cancellationRequested = {});

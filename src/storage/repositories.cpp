@@ -136,6 +136,85 @@ QVariant nullableString(const QString &value)
     return value.isEmpty() ? QVariant() : QVariant(value);
 }
 
+std::optional<qint64> nullableInteger(const QVariant &value)
+{
+    return value.isNull() ? std::nullopt : std::optional<qint64>(value.toLongLong());
+}
+
+RepositoryResult<void> recordSteamPriceObservation(QSqlDatabase &database,
+                                                   const SteamGame &game,
+                                                   const QString &observedAtUtc)
+{
+    static const QRegularExpression countryPattern(QStringLiteral("^[A-Z]{2}$"));
+    static const QRegularExpression currencyPattern(QStringLiteral("^[A-Z]{3}$"));
+    const bool priced = game.priceStatus == QStringLiteral("priced");
+    const bool free = game.priceStatus == QStringLiteral("free");
+    const bool unavailable = game.priceStatus == QStringLiteral("unavailable");
+    const bool unsupported = game.priceStatus == QStringLiteral("unsupported");
+    if (game.id <= 0 || game.steamAppId <= 0
+        || !countryPattern.match(game.priceCountryCode).hasMatch()
+        || (!game.currency.isEmpty() && !currencyPattern.match(game.currency).hasMatch())
+        || game.discountPercent < 0 || game.discountPercent > 100
+        || (!priced && game.discountPercent != 0)
+        || (priced && (game.currency.isEmpty() || !game.currentPriceMinor
+                       || !game.regularPriceMinor))
+        || (free && (game.currentPriceMinor != std::optional<qint64>(0)
+                     || game.regularPriceMinor != std::optional<qint64>(0)))
+        || ((unavailable || unsupported)
+            && (game.currentPriceMinor || game.regularPriceMinor))) {
+        return failureVoid(domain::ErrorCategory::Validation);
+    }
+
+    // Keep unavailable and unsupported checks as state-only observations; no price is inferred.
+    QDateTime timestamp = QDateTime::fromString(observedAtUtc, Qt::ISODateWithMs);
+    if (!timestamp.isValid()) timestamp = QDateTime::fromString(observedAtUtc, Qt::ISODate);
+    if (!timestamp.isValid()) return failureVoid(domain::ErrorCategory::Validation);
+    timestamp = timestamp.toUTC();
+    const QString normalizedTimestamp = timestamp.toString(Qt::ISODateWithMs);
+    const QString observationDay = timestamp.date().toString(Qt::ISODate);
+
+    QSqlQuery previous(database);
+    previous.prepare(QStringLiteral(
+        "SELECT price_state,current_price_minor,regular_price_minor,discount_percent,"
+        "date(observed_at_utc) FROM steam_price_observations "
+        "WHERE steam_game_id=? AND country_code=? AND currency_code IS ? "
+        "ORDER BY observed_at_utc DESC,id DESC LIMIT 1"));
+    previous.addBindValue(game.id);
+    previous.addBindValue(game.priceCountryCode);
+    previous.addBindValue(nullableString(game.currency));
+    if (!previous.exec()) return failureVoid(queryFailure(previous));
+
+    bool unchangedToday = false;
+    if (previous.next()) {
+        unchangedToday = previous.value(0).toString() == game.priceStatus
+            && nullableInteger(previous.value(1)) == game.currentPriceMinor
+            && nullableInteger(previous.value(2)) == game.regularPriceMinor
+            && previous.value(3).toInt() == game.discountPercent
+            && previous.value(4).toString() == observationDay;
+    }
+    previous.finish();
+    if (unchangedToday) return {};
+
+    QSqlQuery insert(database);
+    insert.prepare(QStringLiteral(
+        "INSERT INTO steam_price_observations(steam_game_id,steam_app_id,country_code,"
+        "currency_code,price_state,current_price_minor,regular_price_minor,"
+        "discount_percent,observed_at_utc) VALUES(?,?,?,?,?,?,?,?,?)"));
+    insert.addBindValue(game.id);
+    insert.addBindValue(game.steamAppId);
+    insert.addBindValue(game.priceCountryCode);
+    insert.addBindValue(nullableString(game.currency));
+    insert.addBindValue(game.priceStatus);
+    insert.addBindValue(game.currentPriceMinor
+        ? QVariant(*game.currentPriceMinor) : QVariant());
+    insert.addBindValue(game.regularPriceMinor
+        ? QVariant(*game.regularPriceMinor) : QVariant());
+    insert.addBindValue(game.discountPercent);
+    insert.addBindValue(normalizedTimestamp);
+    if (!insert.exec()) return failureVoid(queryFailure(insert));
+    return {};
+}
+
 domain::TaskHistoryValue historyValue(const QJsonValue &value)
 {
     return domain::TaskHistoryValue::fromJsonValue(value);
@@ -3192,7 +3271,8 @@ RepositoryResult<SteamGame> SteamRepository::load(qint64 id) const
     return result;
 }
 
-RepositoryResult<SteamGame> SteamRepository::add(SteamGame game)
+RepositoryResult<SteamGame> SteamRepository::add(
+    SteamGame game, const std::function<bool()> &cancellationRequested)
 {
     Q_ASSERT(QThread::currentThread() == m_database.driver()->thread());
     game.name = game.name.trimmed();
@@ -3203,13 +3283,19 @@ RepositoryResult<SteamGame> SteamRepository::add(SteamGame game)
     static const QRegularExpression countryPattern(QStringLiteral("^[A-Z]{2}$"));
     if (game.steamAppId <= 0 || game.storeUrl.trimmed().isEmpty() || game.name.isEmpty() || game.name.toUcs4().size() > 300
         || game.priceCountryCode.isEmpty() || !countryPattern.match(game.priceCountryCode).hasMatch()
-        || (game.priceStatus != QStringLiteral("priced") && game.priceStatus != QStringLiteral("free")
-            && game.priceStatus != QStringLiteral("unavailable"))
+        || (game.priceStatus != QStringLiteral("priced")
+            && game.priceStatus != QStringLiteral("free")
+            && game.priceStatus != QStringLiteral("unavailable")
+            && game.priceStatus != QStringLiteral("unsupported"))
         || (!game.currency.isEmpty() && !currencyPattern.match(game.currency).hasMatch())
         || game.discountPercent < 0 || game.discountPercent > 100
         || (game.regularPriceMinor && *game.regularPriceMinor < 0)
         || (game.currentPriceMinor && *game.currentPriceMinor < 0))
         return failure<SteamGame>(domain::ErrorCategory::Validation);
+    if (cancellationRequested && cancellationRequested())
+        return failure<SteamGame>(domain::ErrorCategory::Cancelled);
+    Transaction transaction(m_database);
+    if (!transaction.active()) return failure<SteamGame>(domain::ErrorCategory::Storage);
     QSqlQuery query(m_database);
     query.prepare(QStringLiteral("INSERT INTO steam_games(steam_app_id,store_url,name,image_source_url,price_status,currency,regular_price_minor,current_price_minor,discount_percent,price_country_code,last_checked_at,last_attempted_at,last_refresh_error) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)"));
     query.addBindValue(game.steamAppId);
@@ -3226,10 +3312,21 @@ RepositoryResult<SteamGame> SteamRepository::add(SteamGame game)
     query.addBindValue(nullableString(game.lastAttemptedAt));
     query.addBindValue(game.lastRefreshError);
     if (!query.exec()) return failure<SteamGame>(queryFailure(query));
-    return load(query.lastInsertId().toLongLong());
+    game.id = query.lastInsertId().toLongLong();
+    query.finish();
+    const auto observation = recordSteamPriceObservation(m_database, game, game.lastCheckedAt);
+    if (!observation.succeeded())
+        return failure<SteamGame>(observation.error.category());
+    if (cancellationRequested && cancellationRequested())
+        return failure<SteamGame>(domain::ErrorCategory::Cancelled);
+    const auto inserted = load(game.id);
+    if (!inserted.succeeded()) return inserted;
+    if (!transaction.commit()) return failure<SteamGame>(domain::ErrorCategory::Storage);
+    return inserted;
 }
 
-RepositoryResult<SteamGame> SteamRepository::updateRefresh(SteamGame game)
+RepositoryResult<SteamGame> SteamRepository::updateRefresh(
+    SteamGame game, const std::function<bool()> &cancellationRequested)
 {
     Q_ASSERT(QThread::currentThread() == m_database.driver()->thread());
     if (game.id <= 0) return failure<SteamGame>(domain::ErrorCategory::Validation);
@@ -3240,13 +3337,19 @@ RepositoryResult<SteamGame> SteamRepository::updateRefresh(SteamGame game)
     static const QRegularExpression currencyPattern(QStringLiteral("^[A-Z]{3}$"));
     static const QRegularExpression countryPattern(QStringLiteral("^[A-Z]{2}$"));
     if (game.storeUrl.trimmed().isEmpty() || game.name.isEmpty() || game.name.toUcs4().size() > 300 || !countryPattern.match(game.priceCountryCode).hasMatch()
-        || (game.priceStatus != QStringLiteral("priced") && game.priceStatus != QStringLiteral("free")
-            && game.priceStatus != QStringLiteral("unavailable"))
+        || (game.priceStatus != QStringLiteral("priced")
+            && game.priceStatus != QStringLiteral("free")
+            && game.priceStatus != QStringLiteral("unavailable")
+            && game.priceStatus != QStringLiteral("unsupported"))
         || (!game.currency.isEmpty() && !currencyPattern.match(game.currency).hasMatch())
         || game.discountPercent < 0 || game.discountPercent > 100
         || (game.regularPriceMinor && *game.regularPriceMinor < 0)
         || (game.currentPriceMinor && *game.currentPriceMinor < 0))
         return failure<SteamGame>(domain::ErrorCategory::Validation);
+    if (cancellationRequested && cancellationRequested())
+        return failure<SteamGame>(domain::ErrorCategory::Cancelled);
+    Transaction transaction(m_database);
+    if (!transaction.active()) return failure<SteamGame>(domain::ErrorCategory::Storage);
     QSqlQuery query(m_database);
     query.prepare(QStringLiteral("UPDATE steam_games SET store_url=?,name=?,image_source_url=?,price_status=?,currency=?,regular_price_minor=?,current_price_minor=?,discount_percent=?,price_country_code=?,last_checked_at=?,last_attempted_at=?,last_refresh_error=?,updated_at=CURRENT_TIMESTAMP WHERE id=?"));
     query.addBindValue(game.storeUrl);
@@ -3264,7 +3367,16 @@ RepositoryResult<SteamGame> SteamRepository::updateRefresh(SteamGame game)
     query.addBindValue(game.id);
     if (!query.exec()) return failure<SteamGame>(queryFailure(query));
     if (query.numRowsAffected() != 1) return failure<SteamGame>(domain::ErrorCategory::NotFound);
-    return load(game.id);
+    query.finish();
+    const auto observation = recordSteamPriceObservation(m_database, game, game.lastCheckedAt);
+    if (!observation.succeeded())
+        return failure<SteamGame>(observation.error.category());
+    if (cancellationRequested && cancellationRequested())
+        return failure<SteamGame>(domain::ErrorCategory::Cancelled);
+    const auto updated = load(game.id);
+    if (!updated.succeeded()) return updated;
+    if (!transaction.commit()) return failure<SteamGame>(domain::ErrorCategory::Storage);
+    return updated;
 }
 
 RepositoryResult<void> SteamRepository::applyRefreshBatch(
@@ -3315,7 +3427,8 @@ RepositoryResult<void> SteamRepository::applyRefreshBatch(
         const SteamGame &game = *update.refreshedGame;
         const bool knownStatus = game.priceStatus == QStringLiteral("priced")
             || game.priceStatus == QStringLiteral("free")
-            || game.priceStatus == QStringLiteral("unavailable");
+            || game.priceStatus == QStringLiteral("unavailable")
+            || game.priceStatus == QStringLiteral("unsupported");
         if (game.id != update.gameId || game.name.trimmed().isEmpty()
             || game.name.toUcs4().size() > 300 || !knownStatus
             || !countryPattern.match(game.priceCountryCode).hasMatch()
@@ -3346,6 +3459,10 @@ RepositoryResult<void> SteamRepository::applyRefreshBatch(
         if (successfulUpdate.numRowsAffected() != 1)
             return failureVoid(domain::ErrorCategory::NotFound);
         successfulUpdate.finish();
+        const auto observation = recordSteamPriceObservation(
+            m_database, game, update.attemptedAt);
+        if (!observation.succeeded())
+            return failureVoid(observation.error.category());
     }
 
     if (cancellationRequested && cancellationRequested())

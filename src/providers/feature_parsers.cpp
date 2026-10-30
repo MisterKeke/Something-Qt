@@ -651,7 +651,8 @@ FeatureParseResult<SteamGameDetails> parseSteamGameDetails(const QByteArray &bod
     }
     const QJsonValue priceValue = data.value(QStringLiteral("price_overview"));
     if (priceValue.isUndefined() || priceValue.isNull()) {
-        details.priceState = SteamPriceState::Unavailable;
+        details.priceState = isFreeValue.isBool()
+            ? SteamPriceState::Unavailable : SteamPriceState::Unsupported;
         result.value = std::move(details);
         return result;
     }

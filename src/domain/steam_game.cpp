@@ -88,6 +88,7 @@ QString steamPriceStateName(SteamPriceState state)
     case SteamPriceState::Priced: return QStringLiteral("priced");
     case SteamPriceState::Free: return QStringLiteral("free");
     case SteamPriceState::Unavailable: return QStringLiteral("unavailable");
+    case SteamPriceState::Unsupported: return QStringLiteral("unsupported");
     }
     return QStringLiteral("unavailable");
 }

@@ -38,7 +38,8 @@ bool validSteamRecord(const domain::SteamGameDetails &details)
     if (details.priceState == domain::SteamPriceState::Free)
         return details.regularPriceMinor == std::optional<qint64>(0)
             && details.currentPriceMinor == std::optional<qint64>(0);
-    return details.priceState == domain::SteamPriceState::Unavailable
+    return (details.priceState == domain::SteamPriceState::Unavailable
+            || details.priceState == domain::SteamPriceState::Unsupported)
         && !details.regularPriceMinor && !details.currentPriceMinor;
 }
 
@@ -158,7 +159,7 @@ storage::StorageCommand SteamService::addGame(QString profileDirectory,
         game.priceCountryCode = countryCode;
         game.lastCheckedAt = checkedAt;
         game.lastAttemptedAt = checkedAt;
-        const auto inserted = repositories.steam.add(std::move(game));
+        const auto inserted = repositories.steam.add(std::move(game), cancelled);
         if (!inserted.succeeded()) return failed(inserted.error);
         storage::StorageReply reply;
         reply.values.insert(QStringLiteral("game"), gameValue(inserted.value, profileDirectory));

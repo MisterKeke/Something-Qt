@@ -807,7 +807,8 @@ domain::SteamGameDetails SteamGamesController::detailsFromMap(const QVariantMap 
     const QString state = map.value(QStringLiteral("priceState")).toString();
     details.priceState = state == QStringLiteral("priced") ? domain::SteamPriceState::Priced
         : state == QStringLiteral("free") ? domain::SteamPriceState::Free
-                                           : domain::SteamPriceState::Unavailable;
+        : state == QStringLiteral("unsupported") ? domain::SteamPriceState::Unsupported
+                                                   : domain::SteamPriceState::Unavailable;
     details.currency = map.value(QStringLiteral("currency")).toString();
     if (map.value(QStringLiteral("hasRegularPrice")).toBool())
         details.regularPriceMinor = map.value(QStringLiteral("regularPriceMinor")).toLongLong();
