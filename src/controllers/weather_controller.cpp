@@ -95,6 +95,40 @@ QString forecastLocation(const domain::WeatherForecast &forecast)
         : QStringLiteral("Your location (%1)").arg(forecast.timezone);
 }
 
+QVariantMap weatherDayMap(const domain::WeatherDay &day)
+{
+    QVariantMap row{
+        {QStringLiteral("date"), day.date},
+        {QStringLiteral("weatherCode"), day.weatherCode},
+        {QStringLiteral("maximum"), day.maximumCelsius},
+        {QStringLiteral("minimum"), day.minimumCelsius},
+        {QStringLiteral("precipitation"), day.precipitationProbability},
+    };
+    if (day.sunriseTimestamp)
+        row.insert(QStringLiteral("sunriseTimestamp"), *day.sunriseTimestamp);
+    if (day.sunsetTimestamp)
+        row.insert(QStringLiteral("sunsetTimestamp"), *day.sunsetTimestamp);
+    if (day.daylightDurationSeconds)
+        row.insert(QStringLiteral("daylightDurationSeconds"), *day.daylightDurationSeconds);
+    return row;
+}
+
+domain::WeatherDay weatherDayFromMap(const QVariantMap &row)
+{
+    domain::WeatherDay day{row.value(QStringLiteral("date")).toString(),
+                           row.value(QStringLiteral("weatherCode")).toInt(),
+                           row.value(QStringLiteral("maximum")).toDouble(),
+                           row.value(QStringLiteral("minimum")).toDouble(),
+                           row.value(QStringLiteral("precipitation")).toDouble()};
+    if (row.contains(QStringLiteral("sunriseTimestamp")))
+        day.sunriseTimestamp = row.value(QStringLiteral("sunriseTimestamp")).toString();
+    if (row.contains(QStringLiteral("sunsetTimestamp")))
+        day.sunsetTimestamp = row.value(QStringLiteral("sunsetTimestamp")).toString();
+    if (row.contains(QStringLiteral("daylightDurationSeconds")))
+        day.daylightDurationSeconds = row.value(QStringLiteral("daylightDurationSeconds")).toDouble();
+    return day;
+}
+
 } // namespace
 
 WeatherController::WeatherController(application::ApplicationServiceGraph *graph,
@@ -227,13 +261,7 @@ quint64 WeatherController::submitParse(Kind kind, QByteArray body, QString fresh
             QVariantList days;
             days.reserve(forecast.days.size());
             for (const domain::WeatherDay &day : forecast.days) {
-                days.push_back(QVariantMap{
-                    {QStringLiteral("date"), day.date},
-                    {QStringLiteral("weatherCode"), day.weatherCode},
-                    {QStringLiteral("maximum"), day.maximumCelsius},
-                    {QStringLiteral("minimum"), day.minimumCelsius},
-                    {QStringLiteral("precipitation"), day.precipitationProbability},
-                });
+                days.push_back(weatherDayMap(day));
             }
             QVariantMap current;
             if (forecast.current.temperatureCelsius)
@@ -590,12 +618,7 @@ void WeatherController::onValueJobFinished(quint64 id, const QVariantMap &values
             forecast.current.windKmh = current.value(QStringLiteral("wind")).toDouble();
         forecast.timezone = values.value(QStringLiteral("timezone")).toString();
         for (const QVariant &value : values.value(QStringLiteral("days")).toList()) {
-            const QVariantMap row = value.toMap();
-            forecast.days.push_back({row.value(QStringLiteral("date")).toString(),
-                                     row.value(QStringLiteral("weatherCode")).toInt(),
-                                     row.value(QStringLiteral("maximum")).toDouble(),
-                                     row.value(QStringLiteral("minimum")).toDouble(),
-                                     row.value(QStringLiteral("precipitation")).toDouble()});
+            forecast.days.push_back(weatherDayFromMap(value.toMap()));
         }
         publishCity(pending.city, forecast);
         return;
@@ -617,12 +640,7 @@ void WeatherController::onValueJobFinished(quint64 id, const QVariantMap &values
         forecast.current.windKmh = current.value(QStringLiteral("wind")).toDouble();
     forecast.timezone = values.value(QStringLiteral("timezone")).toString();
     for (const QVariant &value : values.value(QStringLiteral("days")).toList()) {
-        const QVariantMap row = value.toMap();
-        forecast.days.push_back({row.value(QStringLiteral("date")).toString(),
-                                 row.value(QStringLiteral("weatherCode")).toInt(),
-                                 row.value(QStringLiteral("maximum")).toDouble(),
-                                 row.value(QStringLiteral("minimum")).toDouble(),
-                                 row.value(QStringLiteral("precipitation")).toDouble()});
+        forecast.days.push_back(weatherDayFromMap(value.toMap()));
     }
     savePrimaryForecast(forecast, pending.latitude, pending.longitude,
                         pending.saveLocation, pending.generation);

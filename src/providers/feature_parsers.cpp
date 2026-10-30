@@ -105,6 +105,35 @@ bool validDate(const QString &value)
     return date.isValid() && date.toString(Qt::ISODate) == value;
 }
 
+bool validSolarTimestamp(const QString &value, const QString &expectedDate)
+{
+    static const QRegularExpression pattern(QStringLiteral(
+        R"(^([0-9]{4}-[0-9]{2}-[0-9]{2})T([0-9]{2}):([0-9]{2})(?::([0-9]{2})(?:\.[0-9]{1,9})?)?(?:[Zz]|([+-])([0-9]{2}):([0-9]{2}))?$)"));
+    const QRegularExpressionMatch match = pattern.match(value);
+    if (!match.hasMatch() || match.captured(1) != expectedDate
+        || !validDate(match.captured(1))) return false;
+
+    bool hourOk = false;
+    bool minuteOk = false;
+    const int hour = match.captured(2).toInt(&hourOk);
+    const int minute = match.captured(3).toInt(&minuteOk);
+    if (!hourOk || !minuteOk || hour > 23 || minute > 59) return false;
+    if (!match.captured(4).isEmpty()) {
+        bool secondOk = false;
+        const int second = match.captured(4).toInt(&secondOk);
+        if (!secondOk || second > 59) return false;
+    }
+    if (!match.captured(5).isEmpty()) {
+        bool offsetHourOk = false;
+        bool offsetMinuteOk = false;
+        const int offsetHour = match.captured(6).toInt(&offsetHourOk);
+        const int offsetMinute = match.captured(7).toInt(&offsetMinuteOk);
+        if (!offsetHourOk || !offsetMinuteOk || offsetHour > 23 || offsetMinute > 59)
+            return false;
+    }
+    return true;
+}
+
 template<typename T, typename Convert>
 bool parseArray(const QJsonValue &value, QVector<T> *output, Convert convert)
 {
@@ -117,6 +146,24 @@ bool parseArray(const QJsonValue &value, QVector<T> *output, Convert convert)
         output->push_back(std::move(result));
     }
     return true;
+}
+
+template<typename T, typename Convert>
+QVector<std::optional<T>> parseOptionalSolarArray(const QJsonValue &value,
+                                                  qsizetype expectedCount,
+                                                  Convert convert)
+{
+    QVector<std::optional<T>> output(expectedCount);
+    if (!value.isArray()) return output;
+    const QJsonArray array = value.toArray();
+    const qsizetype count = std::min(array.size(), expectedCount);
+    for (qsizetype i = 0; i < count; ++i) {
+        const QJsonValue item = array.at(i);
+        if (item.isNull() || item.isUndefined()) continue;
+        T parsed{};
+        if (convert(item, &parsed)) output[i] = std::move(parsed);
+    }
+    return output;
 }
 
 bool parseDailyNumber(const QJsonValue &value, double *out)
@@ -214,10 +261,39 @@ FeatureParseResult<WeatherForecast> parseWeatherForecast(const QByteArray &body)
         result.error = invalidResponse();
         return result;
     }
+
+    const auto sunrises = parseOptionalSolarArray<QString>(
+        daily.value(QStringLiteral("sunrise")), count,
+        [](const QJsonValue &value, QString *out) {
+            if (!value.isString()) return false;
+            *out = value.toString();
+            return true;
+        });
+    const auto sunsets = parseOptionalSolarArray<QString>(
+        daily.value(QStringLiteral("sunset")), count,
+        [](const QJsonValue &value, QString *out) {
+            if (!value.isString()) return false;
+            *out = value.toString();
+            return true;
+        });
+    const auto daylightDurations = parseOptionalSolarArray<double>(
+        daily.value(QStringLiteral("daylight_duration")), count,
+        [](const QJsonValue &value, double *out) {
+            if (!value.isDouble() || !std::isfinite(value.toDouble())
+                || value.toDouble() < 0.0 || value.toDouble() > 86400.0) return false;
+            *out = value.toDouble();
+            return true;
+        });
     result.value.days.reserve(count);
     for (qsizetype i = 0; i < count; ++i) {
-        result.value.days.push_back({dates.at(i), codes.at(i), highs.at(i), lows.at(i),
-                                     precipitation.at(i)});
+        WeatherDay day{dates.at(i), codes.at(i), highs.at(i), lows.at(i),
+                       precipitation.at(i)};
+        if (sunrises.at(i) && validSolarTimestamp(*sunrises.at(i), dates.at(i)))
+            day.sunriseTimestamp = sunrises.at(i);
+        if (sunsets.at(i) && validSolarTimestamp(*sunsets.at(i), dates.at(i)))
+            day.sunsetTimestamp = sunsets.at(i);
+        day.daylightDurationSeconds = daylightDurations.at(i);
+        result.value.days.push_back(std::move(day));
     }
     return result;
 }
@@ -348,20 +424,45 @@ QByteArray serializeWeatherForecast(const WeatherForecast &forecast)
     if (forecast.current.windKmh)
         current.insert(QStringLiteral("wind_speed_10m"), *forecast.current.windKmh);
     QJsonArray time, code, maximum, minimum, precipitation;
+    QJsonArray sunrise, sunset, daylightDuration;
+    bool hasSunrise = false;
+    bool hasSunset = false;
+    bool hasDaylightDuration = false;
     for (const WeatherDay &day : forecast.days) {
         time.push_back(day.date);
         code.push_back(day.weatherCode);
         maximum.push_back(day.maximumCelsius);
         minimum.push_back(day.minimumCelsius);
         precipitation.push_back(day.precipitationProbability);
+        if (day.sunriseTimestamp) {
+            sunrise.push_back(*day.sunriseTimestamp);
+            hasSunrise = true;
+        } else {
+            sunrise.push_back(QJsonValue(QJsonValue::Null));
+        }
+        if (day.sunsetTimestamp) {
+            sunset.push_back(*day.sunsetTimestamp);
+            hasSunset = true;
+        } else {
+            sunset.push_back(QJsonValue(QJsonValue::Null));
+        }
+        if (day.daylightDurationSeconds) {
+            daylightDuration.push_back(*day.daylightDurationSeconds);
+            hasDaylightDuration = true;
+        } else {
+            daylightDuration.push_back(QJsonValue(QJsonValue::Null));
+        }
     }
-    const QJsonObject daily{
+    QJsonObject daily{
         {QStringLiteral("time"), time},
         {QStringLiteral("weather_code"), code},
         {QStringLiteral("temperature_2m_max"), maximum},
         {QStringLiteral("temperature_2m_min"), minimum},
         {QStringLiteral("precipitation_probability_max"), precipitation},
     };
+    if (hasSunrise) daily.insert(QStringLiteral("sunrise"), sunrise);
+    if (hasSunset) daily.insert(QStringLiteral("sunset"), sunset);
+    if (hasDaylightDuration) daily.insert(QStringLiteral("daylight_duration"), daylightDuration);
     const QJsonObject root{{QStringLiteral("current"), current},
                            {QStringLiteral("daily"), daily},
                            {QStringLiteral("timezone"), forecast.timezone}};
