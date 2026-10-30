@@ -225,6 +225,51 @@ private:
     QSqlDatabase &m_database;
 };
 
+class SteamGameCatalogRepository final {
+public:
+    explicit SteamGameCatalogRepository(QSqlDatabase &database);
+    RepositoryResult<QVector<domain::SteamGameCatalogEntry>> list() const;
+    RepositoryResult<domain::SteamGameCatalogEntry> get(quint32 appId) const;
+    RepositoryResult<domain::SteamGameCatalogEntry> upsert(
+        domain::SteamGameCatalogDetails details);
+    RepositoryResult<void> setArtwork(
+        quint32 appId, const QString &expectedSourceUrl,
+        const domain::SteamGameCatalogArtwork &artwork);
+    RepositoryResult<bool> hasArtworkFilename(const QString &filename) const;
+    RepositoryResult<void> remove(quint32 appId);
+
+private:
+    RepositoryResult<domain::SteamGameCatalogEntry> load(quint32 appId) const;
+    QSqlDatabase &m_database;
+};
+
+class SteamCollectionsRepository final {
+public:
+    explicit SteamCollectionsRepository(QSqlDatabase &database);
+    RepositoryResult<QVector<domain::SteamCollection>> list() const;
+    RepositoryResult<domain::SteamCollection> get(qint64 collectionId) const;
+    RepositoryResult<domain::SteamCollection> create(
+        domain::SteamCollectionInput input);
+    RepositoryResult<domain::SteamCollection> update(
+        qint64 collectionId, domain::SteamCollectionInput input);
+    RepositoryResult<void> reorder(const QVector<qint64> &orderedIds);
+    RepositoryResult<SteamCollectionDeleteResult> remove(qint64 collectionId);
+    RepositoryResult<QVector<domain::SteamCollectionGameEntry>> games(
+        qint64 collectionId) const;
+    RepositoryResult<domain::SteamCollectionGameEntry> addGame(
+        qint64 collectionId, domain::SteamGameCatalogDetails catalogDetails,
+        domain::SteamCollectionGameInput input);
+    RepositoryResult<domain::SteamCollectionGameEntry> updateGame(
+        qint64 collectionId, domain::SteamCollectionGameInput input);
+    RepositoryResult<void> removeGame(qint64 collectionId, quint32 appId);
+
+private:
+    RepositoryResult<domain::SteamCollection> load(qint64 collectionId) const;
+    RepositoryResult<domain::SteamCollectionGameEntry> loadGame(
+        qint64 collectionId, quint32 appId) const;
+    QSqlDatabase &m_database;
+};
+
 class SteamRepository final {
 public:
     explicit SteamRepository(QSqlDatabase &database);
@@ -341,6 +386,8 @@ public:
     DesktopApplicationsRepository applications;
     SetupsRepository setups;
     WallpapersRepository wallpapers;
+    SteamGameCatalogRepository steamCatalog;
+    SteamCollectionsRepository steamCollections;
     SteamRepository steam;
     SteamReleaseRepository steamReleases;
     SteamGameUpdatesRepository gameUpdates;

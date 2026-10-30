@@ -103,6 +103,7 @@ AppError normalizeSteamCollectionInput(SteamCollectionInput &input)
 
     QString normalizedColor;
     if (input.name.isEmpty() || characterCount(input.name) > maximumCollectionNameCharacters
+        || characterCount(steamCollectionNameKey(input.name)) > 240
         || characterCount(input.description) > maximumCollectionDescriptionCharacters
         || characterCount(input.icon) > maximumCollectionIconCharacters
         || !validIconText(input.icon)

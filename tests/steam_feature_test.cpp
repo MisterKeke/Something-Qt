@@ -653,6 +653,9 @@ void SteamFeatureTest::releaseRadarMigrationPreservesExistingPriceProfiles()
 
     {
         QSqlQuery legacy(database);
+        QVERIFY(legacy.exec(QStringLiteral("DROP TABLE steam_collection_games")));
+        QVERIFY(legacy.exec(QStringLiteral("DROP TABLE steam_collections")));
+        QVERIFY(legacy.exec(QStringLiteral("DROP TABLE steam_game_catalog")));
         QVERIFY(legacy.exec(QStringLiteral("DROP TABLE steam_game_update_news_items")));
         QVERIFY(legacy.exec(QStringLiteral("DROP TABLE steam_game_update_follows")));
         QVERIFY(legacy.exec(QStringLiteral("DROP TABLE steam_release_follows")));
@@ -663,7 +666,7 @@ void SteamFeatureTest::releaseRadarMigrationPreservesExistingPriceProfiles()
 
     QString diagnostic;
     QVERIFY2(storage::SchemaMigrator::apply(database, &diagnostic), qPrintable(diagnostic));
-    QCOMPARE(storage::SchemaMigrator::latestVersion(), 17);
+    QCOMPARE(storage::SchemaMigrator::latestVersion(), 18);
     {
         storage::StorageRepositories repositories(database);
         const auto preserved = repositories.steam.get(priceGameId);
@@ -687,7 +690,7 @@ void SteamFeatureTest::releaseRadarMigrationPreservesExistingPriceProfiles()
         QVERIFY(migratedVersion.exec(QStringLiteral(
             "SELECT MAX(version) FROM schema_migrations")));
         QVERIFY(migratedVersion.next());
-        QCOMPARE(migratedVersion.value(0).toInt(), 17);
+        QCOMPARE(migratedVersion.value(0).toInt(), 18);
     }
     closeDatabase(&database, connectionName);
 }
@@ -825,6 +828,9 @@ void SteamFeatureTest::steamPriceHistoryMigrationPreservesLegacyGamesWithoutFabr
         "last_checked_at,last_attempted_at) VALUES(51,555001,"
         "'https://store.steampowered.com/app/555001/','Legacy tracked game','priced','USD',"
         "1999,999,50,'US','2025-03-04T12:00:00Z','2025-03-04T12:00:00Z')")));
+    QVERIFY(legacy.exec(QStringLiteral("DROP TABLE steam_collection_games")));
+    QVERIFY(legacy.exec(QStringLiteral("DROP TABLE steam_collections")));
+    QVERIFY(legacy.exec(QStringLiteral("DROP TABLE steam_game_catalog")));
     QVERIFY(legacy.exec(QStringLiteral("DROP TABLE steam_price_observations")));
     QVERIFY(legacy.exec(QStringLiteral("DROP TABLE steam_release_follows")));
     QVERIFY(legacy.exec(QStringLiteral("DROP TABLE steam_game_update_news_items")));
@@ -834,7 +840,7 @@ void SteamFeatureTest::steamPriceHistoryMigrationPreservesLegacyGamesWithoutFabr
 
     QString diagnostic;
     QVERIFY2(storage::SchemaMigrator::apply(database, &diagnostic), qPrintable(diagnostic));
-    QCOMPARE(storage::SchemaMigrator::latestVersion(), 17);
+    QCOMPARE(storage::SchemaMigrator::latestVersion(), 18);
 
     {
         storage::StorageRepositories repositories(database);

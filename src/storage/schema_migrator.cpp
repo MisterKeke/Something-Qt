@@ -554,6 +554,115 @@ constexpr const char *steamGameUpdateNews[] = {
     "CREATE INDEX idx_steam_game_update_news_unread ON steam_game_update_news_items(is_read, steam_app_id, published_at_unix_seconds DESC)",
 };
 
+constexpr const char *steamCatalogAndCollections[] = {
+    R"SQL(CREATE TABLE steam_game_catalog (
+        steam_app_id INTEGER PRIMARY KEY CHECK(steam_app_id BETWEEN 1 AND 4294967295),
+        store_url TEXT NOT NULL CHECK(length(store_url) BETWEEN 1 AND 4096),
+        name TEXT NOT NULL CHECK(length(trim(name)) BETWEEN 1 AND 300),
+        artwork_source_url TEXT NOT NULL DEFAULT '' CHECK(length(artwork_source_url) <= 4096),
+        artwork_filename TEXT NOT NULL DEFAULT '',
+        artwork_mime_type TEXT NOT NULL DEFAULT '',
+        artwork_byte_size INTEGER NOT NULL DEFAULT 0 CHECK(artwork_byte_size >= 0),
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        CHECK((artwork_filename = '' AND artwork_mime_type = '' AND artwork_byte_size = 0)
+            OR (artwork_filename <> '' AND artwork_source_url <> '' AND artwork_mime_type IN
+                ('image/jpeg', 'image/png', 'image/webp') AND artwork_byte_size > 0))
+    ))SQL",
+    "CREATE INDEX idx_steam_game_catalog_name ON steam_game_catalog(name COLLATE NOCASE, steam_app_id)",
+    R"SQL(CREATE TABLE steam_collections (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL CHECK(length(trim(name)) BETWEEN 1 AND 80),
+        name_normalized TEXT NOT NULL UNIQUE CHECK(length(trim(name_normalized)) BETWEEN 1 AND 240),
+        description TEXT NOT NULL DEFAULT '' CHECK(length(description) <= 2000),
+        color TEXT NOT NULL DEFAULT '' CHECK(color = '' OR
+            (length(color) = 7 AND substr(color, 1, 1) = '#'
+                AND substr(color, 2) NOT GLOB '*[^0-9a-f]*')),
+        icon TEXT NOT NULL DEFAULT '' CHECK(length(icon) <= 16),
+        display_order INTEGER NOT NULL UNIQUE CHECK(display_order >= 0),
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    ))SQL",
+    R"SQL(CREATE TABLE steam_collection_games (
+        collection_id INTEGER NOT NULL REFERENCES steam_collections(id) ON DELETE CASCADE,
+        steam_app_id INTEGER NOT NULL REFERENCES steam_game_catalog(steam_app_id) ON DELETE RESTRICT,
+        status TEXT CHECK(status IS NULL OR status IN
+            ('backlog', 'playing', 'completed', 'paused', 'dropped')),
+        personal_rating INTEGER CHECK(personal_rating IS NULL OR personal_rating BETWEEN 1 AND 5),
+        personal_comment TEXT NOT NULL DEFAULT '' CHECK(length(personal_comment) <= 4000),
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY(collection_id, steam_app_id)
+    ))SQL",
+    "CREATE INDEX idx_steam_collection_games_app ON steam_collection_games(steam_app_id, collection_id)",
+    // Seed one shared App-ID row from existing independent memberships.
+    R"SQL(INSERT INTO steam_game_catalog(steam_app_id,store_url,name,artwork_source_url,
+        artwork_filename,artwork_mime_type,artwork_byte_size,created_at,updated_at)
+        SELECT steam_app_id,
+            'https://store.steampowered.com/app/' || steam_app_id || '/',title,artwork_source_url,
+            CASE WHEN artwork_source_url<>'' THEN artwork_filename ELSE '' END,
+            CASE WHEN artwork_source_url<>'' THEN artwork_mime_type ELSE '' END,
+            CASE WHEN artwork_source_url<>'' THEN artwork_byte_size ELSE 0 END,
+            created_at,updated_at
+        FROM steam_release_follows WHERE steam_app_id BETWEEN 1 AND 4294967295)SQL",
+    R"SQL(INSERT INTO steam_game_catalog(steam_app_id,store_url,name,artwork_source_url,
+        artwork_filename,artwork_mime_type,artwork_byte_size,created_at,updated_at)
+        SELECT steam_app_id,
+            'https://store.steampowered.com/app/' || steam_app_id || '/',name,artwork_source_url,
+            CASE WHEN artwork_source_url<>'' THEN artwork_filename ELSE '' END,
+            CASE WHEN artwork_source_url<>'' THEN artwork_mime_type ELSE '' END,
+            CASE WHEN artwork_source_url<>'' THEN artwork_byte_size ELSE 0 END,
+            created_at,updated_at
+        FROM steam_game_update_follows WHERE steam_app_id BETWEEN 1 AND 4294967295
+        ON CONFLICT(steam_app_id) DO UPDATE SET
+            artwork_source_url=CASE WHEN steam_game_catalog.artwork_source_url=''
+                THEN excluded.artwork_source_url ELSE steam_game_catalog.artwork_source_url END,
+            artwork_filename=CASE WHEN steam_game_catalog.artwork_filename=''
+                AND (steam_game_catalog.artwork_source_url=''
+                    OR steam_game_catalog.artwork_source_url=excluded.artwork_source_url)
+                AND excluded.artwork_filename<>'' THEN excluded.artwork_filename
+                ELSE steam_game_catalog.artwork_filename END,
+            artwork_mime_type=CASE WHEN steam_game_catalog.artwork_filename=''
+                AND (steam_game_catalog.artwork_source_url=''
+                    OR steam_game_catalog.artwork_source_url=excluded.artwork_source_url)
+                AND excluded.artwork_filename<>'' THEN excluded.artwork_mime_type
+                ELSE steam_game_catalog.artwork_mime_type END,
+            artwork_byte_size=CASE WHEN steam_game_catalog.artwork_filename=''
+                AND (steam_game_catalog.artwork_source_url=''
+                    OR steam_game_catalog.artwork_source_url=excluded.artwork_source_url)
+                AND excluded.artwork_filename<>'' THEN excluded.artwork_byte_size
+                ELSE steam_game_catalog.artwork_byte_size END)SQL",
+    R"SQL(INSERT INTO steam_game_catalog(steam_app_id,store_url,name,artwork_source_url,
+        artwork_filename,artwork_mime_type,artwork_byte_size,created_at,updated_at)
+        SELECT g.steam_app_id,
+            'https://store.steampowered.com/app/' || g.steam_app_id || '/',
+            g.name,g.image_source_url,
+            CASE WHEN g.image_source_url<>'' THEN COALESCE(i.filename,'') ELSE '' END,
+            CASE WHEN g.image_source_url<>'' THEN COALESCE(i.mime_type,'') ELSE '' END,
+            CASE WHEN g.image_source_url<>'' THEN COALESCE(i.byte_size,0) ELSE 0 END,
+            g.created_at,g.updated_at
+        FROM steam_games g LEFT JOIN steam_game_images i ON i.game_id=g.id
+        WHERE g.steam_app_id BETWEEN 1 AND 4294967295
+        ON CONFLICT(steam_app_id) DO UPDATE SET
+            artwork_source_url=CASE WHEN steam_game_catalog.artwork_source_url=''
+                THEN excluded.artwork_source_url ELSE steam_game_catalog.artwork_source_url END,
+            artwork_filename=CASE WHEN steam_game_catalog.artwork_filename=''
+                AND (steam_game_catalog.artwork_source_url=''
+                    OR steam_game_catalog.artwork_source_url=excluded.artwork_source_url)
+                AND excluded.artwork_filename<>'' THEN excluded.artwork_filename
+                ELSE steam_game_catalog.artwork_filename END,
+            artwork_mime_type=CASE WHEN steam_game_catalog.artwork_filename=''
+                AND (steam_game_catalog.artwork_source_url=''
+                    OR steam_game_catalog.artwork_source_url=excluded.artwork_source_url)
+                AND excluded.artwork_filename<>'' THEN excluded.artwork_mime_type
+                ELSE steam_game_catalog.artwork_mime_type END,
+            artwork_byte_size=CASE WHEN steam_game_catalog.artwork_filename=''
+                AND (steam_game_catalog.artwork_source_url=''
+                    OR steam_game_catalog.artwork_source_url=excluded.artwork_source_url)
+                AND excluded.artwork_filename<>'' THEN excluded.artwork_byte_size
+                ELSE steam_game_catalog.artwork_byte_size END)SQL",
+};
+
 constexpr std::array migrations{
     Migration{1, "core tasks currencies preferences", core, qsizetype(std::size(core))},
     Migration{2, "favorites and retained update news", favorites, qsizetype(std::size(favorites))},
@@ -583,6 +692,8 @@ constexpr std::array migrations{
               qsizetype(std::size(steamGameUpdates))},
     Migration{17, "independent Steam Game Updates article cache", steamGameUpdateNews,
               qsizetype(std::size(steamGameUpdateNews))},
+    Migration{18, "Steam game catalog and collections", steamCatalogAndCollections,
+              qsizetype(std::size(steamCatalogAndCollections))},
 };
 
 bool fail(QString *diagnostic, const QString &message)
@@ -643,6 +754,9 @@ bool hasUnexpectedTables(const QSqlDatabase &database, QString *diagnostic, bool
         QStringLiteral("steam_release_follows"),
         QStringLiteral("steam_game_update_follows"),
         QStringLiteral("steam_game_update_news_items"),
+        QStringLiteral("steam_game_catalog"),
+        QStringLiteral("steam_collections"),
+        QStringLiteral("steam_collection_games"),
         QStringLiteral("task_history"), QStringLiteral("task_schedules"),
         QStringLiteral("scheduling_preferences"),
         QStringLiteral("weather_comparison_cities")

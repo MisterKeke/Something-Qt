@@ -675,6 +675,9 @@ void WeatherCurrencyFeatureTest::weatherComparisonPersistenceRestoresOrderCacheA
         QSqlQuery downgrade(database);
         QVERIFY(downgrade.exec(QStringLiteral("DROP TABLE weather_comparison_cities")));
         QVERIFY(downgrade.exec(QStringLiteral("DROP TABLE steam_price_observations")));
+        QVERIFY(downgrade.exec(QStringLiteral("DROP TABLE steam_collection_games")));
+        QVERIFY(downgrade.exec(QStringLiteral("DROP TABLE steam_collections")));
+        QVERIFY(downgrade.exec(QStringLiteral("DROP TABLE steam_game_catalog")));
         QVERIFY(downgrade.exec(QStringLiteral("DROP TABLE steam_release_follows")));
         QVERIFY(downgrade.exec(QStringLiteral("DROP TABLE steam_game_update_news_items")));
         QVERIFY(downgrade.exec(QStringLiteral("DROP TABLE steam_game_update_follows")));

@@ -30,7 +30,8 @@ AppError normalizeSteamGameCatalogDetails(SteamGameCatalogDetails &details)
     details.canonicalStoreUrl = store.canonicalUrl;
     if (!details.artworkUrl.isEmpty()) {
         const QString normalizedArtwork = normalizeSteamArtworkUrl(details.artworkUrl);
-        if (normalizedArtwork.isEmpty()) return AppError(ErrorCategory::Validation);
+        if (normalizedArtwork.isEmpty() || normalizedArtwork.toUtf8().size() > 4096)
+            return AppError(ErrorCategory::Validation);
         details.artworkUrl = normalizedArtwork;
     } else {
         details.artworkUrl = QStringLiteral("");

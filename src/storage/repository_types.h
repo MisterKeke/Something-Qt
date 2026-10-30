@@ -7,6 +7,8 @@
 #include "../domain/steam_news.h"
 #include "../domain/steam_release.h"
 #include "../domain/steam_game_updates.h"
+#include "../domain/steam_game_catalog.h"
+#include "../domain/steam_collections.h"
 #include "../domain/weather_currency.h"
 
 #include <QString>
@@ -220,6 +222,10 @@ struct SteamGame {
     std::optional<AssetMetadata> artwork;
 };
 
+using SteamGameCatalogEntry = domain::SteamGameCatalogEntry;
+using SteamCollection = domain::SteamCollection;
+using SteamCollectionGameEntry = domain::SteamCollectionGameEntry;
+
 struct SteamSettings {
     QString countryCode{QStringLiteral("TR")};
 };
@@ -278,6 +284,11 @@ struct SteamRefreshUpdate final {
     QString attemptedAt;
     QString safeError;
     std::optional<SteamGame> refreshedGame;
+};
+
+struct SteamCollectionDeleteResult final {
+    qint64 deletedId{0};
+    int removedMemberships{0};
 };
 
 struct SteamReleaseRefreshUpdate final {

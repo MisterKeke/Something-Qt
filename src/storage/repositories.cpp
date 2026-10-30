@@ -1,6 +1,8 @@
 #include "repositories.h"
 
 #include "../domain/steam_game.h"
+#include "../domain/steam_game_catalog.h"
+#include "../domain/steam_collections.h"
 #include "../domain/task_rules.h"
 #include "../domain/task_history.h"
 
@@ -583,6 +585,101 @@ void bindAsset(QSqlQuery &query, int firstIndex, const AssetMetadata &asset)
     query.bindValue(firstIndex, asset.filename);
     query.bindValue(firstIndex + 1, asset.mimeType);
     query.bindValue(firstIndex + 2, asset.byteSize);
+}
+
+RepositoryResult<void> upsertSteamCatalogDetails(
+    QSqlDatabase &database, domain::SteamGameCatalogDetails details)
+{
+    if (domain::normalizeSteamGameCatalogDetails(details).isError())
+        return failureVoid(domain::ErrorCategory::Validation);
+    QSqlQuery query(database);
+    query.prepare(QStringLiteral(
+        "INSERT INTO steam_game_catalog(steam_app_id,store_url,name,artwork_source_url) "
+        "VALUES(?,?,?,?) ON CONFLICT(steam_app_id) DO UPDATE SET "
+        "store_url=excluded.store_url,name=excluded.name,"
+        "artwork_filename=CASE WHEN excluded.artwork_source_url<>'' AND "
+        "steam_game_catalog.artwork_source_url<>excluded.artwork_source_url "
+        "THEN '' ELSE steam_game_catalog.artwork_filename END,"
+        "artwork_mime_type=CASE WHEN excluded.artwork_source_url<>'' AND "
+        "steam_game_catalog.artwork_source_url<>excluded.artwork_source_url "
+        "THEN '' ELSE steam_game_catalog.artwork_mime_type END,"
+        "artwork_byte_size=CASE WHEN excluded.artwork_source_url<>'' AND "
+        "steam_game_catalog.artwork_source_url<>excluded.artwork_source_url "
+        "THEN 0 ELSE steam_game_catalog.artwork_byte_size END,"
+        "artwork_source_url=CASE WHEN excluded.artwork_source_url<>'' "
+        "THEN excluded.artwork_source_url ELSE steam_game_catalog.artwork_source_url END,"
+        "updated_at=CURRENT_TIMESTAMP"));
+    query.addBindValue(details.appId);
+    query.addBindValue(details.canonicalStoreUrl);
+    query.addBindValue(details.name);
+    query.addBindValue(details.artworkUrl);
+    if (!query.exec()) return failureVoid(queryFailure(query));
+    return {};
+}
+
+RepositoryResult<void> setSteamCatalogArtwork(
+    QSqlDatabase &database, quint32 appId, const QString &expectedSourceUrl,
+    const domain::SteamGameCatalogArtwork &artwork)
+{
+    if (appId == 0 || expectedSourceUrl.isEmpty()
+        || artwork.sourceUrl != expectedSourceUrl
+        || !domain::isValidSteamGameCatalogArtwork(appId, artwork)) {
+        return failureVoid(domain::ErrorCategory::Validation);
+    }
+    QSqlQuery query(database);
+    query.prepare(QStringLiteral(
+        "UPDATE steam_game_catalog SET artwork_filename=?,artwork_mime_type=?,"
+        "artwork_byte_size=?,updated_at=CURRENT_TIMESTAMP "
+        "WHERE steam_app_id=? AND artwork_source_url=?"));
+    query.addBindValue(artwork.cachedFilename);
+    query.addBindValue(artwork.mimeType);
+    query.addBindValue(artwork.byteSize);
+    query.addBindValue(appId);
+    query.addBindValue(expectedSourceUrl);
+    if (!query.exec()) return failureVoid(queryFailure(query));
+    if (query.numRowsAffected() == 1) return {};
+    query.finish();
+    QSqlQuery exists(database);
+    exists.prepare(QStringLiteral("SELECT 1 FROM steam_game_catalog WHERE steam_app_id=?"));
+    exists.addBindValue(appId);
+    if (!exists.exec()) return failureVoid(queryFailure(exists));
+    return failureVoid(exists.next() ? domain::ErrorCategory::Conflict
+                                     : domain::ErrorCategory::NotFound);
+}
+
+bool decodeSteamCollectionGame(const QSqlQuery &query,
+                               domain::SteamCollectionGameEntry *entry)
+{
+    entry->collectionId = query.value(0).toLongLong();
+    const QString status = query.value(1).toString();
+    if (!status.isEmpty()) {
+        entry->status = domain::steamCollectionGameStatusFromName(status);
+        if (!entry->status) return false;
+    }
+    if (!query.value(2).isNull()) entry->personalRating = query.value(2).toInt();
+    entry->personalComment = query.value(3).toString();
+    entry->createdAt = query.value(4).toString();
+    entry->updatedAt = query.value(5).toString();
+    entry->game.appId = query.value(6).toUInt();
+    entry->game.canonicalStoreUrl = query.value(7).toString();
+    entry->game.name = query.value(8).toString();
+    entry->game.artwork.sourceUrl = query.value(9).toString();
+    entry->game.artwork.cachedFilename = query.value(10).toString();
+    entry->game.artwork.mimeType = query.value(11).toString();
+    entry->game.artwork.byteSize = query.value(12).toLongLong();
+    entry->game.createdAt = query.value(13).toString();
+    entry->game.updatedAt = query.value(14).toString();
+    return domain::isValidSteamCollectionGameEntry(*entry);
+}
+
+QString steamCollectionGameSelect()
+{
+    return QStringLiteral(
+        "SELECT cg.collection_id,cg.status,cg.personal_rating,cg.personal_comment,"
+        "cg.created_at,cg.updated_at,c.steam_app_id,c.store_url,c.name,"
+        "c.artwork_source_url,c.artwork_filename,c.artwork_mime_type,c.artwork_byte_size,"
+        "c.created_at,c.updated_at FROM steam_collection_games cg "
+        "JOIN steam_game_catalog c ON c.steam_app_id=cg.steam_app_id");
 }
 
 } // namespace
@@ -3320,6 +3417,481 @@ RepositoryResult<void> WallpapersRepository::remove(
     return {};
 }
 
+SteamGameCatalogRepository::SteamGameCatalogRepository(QSqlDatabase &database)
+    : m_database(database)
+{
+}
+
+RepositoryResult<domain::SteamGameCatalogEntry> SteamGameCatalogRepository::load(
+    quint32 appId) const
+{
+    QSqlQuery query(m_database);
+    query.prepare(QStringLiteral(
+        "SELECT steam_app_id,store_url,name,artwork_source_url,artwork_filename,"
+        "artwork_mime_type,artwork_byte_size,created_at,updated_at "
+        "FROM steam_game_catalog WHERE steam_app_id=?"));
+    query.addBindValue(appId);
+    if (!query.exec())
+        return failure<domain::SteamGameCatalogEntry>(queryFailure(query));
+    if (!query.next())
+        return failure<domain::SteamGameCatalogEntry>(domain::ErrorCategory::NotFound);
+    domain::SteamGameCatalogEntry entry;
+    entry.appId = query.value(0).toUInt();
+    entry.canonicalStoreUrl = query.value(1).toString();
+    entry.name = query.value(2).toString();
+    entry.artwork.sourceUrl = query.value(3).toString();
+    entry.artwork.cachedFilename = query.value(4).toString();
+    entry.artwork.mimeType = query.value(5).toString();
+    entry.artwork.byteSize = query.value(6).toLongLong();
+    entry.createdAt = query.value(7).toString();
+    entry.updatedAt = query.value(8).toString();
+    if (!domain::isValidSteamGameCatalogEntry(entry))
+        return failure<domain::SteamGameCatalogEntry>(domain::ErrorCategory::Storage);
+    RepositoryResult<domain::SteamGameCatalogEntry> result;
+    result.value = std::move(entry);
+    return result;
+}
+
+RepositoryResult<QVector<domain::SteamGameCatalogEntry>>
+SteamGameCatalogRepository::list() const
+{
+    Q_ASSERT(QThread::currentThread() == m_database.driver()->thread());
+    QSqlQuery query(m_database);
+    if (!query.exec(QStringLiteral(
+            "SELECT steam_app_id,store_url,name,artwork_source_url,artwork_filename,"
+            "artwork_mime_type,artwork_byte_size,created_at,updated_at "
+            "FROM steam_game_catalog ORDER BY name COLLATE NOCASE,steam_app_id"))) {
+        return failure<QVector<domain::SteamGameCatalogEntry>>(queryFailure(query));
+    }
+    QVector<domain::SteamGameCatalogEntry> entries;
+    while (query.next()) {
+        domain::SteamGameCatalogEntry entry;
+        entry.appId = query.value(0).toUInt();
+        entry.canonicalStoreUrl = query.value(1).toString();
+        entry.name = query.value(2).toString();
+        entry.artwork.sourceUrl = query.value(3).toString();
+        entry.artwork.cachedFilename = query.value(4).toString();
+        entry.artwork.mimeType = query.value(5).toString();
+        entry.artwork.byteSize = query.value(6).toLongLong();
+        entry.createdAt = query.value(7).toString();
+        entry.updatedAt = query.value(8).toString();
+        if (!domain::isValidSteamGameCatalogEntry(entry))
+            return failure<QVector<domain::SteamGameCatalogEntry>>(
+                domain::ErrorCategory::Storage);
+        entries.push_back(std::move(entry));
+    }
+    RepositoryResult<QVector<domain::SteamGameCatalogEntry>> result;
+    result.value = std::move(entries);
+    return result;
+}
+
+RepositoryResult<domain::SteamGameCatalogEntry> SteamGameCatalogRepository::get(
+    quint32 appId) const
+{
+    Q_ASSERT(QThread::currentThread() == m_database.driver()->thread());
+    if (appId == 0)
+        return failure<domain::SteamGameCatalogEntry>(domain::ErrorCategory::Validation);
+    return load(appId);
+}
+
+RepositoryResult<domain::SteamGameCatalogEntry> SteamGameCatalogRepository::upsert(
+    domain::SteamGameCatalogDetails details)
+{
+    Q_ASSERT(QThread::currentThread() == m_database.driver()->thread());
+    const quint32 appId = details.appId;
+    if (domain::normalizeSteamGameCatalogDetails(details).isError())
+        return failure<domain::SteamGameCatalogEntry>(domain::ErrorCategory::Validation);
+    Transaction transaction(m_database);
+    if (!transaction.active())
+        return failure<domain::SteamGameCatalogEntry>(domain::ErrorCategory::Storage);
+    const auto saved = upsertSteamCatalogDetails(m_database, std::move(details));
+    if (!saved.succeeded())
+        return failure<domain::SteamGameCatalogEntry>(saved.error.category());
+    const auto entry = load(appId);
+    if (!entry.succeeded()) return entry;
+    if (!transaction.commit())
+        return failure<domain::SteamGameCatalogEntry>(domain::ErrorCategory::Storage);
+    return entry;
+}
+
+RepositoryResult<void> SteamGameCatalogRepository::setArtwork(
+    quint32 appId, const QString &expectedSourceUrl,
+    const domain::SteamGameCatalogArtwork &artwork)
+{
+    Q_ASSERT(QThread::currentThread() == m_database.driver()->thread());
+    return setSteamCatalogArtwork(m_database, appId, expectedSourceUrl, artwork);
+}
+
+RepositoryResult<bool> SteamGameCatalogRepository::hasArtworkFilename(
+    const QString &filename) const
+{
+    Q_ASSERT(QThread::currentThread() == m_database.driver()->thread());
+    if (filename.isEmpty()) return failure<bool>(domain::ErrorCategory::Validation);
+    QSqlQuery query(m_database);
+    query.prepare(QStringLiteral(
+        "SELECT 1 FROM steam_game_catalog WHERE artwork_filename=? LIMIT 1"));
+    query.addBindValue(filename);
+    if (!query.exec()) return failure<bool>(queryFailure(query));
+    RepositoryResult<bool> result;
+    result.value = query.next();
+    return result;
+}
+
+RepositoryResult<void> SteamGameCatalogRepository::remove(quint32 appId)
+{
+    Q_ASSERT(QThread::currentThread() == m_database.driver()->thread());
+    if (appId == 0) return failureVoid(domain::ErrorCategory::Validation);
+    Transaction transaction(m_database);
+    if (!transaction.active()) return failureVoid(domain::ErrorCategory::Storage);
+    QSqlQuery references(m_database);
+    references.prepare(QStringLiteral(
+        "SELECT (SELECT COUNT(*) FROM steam_collection_games WHERE steam_app_id=?)"
+        "+(SELECT COUNT(*) FROM steam_games WHERE steam_app_id=?)"
+        "+(SELECT COUNT(*) FROM steam_release_follows WHERE steam_app_id=?)"
+        "+(SELECT COUNT(*) FROM steam_game_update_follows WHERE steam_app_id=?)"));
+    for (int i = 0; i < 4; ++i) references.addBindValue(appId);
+    if (!references.exec()) return failureVoid(queryFailure(references));
+    if (!references.next()) return failureVoid(domain::ErrorCategory::Storage);
+    if (references.value(0).toLongLong() != 0)
+        return failureVoid(domain::ErrorCategory::Conflict);
+    references.finish();
+    QSqlQuery query(m_database);
+    query.prepare(QStringLiteral("DELETE FROM steam_game_catalog WHERE steam_app_id=?"));
+    query.addBindValue(appId);
+    if (!query.exec()) return failureVoid(queryFailure(query));
+    if (query.numRowsAffected() != 1) return failureVoid(domain::ErrorCategory::NotFound);
+    if (!transaction.commit()) return failureVoid(domain::ErrorCategory::Storage);
+    return {};
+}
+
+SteamCollectionsRepository::SteamCollectionsRepository(QSqlDatabase &database)
+    : m_database(database)
+{
+}
+
+RepositoryResult<domain::SteamCollection> SteamCollectionsRepository::load(
+    qint64 collectionId) const
+{
+    QSqlQuery query(m_database);
+    query.prepare(QStringLiteral(
+        "SELECT id,name,description,color,icon,display_order,created_at,updated_at "
+        "FROM steam_collections WHERE id=?"));
+    query.addBindValue(collectionId);
+    if (!query.exec()) return failure<domain::SteamCollection>(queryFailure(query));
+    if (!query.next()) return failure<domain::SteamCollection>(domain::ErrorCategory::NotFound);
+    domain::SteamCollection collection;
+    collection.id = query.value(0).toLongLong();
+    collection.name = query.value(1).toString();
+    collection.description = query.value(2).toString();
+    collection.color = query.value(3).toString();
+    collection.icon = query.value(4).toString();
+    collection.displayOrder = query.value(5).toInt();
+    collection.createdAt = query.value(6).toString();
+    collection.updatedAt = query.value(7).toString();
+    if (!domain::isValidSteamCollection(collection))
+        return failure<domain::SteamCollection>(domain::ErrorCategory::Storage);
+    RepositoryResult<domain::SteamCollection> result;
+    result.value = std::move(collection);
+    return result;
+}
+
+RepositoryResult<QVector<domain::SteamCollection>> SteamCollectionsRepository::list() const
+{
+    Q_ASSERT(QThread::currentThread() == m_database.driver()->thread());
+    QSqlQuery query(m_database);
+    if (!query.exec(QStringLiteral(
+            "SELECT id,name,description,color,icon,display_order,created_at,updated_at "
+            "FROM steam_collections ORDER BY display_order,id"))) {
+        return failure<QVector<domain::SteamCollection>>(queryFailure(query));
+    }
+    QVector<domain::SteamCollection> collections;
+    while (query.next()) {
+        domain::SteamCollection collection;
+        collection.id = query.value(0).toLongLong();
+        collection.name = query.value(1).toString();
+        collection.description = query.value(2).toString();
+        collection.color = query.value(3).toString();
+        collection.icon = query.value(4).toString();
+        collection.displayOrder = query.value(5).toInt();
+        collection.createdAt = query.value(6).toString();
+        collection.updatedAt = query.value(7).toString();
+        if (!domain::isValidSteamCollection(collection))
+            return failure<QVector<domain::SteamCollection>>(domain::ErrorCategory::Storage);
+        collections.push_back(std::move(collection));
+    }
+    RepositoryResult<QVector<domain::SteamCollection>> result;
+    result.value = std::move(collections);
+    return result;
+}
+
+RepositoryResult<domain::SteamCollection> SteamCollectionsRepository::get(
+    qint64 collectionId) const
+{
+    Q_ASSERT(QThread::currentThread() == m_database.driver()->thread());
+    if (collectionId <= 0) return failure<domain::SteamCollection>(domain::ErrorCategory::Validation);
+    return load(collectionId);
+}
+
+RepositoryResult<domain::SteamCollection> SteamCollectionsRepository::create(
+    domain::SteamCollectionInput input)
+{
+    Q_ASSERT(QThread::currentThread() == m_database.driver()->thread());
+    if (domain::normalizeSteamCollectionInput(input).isError())
+        return failure<domain::SteamCollection>(domain::ErrorCategory::Validation);
+    Transaction transaction(m_database);
+    if (!transaction.active()) return failure<domain::SteamCollection>(domain::ErrorCategory::Storage);
+    QSqlQuery query(m_database);
+    query.prepare(QStringLiteral(
+        "INSERT INTO steam_collections(name,name_normalized,description,color,icon,display_order) "
+        "VALUES(?,?,?,?,?,(SELECT COALESCE(MAX(display_order),-1)+1 FROM steam_collections))"));
+    query.addBindValue(input.name);
+    query.addBindValue(domain::steamCollectionNameKey(input.name));
+    query.addBindValue(input.description);
+    query.addBindValue(input.color);
+    query.addBindValue(input.icon);
+    if (!query.exec()) return failure<domain::SteamCollection>(queryFailure(query));
+    const qint64 id = query.lastInsertId().toLongLong();
+    query.finish();
+    const auto collection = load(id);
+    if (!collection.succeeded()) return collection;
+    if (!transaction.commit()) return failure<domain::SteamCollection>(domain::ErrorCategory::Storage);
+    return collection;
+}
+
+RepositoryResult<domain::SteamCollection> SteamCollectionsRepository::update(
+    qint64 collectionId, domain::SteamCollectionInput input)
+{
+    Q_ASSERT(QThread::currentThread() == m_database.driver()->thread());
+    if (collectionId <= 0 || domain::normalizeSteamCollectionInput(input).isError())
+        return failure<domain::SteamCollection>(domain::ErrorCategory::Validation);
+    Transaction transaction(m_database);
+    if (!transaction.active()) return failure<domain::SteamCollection>(domain::ErrorCategory::Storage);
+    QSqlQuery query(m_database);
+    query.prepare(QStringLiteral(
+        "UPDATE steam_collections SET name=?,name_normalized=?,description=?,color=?,icon=?,"
+        "updated_at=CURRENT_TIMESTAMP WHERE id=?"));
+    query.addBindValue(input.name);
+    query.addBindValue(domain::steamCollectionNameKey(input.name));
+    query.addBindValue(input.description);
+    query.addBindValue(input.color);
+    query.addBindValue(input.icon);
+    query.addBindValue(collectionId);
+    if (!query.exec()) return failure<domain::SteamCollection>(queryFailure(query));
+    if (query.numRowsAffected() != 1)
+        return failure<domain::SteamCollection>(domain::ErrorCategory::NotFound);
+    query.finish();
+    const auto collection = load(collectionId);
+    if (!collection.succeeded()) return collection;
+    if (!transaction.commit()) return failure<domain::SteamCollection>(domain::ErrorCategory::Storage);
+    return collection;
+}
+
+RepositoryResult<void> SteamCollectionsRepository::reorder(
+    const QVector<qint64> &orderedIds)
+{
+    Q_ASSERT(QThread::currentThread() == m_database.driver()->thread());
+    Transaction transaction(m_database);
+    if (!transaction.active()) return failureVoid(domain::ErrorCategory::Storage);
+    QSqlQuery query(m_database);
+    if (!query.exec(QStringLiteral("SELECT id,display_order FROM steam_collections")))
+        return failureVoid(queryFailure(query));
+    QSet<qint64> existing;
+    qint64 largestOrder = -1;
+    while (query.next()) {
+        existing.insert(query.value(0).toLongLong());
+        largestOrder = std::max(largestOrder, query.value(1).toLongLong());
+    }
+    query.finish();
+    QSet<qint64> requested;
+    for (const qint64 id : orderedIds) {
+        if (id <= 0 || requested.contains(id))
+            return failureVoid(domain::ErrorCategory::Validation);
+        requested.insert(id);
+    }
+    if (requested != existing) return failureVoid(domain::ErrorCategory::Validation);
+    if (orderedIds.isEmpty()) {
+        if (!transaction.commit()) return failureVoid(domain::ErrorCategory::Storage);
+        return {};
+    }
+    const qint64 offset = largestOrder + orderedIds.size() + 1;
+    QSqlQuery shift(m_database);
+    shift.prepare(QStringLiteral("UPDATE steam_collections SET display_order=display_order+?"));
+    shift.addBindValue(offset);
+    if (!shift.exec()) return failureVoid(queryFailure(shift));
+    shift.finish();
+    QSqlQuery assign(m_database);
+    assign.prepare(QStringLiteral(
+        "UPDATE steam_collections SET display_order=?,updated_at=CURRENT_TIMESTAMP WHERE id=?"));
+    for (int order = 0; order < orderedIds.size(); ++order) {
+        assign.bindValue(0, order);
+        assign.bindValue(1, orderedIds[order]);
+        if (!assign.exec() || assign.numRowsAffected() != 1)
+            return failureVoid(assign.lastError().isValid()
+                ? queryFailure(assign) : domain::ErrorCategory::Storage);
+        assign.finish();
+    }
+    if (!transaction.commit()) return failureVoid(domain::ErrorCategory::Storage);
+    return {};
+}
+
+RepositoryResult<SteamCollectionDeleteResult> SteamCollectionsRepository::remove(
+    qint64 collectionId)
+{
+    Q_ASSERT(QThread::currentThread() == m_database.driver()->thread());
+    if (collectionId <= 0) return failure<SteamCollectionDeleteResult>(domain::ErrorCategory::Validation);
+    Transaction transaction(m_database);
+    if (!transaction.active()) return failure<SteamCollectionDeleteResult>(domain::ErrorCategory::Storage);
+    QSqlQuery count(m_database);
+    count.prepare(QStringLiteral(
+        "SELECT COUNT(*) FROM steam_collection_games WHERE collection_id=?"));
+    count.addBindValue(collectionId);
+    if (!count.exec() || !count.next())
+        return failure<SteamCollectionDeleteResult>(queryFailure(count));
+    const int membershipCount = count.value(0).toInt();
+    count.finish();
+    QSqlQuery query(m_database);
+    query.prepare(QStringLiteral("DELETE FROM steam_collections WHERE id=?"));
+    query.addBindValue(collectionId);
+    if (!query.exec()) return failure<SteamCollectionDeleteResult>(queryFailure(query));
+    if (query.numRowsAffected() != 1)
+        return failure<SteamCollectionDeleteResult>(domain::ErrorCategory::NotFound);
+    if (!transaction.commit())
+        return failure<SteamCollectionDeleteResult>(domain::ErrorCategory::Storage);
+    RepositoryResult<SteamCollectionDeleteResult> result;
+    result.value = {collectionId, membershipCount};
+    return result;
+}
+
+RepositoryResult<QVector<domain::SteamCollectionGameEntry>>
+SteamCollectionsRepository::games(qint64 collectionId) const
+{
+    Q_ASSERT(QThread::currentThread() == m_database.driver()->thread());
+    if (collectionId <= 0)
+        return failure<QVector<domain::SteamCollectionGameEntry>>(
+            domain::ErrorCategory::Validation);
+    const auto collection = load(collectionId);
+    if (!collection.succeeded())
+        return failure<QVector<domain::SteamCollectionGameEntry>>(
+            collection.error.category());
+    QSqlQuery query(m_database);
+    query.prepare(steamCollectionGameSelect()
+        + QStringLiteral(" WHERE cg.collection_id=? ORDER BY c.name COLLATE NOCASE,c.steam_app_id"));
+    query.addBindValue(collectionId);
+    if (!query.exec())
+        return failure<QVector<domain::SteamCollectionGameEntry>>(queryFailure(query));
+    QVector<domain::SteamCollectionGameEntry> entries;
+    while (query.next()) {
+        domain::SteamCollectionGameEntry entry;
+        if (!decodeSteamCollectionGame(query, &entry))
+            return failure<QVector<domain::SteamCollectionGameEntry>>(
+                domain::ErrorCategory::Storage);
+        entries.push_back(std::move(entry));
+    }
+    RepositoryResult<QVector<domain::SteamCollectionGameEntry>> result;
+    result.value = std::move(entries);
+    return result;
+}
+
+RepositoryResult<domain::SteamCollectionGameEntry> SteamCollectionsRepository::loadGame(
+    qint64 collectionId, quint32 appId) const
+{
+    QSqlQuery query(m_database);
+    query.prepare(steamCollectionGameSelect()
+        + QStringLiteral(" WHERE cg.collection_id=? AND cg.steam_app_id=?"));
+    query.addBindValue(collectionId);
+    query.addBindValue(appId);
+    if (!query.exec())
+        return failure<domain::SteamCollectionGameEntry>(queryFailure(query));
+    if (!query.next())
+        return failure<domain::SteamCollectionGameEntry>(domain::ErrorCategory::NotFound);
+    domain::SteamCollectionGameEntry entry;
+    if (!decodeSteamCollectionGame(query, &entry))
+        return failure<domain::SteamCollectionGameEntry>(domain::ErrorCategory::Storage);
+    RepositoryResult<domain::SteamCollectionGameEntry> result;
+    result.value = std::move(entry);
+    return result;
+}
+
+RepositoryResult<domain::SteamCollectionGameEntry> SteamCollectionsRepository::addGame(
+    qint64 collectionId, domain::SteamGameCatalogDetails catalogDetails,
+    domain::SteamCollectionGameInput input)
+{
+    Q_ASSERT(QThread::currentThread() == m_database.driver()->thread());
+    if (collectionId <= 0
+        || domain::normalizeSteamGameCatalogDetails(catalogDetails).isError()
+        || domain::normalizeSteamCollectionGameInput(input).isError()
+        || catalogDetails.appId != input.steamAppId) {
+        return failure<domain::SteamCollectionGameEntry>(domain::ErrorCategory::Validation);
+    }
+    Transaction transaction(m_database);
+    if (!transaction.active())
+        return failure<domain::SteamCollectionGameEntry>(domain::ErrorCategory::Storage);
+    const auto collection = load(collectionId);
+    if (!collection.succeeded())
+        return failure<domain::SteamCollectionGameEntry>(collection.error.category());
+    const auto catalog = upsertSteamCatalogDetails(m_database, std::move(catalogDetails));
+    if (!catalog.succeeded())
+        return failure<domain::SteamCollectionGameEntry>(catalog.error.category());
+    QSqlQuery query(m_database);
+    query.prepare(QStringLiteral(
+        "INSERT INTO steam_collection_games(collection_id,steam_app_id,status,personal_rating,"
+        "personal_comment) VALUES(?,?,?,?,?)"));
+    query.addBindValue(collectionId);
+    query.addBindValue(input.steamAppId);
+    query.addBindValue(input.status
+        ? QVariant(domain::steamCollectionGameStatusName(*input.status)) : QVariant());
+    query.addBindValue(input.personalRating ? QVariant(*input.personalRating) : QVariant());
+    query.addBindValue(input.personalComment);
+    if (!query.exec())
+        return failure<domain::SteamCollectionGameEntry>(queryFailure(query));
+    query.finish();
+    const auto entry = loadGame(collectionId, input.steamAppId);
+    if (!entry.succeeded()) return entry;
+    if (!transaction.commit())
+        return failure<domain::SteamCollectionGameEntry>(domain::ErrorCategory::Storage);
+    return entry;
+}
+
+RepositoryResult<domain::SteamCollectionGameEntry> SteamCollectionsRepository::updateGame(
+    qint64 collectionId, domain::SteamCollectionGameInput input)
+{
+    Q_ASSERT(QThread::currentThread() == m_database.driver()->thread());
+    if (collectionId <= 0 || domain::normalizeSteamCollectionGameInput(input).isError())
+        return failure<domain::SteamCollectionGameEntry>(domain::ErrorCategory::Validation);
+    QSqlQuery query(m_database);
+    query.prepare(QStringLiteral(
+        "UPDATE steam_collection_games SET status=?,personal_rating=?,personal_comment=?,"
+        "updated_at=CURRENT_TIMESTAMP WHERE collection_id=? AND steam_app_id=?"));
+    query.addBindValue(input.status
+        ? QVariant(domain::steamCollectionGameStatusName(*input.status)) : QVariant());
+    query.addBindValue(input.personalRating ? QVariant(*input.personalRating) : QVariant());
+    query.addBindValue(input.personalComment);
+    query.addBindValue(collectionId);
+    query.addBindValue(input.steamAppId);
+    if (!query.exec())
+        return failure<domain::SteamCollectionGameEntry>(queryFailure(query));
+    if (query.numRowsAffected() != 1)
+        return failure<domain::SteamCollectionGameEntry>(domain::ErrorCategory::NotFound);
+    query.finish();
+    return loadGame(collectionId, input.steamAppId);
+}
+
+RepositoryResult<void> SteamCollectionsRepository::removeGame(
+    qint64 collectionId, quint32 appId)
+{
+    Q_ASSERT(QThread::currentThread() == m_database.driver()->thread());
+    if (collectionId <= 0 || appId == 0)
+        return failureVoid(domain::ErrorCategory::Validation);
+    QSqlQuery query(m_database);
+    query.prepare(QStringLiteral(
+        "DELETE FROM steam_collection_games WHERE collection_id=? AND steam_app_id=?"));
+    query.addBindValue(collectionId);
+    query.addBindValue(appId);
+    if (!query.exec()) return failureVoid(queryFailure(query));
+    return query.numRowsAffected() == 1 ? RepositoryResult<void>{}
+        : failureVoid(domain::ErrorCategory::NotFound);
+}
+
 SteamRepository::SteamRepository(QSqlDatabase &database) : m_database(database) {}
 
 RepositoryResult<SteamSettings> SteamRepository::settings() const
@@ -3704,7 +4276,9 @@ RepositoryResult<SteamGame> SteamRepository::add(
     game.priceCountryCode = game.priceCountryCode.trimmed().toUpper();
     static const QRegularExpression currencyPattern(QStringLiteral("^[A-Z]{3}$"));
     static const QRegularExpression countryPattern(QStringLiteral("^[A-Z]{2}$"));
-    if (game.steamAppId <= 0 || game.storeUrl.trimmed().isEmpty() || game.name.isEmpty() || game.name.toUcs4().size() > 300
+    if (game.steamAppId <= 0 || game.steamAppId > 4294967295LL
+        || game.storeUrl.trimmed().isEmpty() || game.name.isEmpty()
+        || game.name.toUcs4().size() > 300
         || game.priceCountryCode.isEmpty() || !countryPattern.match(game.priceCountryCode).hasMatch()
         || (game.priceStatus != QStringLiteral("priced")
             && game.priceStatus != QStringLiteral("free")
@@ -3737,6 +4311,9 @@ RepositoryResult<SteamGame> SteamRepository::add(
     if (!query.exec()) return failure<SteamGame>(queryFailure(query));
     game.id = query.lastInsertId().toLongLong();
     query.finish();
+    const auto catalog = upsertSteamCatalogDetails(m_database, {
+        quint32(game.steamAppId), game.storeUrl, game.name, game.imageSourceUrl});
+    if (!catalog.succeeded()) return failure<SteamGame>(catalog.error.category());
     const auto observation = recordSteamPriceObservation(m_database, game, game.lastCheckedAt);
     if (!observation.succeeded())
         return failure<SteamGame>(observation.error.category());
@@ -3759,7 +4336,9 @@ RepositoryResult<SteamGame> SteamRepository::updateRefresh(
     game.priceCountryCode = game.priceCountryCode.trimmed().toUpper();
     static const QRegularExpression currencyPattern(QStringLiteral("^[A-Z]{3}$"));
     static const QRegularExpression countryPattern(QStringLiteral("^[A-Z]{2}$"));
-    if (game.storeUrl.trimmed().isEmpty() || game.name.isEmpty() || game.name.toUcs4().size() > 300 || !countryPattern.match(game.priceCountryCode).hasMatch()
+    if (game.steamAppId <= 0 || game.steamAppId > 4294967295LL
+        || game.storeUrl.trimmed().isEmpty() || game.name.isEmpty()
+        || game.name.toUcs4().size() > 300 || !countryPattern.match(game.priceCountryCode).hasMatch()
         || (game.priceStatus != QStringLiteral("priced")
             && game.priceStatus != QStringLiteral("free")
             && game.priceStatus != QStringLiteral("unavailable")
@@ -3791,6 +4370,9 @@ RepositoryResult<SteamGame> SteamRepository::updateRefresh(
     if (!query.exec()) return failure<SteamGame>(queryFailure(query));
     if (query.numRowsAffected() != 1) return failure<SteamGame>(domain::ErrorCategory::NotFound);
     query.finish();
+    const auto catalog = upsertSteamCatalogDetails(m_database, {
+        quint32(game.steamAppId), game.storeUrl, game.name, game.imageSourceUrl});
+    if (!catalog.succeeded()) return failure<SteamGame>(catalog.error.category());
     const auto observation = recordSteamPriceObservation(m_database, game, game.lastCheckedAt);
     if (!observation.succeeded())
         return failure<SteamGame>(observation.error.category());
@@ -3852,7 +4434,8 @@ RepositoryResult<void> SteamRepository::applyRefreshBatch(
             || game.priceStatus == QStringLiteral("free")
             || game.priceStatus == QStringLiteral("unavailable")
             || game.priceStatus == QStringLiteral("unsupported");
-        if (game.id != update.gameId || game.name.trimmed().isEmpty()
+        if (game.id != update.gameId || game.steamAppId <= 0
+            || game.steamAppId > 4294967295LL || game.name.trimmed().isEmpty()
             || game.name.toUcs4().size() > 300 || !knownStatus
             || !countryPattern.match(game.priceCountryCode).hasMatch()
             || (!game.currency.isEmpty() && !currencyPattern.match(game.currency).hasMatch())
@@ -3882,6 +4465,9 @@ RepositoryResult<void> SteamRepository::applyRefreshBatch(
         if (successfulUpdate.numRowsAffected() != 1)
             return failureVoid(domain::ErrorCategory::NotFound);
         successfulUpdate.finish();
+        const auto catalog = upsertSteamCatalogDetails(m_database, {
+            quint32(game.steamAppId), game.storeUrl, game.name, game.imageSourceUrl});
+        if (!catalog.succeeded()) return failureVoid(catalog.error.category());
         const auto observation = recordSteamPriceObservation(
             m_database, game, update.attemptedAt);
         if (!observation.succeeded())
@@ -3899,11 +4485,36 @@ RepositoryResult<void> SteamRepository::setArtwork(qint64 gameId, const AssetMet
     Q_ASSERT(QThread::currentThread() == m_database.driver()->thread());
     if (gameId <= 0 || !validAsset(asset, {QStringLiteral("image/jpeg"), QStringLiteral("image/png"), QStringLiteral("image/webp")}))
         return failureVoid(domain::ErrorCategory::Validation);
+    Transaction transaction(m_database);
+    if (!transaction.active()) return failureVoid(domain::ErrorCategory::Storage);
+    QSqlQuery gameQuery(m_database);
+    gameQuery.prepare(QStringLiteral(
+        "SELECT steam_app_id,store_url,name,image_source_url FROM steam_games WHERE id=?"));
+    gameQuery.addBindValue(gameId);
+    if (!gameQuery.exec()) return failureVoid(queryFailure(gameQuery));
+    if (!gameQuery.next()) return failureVoid(domain::ErrorCategory::NotFound);
+    const qint64 storedAppId = gameQuery.value(0).toLongLong();
+    if (storedAppId <= 0 || storedAppId > 4294967295LL)
+        return failureVoid(domain::ErrorCategory::Storage);
+    const quint32 appId = quint32(storedAppId);
+    const QString storeUrl = gameQuery.value(1).toString();
+    const QString name = gameQuery.value(2).toString();
+    const QString sourceUrl = gameQuery.value(3).toString();
+    gameQuery.finish();
+    if (sourceUrl.isEmpty()) return failureVoid(domain::ErrorCategory::Conflict);
+    const auto catalog = upsertSteamCatalogDetails(m_database, {
+        appId, storeUrl, name, sourceUrl});
+    if (!catalog.succeeded()) return failureVoid(catalog.error.category());
     QSqlQuery query(m_database);
     query.prepare(QStringLiteral("INSERT INTO steam_game_images(game_id,filename,mime_type,byte_size) VALUES(?,?,?,?) ON CONFLICT(game_id) DO UPDATE SET filename=excluded.filename,mime_type=excluded.mime_type,byte_size=excluded.byte_size,updated_at=CURRENT_TIMESTAMP"));
     query.addBindValue(gameId);
     bindAsset(query, 1, asset);
     if (!query.exec()) return failureVoid(queryFailure(query));
+    query.finish();
+    const auto sharedArtwork = setSteamCatalogArtwork(m_database, appId, sourceUrl,
+        {sourceUrl, asset.filename, asset.mimeType, asset.byteSize});
+    if (!sharedArtwork.succeeded()) return failureVoid(sharedArtwork.error.category());
+    if (!transaction.commit()) return failureVoid(domain::ErrorCategory::Storage);
     return {};
 }
 
@@ -4129,6 +4740,10 @@ RepositoryResult<domain::SteamTrackedRelease> SteamReleaseRepository::add(
     query.addBindValue(release.refreshError);
     if (!query.exec()) return failure<domain::SteamTrackedRelease>(queryFailure(query));
     query.finish();
+    const auto catalog = upsertSteamCatalogDetails(m_database, {
+        release.appId, release.canonicalStoreUrl, release.title, release.artwork.sourceUrl});
+    if (!catalog.succeeded())
+        return failure<domain::SteamTrackedRelease>(catalog.error.category());
     if (cancellationRequested && cancellationRequested())
         return failure<domain::SteamTrackedRelease>(domain::ErrorCategory::Cancelled);
     const auto inserted = load(release.appId);
@@ -4214,6 +4829,14 @@ RepositoryResult<void> SteamReleaseRepository::applyRefreshBatch(
         }
         if (!query.exec()) return failureVoid(queryFailure(query));
         if (query.numRowsAffected() != 1) return failureVoid(domain::ErrorCategory::NotFound);
+        query.finish();
+        if (update.refreshedDetails) {
+            const domain::SteamReleaseDetails &details = *update.refreshedDetails;
+            const auto catalog = upsertSteamCatalogDetails(m_database, {
+                update.appId, existing.value.canonicalStoreUrl, details.title,
+                details.artworkUrl});
+            if (!catalog.succeeded()) return failureVoid(catalog.error.category());
+        }
         if (cancellationRequested && cancellationRequested())
             return failureVoid(domain::ErrorCategory::Cancelled);
     }
@@ -4256,6 +4879,15 @@ RepositoryResult<void> SteamReleaseRepository::setArtwork(
         || artwork.cachedFilename.isEmpty()) {
         return failureVoid(domain::ErrorCategory::Validation);
     }
+    Transaction transaction(m_database);
+    if (!transaction.active()) return failureVoid(domain::ErrorCategory::Storage);
+    const auto current = load(appId);
+    if (!current.succeeded()) return failureVoid(current.error.category());
+    if (current.value.artwork.sourceUrl != expectedSourceUrl)
+        return failureVoid(domain::ErrorCategory::Conflict);
+    const auto catalog = upsertSteamCatalogDetails(m_database, {
+        appId, current.value.canonicalStoreUrl, current.value.title, expectedSourceUrl});
+    if (!catalog.succeeded()) return failureVoid(catalog.error.category());
     QSqlQuery query(m_database);
     query.prepare(QStringLiteral(
         "UPDATE steam_release_follows SET artwork_filename=?,artwork_mime_type=?,"
@@ -4267,7 +4899,16 @@ RepositoryResult<void> SteamReleaseRepository::setArtwork(
     query.addBindValue(appId);
     query.addBindValue(expectedSourceUrl);
     if (!query.exec()) return failureVoid(queryFailure(query));
-    if (query.numRowsAffected() == 1) return {};
+    if (query.numRowsAffected() == 1) {
+        query.finish();
+        const auto sharedArtwork = setSteamCatalogArtwork(m_database, appId,
+            expectedSourceUrl, {expectedSourceUrl, artwork.cachedFilename,
+                                artwork.mimeType, artwork.byteSize});
+        if (!sharedArtwork.succeeded())
+            return failureVoid(sharedArtwork.error.category());
+        if (!transaction.commit()) return failureVoid(domain::ErrorCategory::Storage);
+        return {};
+    }
     query.finish();
     QSqlQuery exists(m_database);
     exists.prepare(QStringLiteral("SELECT 1 FROM steam_release_follows WHERE steam_app_id=?"));
@@ -4433,6 +5074,11 @@ RepositoryResult<domain::SteamGameUpdateFollow> SteamGameUpdatesRepository::add(
     query.addBindValue(follow.lastRefreshError);
     if (!query.exec())
         return failure<domain::SteamGameUpdateFollow>(queryFailure(query));
+    query.finish();
+    const auto catalog = upsertSteamCatalogDetails(m_database, {
+        follow.appId, follow.canonicalStoreUrl, follow.name, follow.artwork.sourceUrl});
+    if (!catalog.succeeded())
+        return failure<domain::SteamGameUpdateFollow>(catalog.error.category());
     if (cancellationRequested && cancellationRequested())
         return failure<domain::SteamGameUpdateFollow>(domain::ErrorCategory::Cancelled);
     const auto inserted = load(follow.appId);
@@ -4517,6 +5163,11 @@ RepositoryResult<void> SteamGameUpdatesRepository::setArtwork(
     if (!domain::isValidSteamGameUpdateFollow(updated))
         return failureVoid(domain::ErrorCategory::Validation);
 
+    Transaction transaction(m_database);
+    if (!transaction.active()) return failureVoid(domain::ErrorCategory::Storage);
+    const auto catalog = upsertSteamCatalogDetails(m_database, {
+        appId, current.value.canonicalStoreUrl, current.value.name, expectedSourceUrl});
+    if (!catalog.succeeded()) return failureVoid(catalog.error.category());
     QSqlQuery query(m_database);
     query.prepare(QStringLiteral(
         "UPDATE steam_game_update_follows SET artwork_filename=?,artwork_mime_type=?,"
@@ -4528,8 +5179,16 @@ RepositoryResult<void> SteamGameUpdatesRepository::setArtwork(
     query.addBindValue(appId);
     query.addBindValue(expectedSourceUrl);
     if (!query.exec()) return failureVoid(queryFailure(query));
-    return query.numRowsAffected() == 1 ? RepositoryResult<void>{}
-                                       : failureVoid(domain::ErrorCategory::Conflict);
+    if (query.numRowsAffected() != 1)
+        return failureVoid(domain::ErrorCategory::Conflict);
+    query.finish();
+    const auto sharedArtwork = setSteamCatalogArtwork(m_database, appId,
+        expectedSourceUrl, {expectedSourceUrl, artwork.cachedFilename,
+                            artwork.mimeType, artwork.byteSize});
+    if (!sharedArtwork.succeeded())
+        return failureVoid(sharedArtwork.error.category());
+    if (!transaction.commit()) return failureVoid(domain::ErrorCategory::Storage);
+    return {};
 }
 
 RepositoryResult<bool> SteamGameUpdatesRepository::hasArtworkFilename(
@@ -4863,6 +5522,8 @@ StorageRepositories::StorageRepositories(QSqlDatabase &database)
     , applications(database)
     , setups(database)
     , wallpapers(database)
+    , steamCatalog(database)
+    , steamCollections(database)
     , steam(database)
     , steamReleases(database)
     , gameUpdates(database)

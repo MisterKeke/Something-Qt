@@ -504,6 +504,9 @@ void GameUpdatesFeatureTest::gameUpdatesMigrationsPreserveExistingPriceRows()
     }
 
     QSqlQuery legacy(database);
+    QVERIFY(legacy.exec(QStringLiteral("DROP TABLE steam_collection_games")));
+    QVERIFY(legacy.exec(QStringLiteral("DROP TABLE steam_collections")));
+    QVERIFY(legacy.exec(QStringLiteral("DROP TABLE steam_game_catalog")));
     QVERIFY(legacy.exec(QStringLiteral("DROP TABLE steam_game_update_news_items")));
     QVERIFY(legacy.exec(QStringLiteral("DROP TABLE steam_game_update_follows")));
     QVERIFY(legacy.exec(QStringLiteral("DELETE FROM schema_migrations WHERE version>=16")));
@@ -514,7 +517,7 @@ void GameUpdatesFeatureTest::gameUpdatesMigrationsPreserveExistingPriceRows()
 
     QString diagnostic;
     QVERIFY2(storage::SchemaMigrator::apply(database, &diagnostic), qPrintable(diagnostic));
-    QCOMPARE(storage::SchemaMigrator::latestVersion(), 17);
+    QCOMPARE(storage::SchemaMigrator::latestVersion(), 18);
     {
         storage::StorageRepositories repositories(database);
         const auto preservedPrice = repositories.steam.get(priceId);
