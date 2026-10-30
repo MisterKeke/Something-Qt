@@ -92,6 +92,7 @@ qt_add_executable(SomethingQt WIN32
     src/domain/task_history.cpp
     src/domain/task_rules.cpp
     src/domain/task_scheduling.cpp
+    src/domain/scheduling_engine.cpp
     src/domain/steam_game.cpp
     src/domain/weather_currency.cpp
     src/platform/profile_instance_lock.cpp
