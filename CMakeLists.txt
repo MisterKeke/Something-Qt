@@ -88,6 +88,7 @@ qt_add_executable(SomethingQt WIN32
     src/domain/desktop_application_rules.cpp
     src/domain/favorite_rules.cpp
     src/domain/task_date_rules.cpp
+    src/domain/task_history.cpp
     src/domain/task_rules.cpp
     src/domain/steam_game.cpp
     src/domain/weather_currency.cpp
