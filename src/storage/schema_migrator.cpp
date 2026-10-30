@@ -247,6 +247,23 @@ constexpr const char *dataImport[] = {
     ))SQL",
 };
 
+constexpr const char *applicationCategories[] = {
+    R"SQL(CREATE TABLE application_categories (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL CHECK(length(trim(name)) BETWEEN 1 AND 80),
+        name_normalized TEXT NOT NULL UNIQUE CHECK(length(trim(name_normalized)) > 0),
+        description TEXT,
+        color TEXT,
+        icon_identifier TEXT,
+        display_order INTEGER NOT NULL DEFAULT 0 CHECK(display_order >= 0),
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    ))SQL",
+    "CREATE INDEX idx_application_categories_order ON application_categories(display_order, name_normalized, id)",
+    "ALTER TABLE desktop_apps ADD COLUMN category_id INTEGER REFERENCES application_categories(id) ON DELETE SET NULL",
+    "CREATE INDEX idx_desktop_apps_category ON desktop_apps(category_id, display_name COLLATE NOCASE, id)",
+};
+
 constexpr std::array migrations{
     Migration{1, "core tasks currencies preferences", core, qsizetype(std::size(core))},
     Migration{2, "favorites and retained update news", favorites, qsizetype(std::size(favorites))},
@@ -256,6 +273,8 @@ constexpr std::array migrations{
     Migration{6, "favorite display ordering", favoriteOrdering, qsizetype(std::size(favoriteOrdering))},
     Migration{7, "one-time retained profile import ledger", dataImport,
               qsizetype(std::size(dataImport))},
+    Migration{8, "saved application categories", applicationCategories,
+              qsizetype(std::size(applicationCategories))},
 };
 
 bool fail(QString *diagnostic, const QString &message)
@@ -306,6 +325,7 @@ bool hasUnexpectedTables(const QSqlDatabase &database, QString *diagnostic, bool
         QStringLiteral("youtube_favorites"), QStringLiteral("favorite_update_checkpoints"),
         QStringLiteral("favorite_update_seen_items"), QStringLiteral("favorite_news_items"),
         QStringLiteral("favorite_news_state"), QStringLiteral("saved_weather"),
+        QStringLiteral("application_categories"),
         QStringLiteral("wallpapers"), QStringLiteral("desktop_apps"),
         QStringLiteral("desktop_app_icons"), QStringLiteral("setups"),
         QStringLiteral("setup_apps"), QStringLiteral("setup_icons"),

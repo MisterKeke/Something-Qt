@@ -53,15 +53,15 @@ void StorageRepositoryTest::migrationsAreTransactionalIndependentAndRepeatable()
     QString connectionName;
     QSqlDatabase database;
     QVERIFY(openTestDatabase(&database, &connectionName));
-    QCOMPARE(storage::SchemaMigrator::latestVersion(), 7);
+    QCOMPARE(storage::SchemaMigrator::latestVersion(), 8);
     QVERIFY(storage::SchemaMigrator::apply(database));
 
     QSqlQuery history(database);
     QVERIFY(history.exec(QStringLiteral("SELECT COUNT(*),MIN(version),MAX(version) FROM schema_migrations")));
     QVERIFY(history.next());
-    QCOMPARE(history.value(0).toInt(), 7);
+    QCOMPARE(history.value(0).toInt(), 8);
     QCOMPARE(history.value(1).toInt(), 1);
-    QCOMPARE(history.value(2).toInt(), 7);
+    QCOMPARE(history.value(2).toInt(), 8);
 
     const QStringList tables = tableNames(database);
     for (const QString &retained : {QStringLiteral("tasks"), QStringLiteral("task_tags"),
