@@ -231,7 +231,10 @@ ApplicationWindow {
 
     Component {
         id: steamPageComponent
-        Pages.SteamGamesPage { controller: steamGamesController }
+        Pages.SteamGamesPage {
+            controller: steamGamesController
+            releaseController: steamReleaseController
+        }
     }
 
     background: Item {

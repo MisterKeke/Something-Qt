@@ -76,6 +76,7 @@ qt_add_executable(SomethingQt WIN32
     src/controllers/file_explorer_controller.cpp
     src/controllers/legacy_data_import_controller.cpp
     src/controllers/setups_controller.cpp
+    src/controllers/steam_release_controller.cpp
     src/controllers/steam_games_controller.cpp
     src/controllers/favorites_controller.cpp
     src/controllers/running_applications_controller.cpp
@@ -154,6 +155,7 @@ qt_add_executable(SomethingQt WIN32
     src/models/running_windows_model.cpp
     src/models/weather_forecast_model.cpp
     src/models/weather_comparison_model.cpp
+    src/models/steam_releases_model.cpp
     src/models/steam_games_model.cpp
 )
 
@@ -198,6 +200,8 @@ qt_add_qml_module(SomethingQt
         qml/pages/FileExplorerPage.qml
         qml/pages/RunningApplicationsPage.qml
         qml/pages/SetupsPage.qml
+        qml/pages/SteamPriceTrackingPanel.qml
+        qml/pages/SteamReleaseRadarPage.qml
         qml/pages/SteamGamesPage.qml
         qml/pages/TasksPage.qml
         qml/pages/TerminalPage.qml

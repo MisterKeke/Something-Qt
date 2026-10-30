@@ -30,6 +30,7 @@
 #include "controllers/scheduling_controller.h"
 #include "controllers/settings_controller.h"
 #include "controllers/setups_controller.h"
+#include "controllers/steam_release_controller.h"
 #include "controllers/steam_games_controller.h"
 #include "controllers/tasks_controller.h"
 #include "controllers/task_history_controller.h"
@@ -153,6 +154,7 @@ int main(int argc, char *argv[])
     something::controllers::FileExplorerController fileExplorerController(
         &services, &fileExplorerService, &fileExplorerShell);
     something::controllers::SteamGamesController steamGamesController(&services);
+    something::controllers::SteamReleaseController steamReleaseController(&services);
     commandService.setSnapshotProvider(QStringLiteral("settings"), [&settingsController, &wallpaperController,
                                                                      &steamGamesController] {
         QVariantMap fields;
@@ -195,6 +197,12 @@ int main(int argc, char *argv[])
     QObject::connect(&steamGamesController,
                      &something::controllers::SteamGamesController::artworkInvalidated,
                      &steamGamesController,
+                     [steamArtworkImages](const QString &filename) {
+        steamArtworkImages->invalidate(filename);
+    });
+    QObject::connect(&steamReleaseController,
+                     &something::controllers::SteamReleaseController::artworkInvalidated,
+                     &steamReleaseController,
                      [steamArtworkImages](const QString &filename) {
         steamArtworkImages->invalidate(filename);
     });
@@ -273,6 +281,8 @@ int main(int argc, char *argv[])
                                              &fileExplorerController);
     engine.rootContext()->setContextProperty(QStringLiteral("steamGamesController"),
                                              &steamGamesController);
+    engine.rootContext()->setContextProperty(QStringLiteral("steamReleaseController"),
+                                             &steamReleaseController);
     engine.loadFromModule(QStringLiteral("Something.App"), QStringLiteral("Main"));
 
     if (engine.rootObjects().isEmpty()) {
