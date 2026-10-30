@@ -264,6 +264,33 @@ constexpr const char *applicationCategories[] = {
     "CREATE INDEX idx_desktop_apps_category ON desktop_apps(category_id, display_name COLLATE NOCASE, id)",
 };
 
+constexpr const char *taskHistory[] = {
+    R"SQL(CREATE TABLE task_history (
+        event_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        -- Deliberately no task foreign key: history survives task deletion.
+        task_id INTEGER NOT NULL CHECK(task_id > 0),
+        event_type TEXT NOT NULL CHECK(event_type IN (
+            'task_created', 'task_updated', 'task_title_changed', 'description_changed',
+            'due_date_changed', 'priority_changed', 'difficulty_changed', 'tags_changed',
+            'task_completed', 'task_reopened',
+            'subtask_created', 'subtask_updated', 'subtask_completed',
+            'subtask_reopened', 'subtask_removed', 'task_deleted'
+        )),
+        occurred_at_utc TEXT NOT NULL,
+        task_revision INTEGER CHECK(task_revision IS NULL OR task_revision > 0),
+        task_title TEXT NOT NULL,
+        serialization_version INTEGER NOT NULL CHECK(serialization_version > 0),
+        changed_fields_json TEXT NOT NULL,
+        previous_values_json TEXT NOT NULL,
+        new_values_json TEXT NOT NULL
+    ))SQL",
+    "CREATE INDEX idx_task_history_task_time ON task_history(task_id, occurred_at_utc DESC, event_id DESC)",
+    "CREATE INDEX idx_task_history_time ON task_history(occurred_at_utc DESC, event_id DESC)",
+    "CREATE INDEX idx_task_history_type_time ON task_history(event_type, occurred_at_utc DESC, event_id DESC)",
+    "CREATE TRIGGER task_history_prevent_update BEFORE UPDATE ON task_history BEGIN SELECT RAISE(ABORT, 'task history is append-only'); END",
+    "CREATE TRIGGER task_history_prevent_delete BEFORE DELETE ON task_history BEGIN SELECT RAISE(ABORT, 'task history is append-only'); END",
+};
+
 constexpr std::array migrations{
     Migration{1, "core tasks currencies preferences", core, qsizetype(std::size(core))},
     Migration{2, "favorites and retained update news", favorites, qsizetype(std::size(favorites))},
@@ -275,6 +302,8 @@ constexpr std::array migrations{
               qsizetype(std::size(dataImport))},
     Migration{8, "saved application categories", applicationCategories,
               qsizetype(std::size(applicationCategories))},
+    Migration{9, "persistent task history", taskHistory,
+              qsizetype(std::size(taskHistory))},
 };
 
 bool fail(QString *diagnostic, const QString &message)
@@ -330,7 +359,8 @@ bool hasUnexpectedTables(const QSqlDatabase &database, QString *diagnostic, bool
         QStringLiteral("desktop_app_icons"), QStringLiteral("setups"),
         QStringLiteral("setup_apps"), QStringLiteral("setup_icons"),
         QStringLiteral("steam_game_settings"), QStringLiteral("steam_games"),
-        QStringLiteral("steam_game_images"), QStringLiteral("data_imports")
+        QStringLiteral("steam_game_images"), QStringLiteral("data_imports"),
+        QStringLiteral("task_history")
     };
     QSqlQuery query(database);
     if (!query.exec(QStringLiteral("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"))) {

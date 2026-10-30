@@ -81,6 +81,7 @@ qt_add_executable(SomethingQt WIN32
     src/controllers/running_applications_controller.cpp
     src/controllers/settings_controller.cpp
     src/controllers/tasks_controller.cpp
+    src/controllers/task_history_controller.cpp
     src/controllers/terminal_controller.cpp
     src/controllers/wallpaper_controller.cpp
     src/controllers/weather_controller.cpp
@@ -88,6 +89,7 @@ qt_add_executable(SomethingQt WIN32
     src/domain/desktop_application_rules.cpp
     src/domain/favorite_rules.cpp
     src/domain/task_date_rules.cpp
+    src/domain/task_history.cpp
     src/domain/task_rules.cpp
     src/domain/steam_game.cpp
     src/domain/weather_currency.cpp
@@ -119,6 +121,7 @@ qt_add_executable(SomethingQt WIN32
     src/services/currency_service.cpp
     src/services/favorites_service.cpp
     src/services/task_service.cpp
+    src/services/task_history_service.cpp
     src/services/application_command_service.cpp
     src/services/application_mutation_workflow.cpp
     src/services/preferences_service.cpp
@@ -130,6 +133,7 @@ qt_add_executable(SomethingQt WIN32
     src/storage/schema_migrator.cpp
     src/storage/storage_worker.cpp
     src/models/tasks_model.cpp
+    src/models/task_history_model.cpp
     src/models/terminal_output_model.cpp
     src/models/calendar_months_model.cpp
     src/models/currency_rates_model.cpp
@@ -172,7 +176,9 @@ qt_add_qml_module(SomethingQt
         qml/components/OrbitNavigation.qml
         qml/dialogs/ConfirmationDialog.qml
         qml/dialogs/TaskEditorDialog.qml
+        qml/dialogs/TaskHistoryDialog.qml
         qml/components/TaskSummaryCard.qml
+        qml/components/TaskHistoryEventCard.qml
         qml/pages/CalendarPage.qml
         qml/pages/CurrenciesPage.qml
         qml/pages/DesktopApplicationsPage.qml

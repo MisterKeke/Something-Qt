@@ -29,6 +29,24 @@ private:
     QSqlDatabase &m_database;
 };
 
+class TaskHistoryRepository final {
+public:
+    explicit TaskHistoryRepository(QSqlDatabase &database);
+    RepositoryResult<TaskHistoryPage> forTask(
+        qint64 taskId, std::optional<domain::TaskHistoryEventType> eventType,
+        int pageSize, const TaskHistoryCursor &before = {}) const;
+    RepositoryResult<TaskHistoryPage> recent(
+        QString taskTitleQuery, std::optional<domain::TaskHistoryEventType> eventType,
+        int pageSize, const TaskHistoryCursor &before = {}) const;
+
+private:
+    RepositoryResult<TaskHistoryPage> list(
+        std::optional<qint64> taskId, QString taskTitleQuery,
+        std::optional<domain::TaskHistoryEventType> eventType,
+        int pageSize, const TaskHistoryCursor &before) const;
+    QSqlDatabase &m_database;
+};
+
 class CurrencyFavoritesRepository final {
 public:
     explicit CurrencyFavoritesRepository(QSqlDatabase &database);
@@ -193,6 +211,7 @@ class StorageRepositories final {
 public:
     explicit StorageRepositories(QSqlDatabase &database);
     TaskRepository tasks;
+    TaskHistoryRepository taskHistory;
     CurrencyFavoritesRepository currencies;
     FavoritesRepository favorites;
     FavoriteNewsRepository news;

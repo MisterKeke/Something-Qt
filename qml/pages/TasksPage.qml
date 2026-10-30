@@ -9,13 +9,31 @@ Item {
     id: root
 
     property var controller: taskController
+    property var historyController: taskHistoryController
     property var filterState: taskController.filters
+    property string activeView: "tasks"
     Component.onCompleted: {
         controller.setPageVisible(visible)
+        historyController.setVisible(false)
         refreshControls()
     }
-    Component.onDestruction: controller.setPageVisible(false)
-    onVisibleChanged: if (controller) controller.setPageVisible(visible)
+    Component.onDestruction: {
+        controller.setPageVisible(false)
+        historyController.setVisible(false)
+    }
+    onVisibleChanged: {
+        if (controller) controller.setPageVisible(visible)
+        if (historyController) historyController.setVisible(visible && activeView === "history")
+    }
+    onActiveViewChanged: {
+        if (activeView === "history") {
+            historyController.loadRecentHistory(historyQueryField.text,
+                                                String(historyTypeBox.currentValue || ""))
+            historyController.setVisible(visible)
+        } else {
+            historyController.setVisible(false)
+        }
+    }
     readonly property var dateModes: [
         { label: qsTr("Any date"), value: "any" },
         { label: qsTr("Today"), value: "today" },
@@ -50,6 +68,25 @@ Item {
         { label: qsTr("Due date"), value: "due_date" },
         { label: qsTr("Priority"), value: "priority" },
         { label: qsTr("Title"), value: "title" },
+    ]
+    readonly property var historyEventTypes: [
+        { label: qsTr("All event types"), value: "" },
+        { label: qsTr("Task created"), value: "task_created" },
+        { label: qsTr("Task updated"), value: "task_updated" },
+        { label: qsTr("Title changed"), value: "task_title_changed" },
+        { label: qsTr("Description changed"), value: "description_changed" },
+        { label: qsTr("Due date changed"), value: "due_date_changed" },
+        { label: qsTr("Priority changed"), value: "priority_changed" },
+        { label: qsTr("Difficulty changed"), value: "difficulty_changed" },
+        { label: qsTr("Tags changed"), value: "tags_changed" },
+        { label: qsTr("Task completed"), value: "task_completed" },
+        { label: qsTr("Task reopened"), value: "task_reopened" },
+        { label: qsTr("Subtask created"), value: "subtask_created" },
+        { label: qsTr("Subtask updated"), value: "subtask_updated" },
+        { label: qsTr("Subtask completed"), value: "subtask_completed" },
+        { label: qsTr("Subtask reopened"), value: "subtask_reopened" },
+        { label: qsTr("Subtask removed"), value: "subtask_removed" },
+        { label: qsTr("Task deleted"), value: "task_deleted" },
     ]
 
     implicitHeight: pageColumn.implicitHeight
@@ -111,6 +148,11 @@ Item {
         taskController.setFilters(next)
     }
 
+    function loadGlobalHistory() {
+        historyController.loadRecentHistory(historyQueryField.text,
+                                           String(historyTypeBox.currentValue || ""))
+    }
+
     function dateSummary(date, overdue) {
         if (!date) return qsTr("No due date")
         if (overdue) return qsTr("Overdue · due %1").arg(date)
@@ -146,6 +188,13 @@ Item {
         function onFiltersChanged() { root.refreshControls() }
     }
 
+    Timer {
+        id: historySearchTimer
+        interval: 220
+        repeat: false
+        onTriggered: if (root.activeView === "history") root.loadGlobalHistory()
+    }
+
     ColumnLayout {
         id: pageColumn
         anchors.left: parent.left
@@ -162,16 +211,28 @@ Item {
 
             RowLayout {
                 Layout.fillWidth: true
+                Shared.AppButton {
+                    text: qsTr("Tasks")
+                    quiet: root.activeView !== "tasks"
+                    onClicked: root.activeView = "tasks"
+                }
+                Shared.AppButton {
+                    text: qsTr("History")
+                    quiet: root.activeView !== "history"
+                    onClicked: root.activeView = "history"
+                }
                 Label {
                     Layout.fillWidth: true
-                    text: qsTr("Create, organize, and complete your tasks")
+                    text: root.activeView === "history"
+                          ? qsTr("Chronological task changes")
+                          : qsTr("Create, organize, and complete your tasks")
                     color: ThemeModule.Theme.textSecondary
                     font.family: ThemeModule.Theme.fontFamily
                     font.pixelSize: 13
                     wrapMode: Text.Wrap
                 }
                 BusyIndicator {
-                    visible: taskController.loading
+                    visible: root.activeView === "tasks" && taskController.loading
                     running: visible
                     width: 25
                     height: 25
@@ -179,18 +240,21 @@ Item {
                 }
                 Shared.AppButton {
                     text: qsTr("Refresh")
+                    visible: root.activeView === "tasks"
                     quiet: true
                     enabled: taskController.ready && !taskController.loading
                     onClicked: taskController.refresh()
                 }
                 Shared.AppButton {
                     text: qsTr("Add task")
+                    visible: root.activeView === "tasks"
                     enabled: taskController.ready && !taskController.mutationBusy
                     onClicked: editor.openNew()
                 }
             }
 
             GridLayout {
+                visible: root.activeView === "tasks"
                 Layout.fillWidth: true
                 columns: width > 1000 ? 4 : width > 620 ? 3 : 2
                 columnSpacing: 10
@@ -309,7 +373,7 @@ Item {
 
         Shared.AppCard {
             Layout.fillWidth: true
-            visible: taskController.errorMessage.length > 0
+            visible: root.activeView === "tasks" && taskController.errorMessage.length > 0
             padding: 13
             Label {
                 width: parent.width
@@ -324,7 +388,7 @@ Item {
 
         Shared.StatePanel {
             Layout.fillWidth: true
-            visible: taskController.model.count === 0
+            visible: root.activeView === "tasks" && taskController.model.count === 0
             state: taskController.errorMessage.length > 0 ? "error"
                    : !taskController.ready || taskController.loading ? "loading" : "empty"
             title: taskController.errorMessage.length > 0
@@ -344,7 +408,7 @@ Item {
             id: taskList
             Layout.fillWidth: true
             Layout.preferredHeight: Math.min(720, Math.max(0, contentHeight))
-            visible: taskController.model.count > 0
+            visible: root.activeView === "tasks" && taskController.model.count > 0
             clip: true
             spacing: 9
             boundsBehavior: Flickable.StopAtBounds
@@ -452,6 +516,12 @@ Item {
                                 dueDate, priority, difficulty, revision, tags, subtasks))
                         }
                         Shared.AppButton {
+                            text: qsTr("History")
+                            quiet: true
+                            enabled: historyController.ready
+                            onClicked: historyDialog.openForTask(taskId, title)
+                        }
+                        Shared.AppButton {
                             text: qsTr("Delete")
                             destructive: true
                             quiet: true
@@ -533,7 +603,8 @@ Item {
 
         RowLayout {
             Layout.fillWidth: true
-            visible: taskController.model.count > 0 || taskController.pageNumber > 1
+            visible: root.activeView === "tasks"
+                     && (taskController.model.count > 0 || taskController.pageNumber > 1)
             Shared.AppButton {
                 text: qsTr("Previous")
                 quiet: true
@@ -554,11 +625,136 @@ Item {
                 onClicked: taskController.nextPage()
             }
         }
+
+        Shared.AppCard {
+            Layout.fillWidth: true
+            visible: root.activeView === "history"
+            padding: 14
+            ColumnLayout {
+                width: parent.width
+                spacing: 9
+                Label {
+                    Layout.fillWidth: true
+                    text: qsTr("Search task history")
+                    color: ThemeModule.Theme.textPrimary
+                    font.family: ThemeModule.Theme.fontFamily
+                    font.pixelSize: 15
+                    font.weight: Font.DemiBold
+                }
+                RowLayout {
+                    Layout.fillWidth: true
+                    Shared.AppTextField {
+                        id: historyQueryField
+                        Layout.fillWidth: true
+                        placeholderText: qsTr("Search by task title")
+                        accessibleLabel: qsTr("Search task history by task title")
+                        maximumLength: 256
+                        onTextEdited: historySearchTimer.restart()
+                    }
+                    Shared.AppComboBox {
+                        id: historyTypeBox
+                        Layout.preferredWidth: Math.min(230, parent.width * 0.38)
+                        accessibleLabel: qsTr("Filter task history by event type")
+                        textRole: "label"
+                        valueRole: "value"
+                        model: root.historyEventTypes
+                        onActivated: root.loadGlobalHistory()
+                    }
+                    BusyIndicator {
+                        visible: historyController.loading
+                        running: visible
+                        implicitWidth: 24
+                        implicitHeight: 24
+                        Accessible.name: qsTr("Loading task history")
+                    }
+                    Shared.AppButton {
+                        text: qsTr("Refresh")
+                        quiet: true
+                        enabled: historyController.ready && !historyController.loading
+                        onClicked: root.loadGlobalHistory()
+                    }
+                }
+            }
+        }
+
+        Label {
+            Layout.fillWidth: true
+            visible: root.activeView === "history" && historyController.errorMessage.length > 0
+            text: historyController.errorMessage
+            color: ThemeModule.Theme.error
+            wrapMode: Text.Wrap
+            font.family: ThemeModule.Theme.fontFamily
+            Accessible.role: Accessible.AlertMessage
+        }
+
+        Label {
+            Layout.fillWidth: true
+            visible: root.activeView === "history" && historyController.warningMessage.length > 0
+            text: historyController.warningMessage
+            color: ThemeModule.Theme.warning
+            wrapMode: Text.Wrap
+            font.family: ThemeModule.Theme.fontFamily
+            Accessible.role: Accessible.AlertMessage
+        }
+
+        Shared.StatePanel {
+            Layout.fillWidth: true
+            visible: root.activeView === "history" && historyController.model.count === 0
+            state: historyController.errorMessage.length > 0 ? "error"
+                   : !historyController.ready || historyController.loading ? "loading" : "empty"
+            title: historyController.errorMessage.length > 0
+                   ? qsTr("History could not be loaded")
+                   : historyController.warningMessage.length > 0
+                     ? qsTr("Some history entries could not be read")
+                   : historyController.ready ? qsTr("No matching task history")
+                                             : qsTr("Starting task storage")
+            message: historyController.errorMessage.length > 0
+                     ? qsTr("Refresh this view after the storage issue is resolved.")
+                     : historyController.warningMessage.length > 0
+                       ? historyController.warningMessage
+                     : historyController.ready
+                       ? qsTr("Task changes will appear here as they are recorded.")
+                       : qsTr("Please wait.")
+        }
+
+        ListView {
+            id: historyList
+            Layout.fillWidth: true
+            Layout.preferredHeight: Math.min(720, Math.max(100, contentHeight))
+            visible: root.activeView === "history" && historyController.model.count > 0
+            clip: true
+            spacing: 8
+            boundsBehavior: Flickable.StopAtBounds
+            Accessible.name: qsTr("Chronological task history")
+            model: historyController.model
+            ScrollBar.vertical: ThemeModule.AppScrollBar { policy: ScrollBar.AsNeeded }
+            delegate: Shared.TaskHistoryEventCard {
+                width: ListView.view.width
+                eventType: model.eventType
+                occurredAtUtc: model.occurredAtUtc
+                taskTitle: model.taskTitle
+                changes: model.changes
+            }
+        }
+
+        Shared.AppButton {
+            Layout.alignment: Qt.AlignHCenter
+            visible: root.activeView === "history" && historyController.hasMore
+            text: historyController.loading ? qsTr("Loading older events…") : qsTr("Load older events")
+            quiet: true
+            enabled: !historyController.loading
+            onClicked: historyController.loadOlder()
+        }
     }
 
     Dialogs.TaskEditorDialog {
         id: editor
         taskController: root.controller
+    }
+
+    Dialogs.TaskHistoryDialog {
+        id: historyDialog
+        historyController: root.historyController
     }
 
 }
