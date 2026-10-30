@@ -111,6 +111,98 @@ storage::StorageCommand SteamService::loadSnapshot(QString profileDirectory)
     };
 }
 
+storage::StorageCommand SteamService::loadPriceHistoryStatistics(
+    qint64 gameId, QString countryCode, QString currencyCode,
+    storage::SteamPriceHistoryRange range)
+{
+    countryCode = countryCode.trimmed().toUpper();
+    currencyCode = currencyCode.trimmed().toUpper();
+    return [gameId, countryCode = std::move(countryCode),
+            currencyCode = std::move(currencyCode), range](
+               storage::StorageRepositories &repositories,
+               const std::function<bool()> &cancelled) {
+        if (cancelled()) return failed(domain::AppError::cancelled());
+        static const QRegularExpression currencyPattern(QStringLiteral("^[A-Z]{3}$"));
+        if (gameId <= 0 || !domain::isSupportedSteamCountry(countryCode)
+            || (!currencyCode.isEmpty() && !currencyPattern.match(currencyCode).hasMatch())) {
+            return failed(domain::AppError(domain::ErrorCategory::Validation));
+        }
+
+        QString rangeName;
+        switch (range) {
+        case storage::SteamPriceHistoryRange::Days7:
+            rangeName = QStringLiteral("7d");
+            break;
+        case storage::SteamPriceHistoryRange::Days30:
+            rangeName = QStringLiteral("30d");
+            break;
+        case storage::SteamPriceHistoryRange::Days90:
+            rangeName = QStringLiteral("90d");
+            break;
+        case storage::SteamPriceHistoryRange::Year1:
+            rangeName = QStringLiteral("1y");
+            break;
+        case storage::SteamPriceHistoryRange::All:
+            rangeName = QStringLiteral("all");
+            break;
+        default:
+            return failed(domain::AppError(domain::ErrorCategory::Validation));
+        }
+
+        const auto loaded = repositories.steam.priceHistoryStatistics(
+            gameId, countryCode, currencyCode, range);
+        if (!loaded.succeeded()) return failed(loaded.error);
+        if (cancelled()) return failed(domain::AppError::cancelled());
+
+        const storage::SteamPriceHistoryStatistics &statistics = loaded.value;
+        QVariantMap value{
+            {QStringLiteral("gameId"), gameId},
+            {QStringLiteral("countryCode"), statistics.countryCode},
+            {QStringLiteral("currencyCode"), statistics.currencyCode},
+            {QStringLiteral("range"), rangeName},
+            {QStringLiteral("observationCount"), statistics.observationCount},
+            {QStringLiteral("comparablePriceCount"), statistics.comparablePriceCount},
+            {QStringLiteral("hasSufficientHistory"), statistics.hasSufficientHistory},
+            {QStringLiteral("firstObservationAtUtc"), statistics.firstObservationAtUtc},
+            {QStringLiteral("mostRecentObservationAtUtc"), statistics.mostRecentObservationAtUtc},
+            {QStringLiteral("latestObservationState"), statistics.latestObservationState},
+            {QStringLiteral("latestObservationAtUtc"), statistics.latestObservationAtUtc},
+            {QStringLiteral("latestPriceState"), statistics.latestPriceState},
+            {QStringLiteral("latestPriceAtUtc"), statistics.latestPriceAtUtc},
+            {QStringLiteral("hasLatestPrice"), statistics.latestPriceMinor.has_value()},
+            {QStringLiteral("hasLowestPrice"), statistics.lowestPriceMinor.has_value()},
+            {QStringLiteral("hasHighestPrice"), statistics.highestPriceMinor.has_value()},
+            {QStringLiteral("hasComparableInterval"), statistics.hasComparableInterval},
+            {QStringLiteral("intervalStartAtUtc"), statistics.intervalStartAtUtc},
+            {QStringLiteral("intervalEndAtUtc"), statistics.intervalEndAtUtc},
+            {QStringLiteral("hasIntervalPercentageChange"),
+             statistics.intervalPercentageChange.has_value()},
+        };
+        if (statistics.latestPriceMinor)
+            value.insert(QStringLiteral("latestPriceMinor"), *statistics.latestPriceMinor);
+        if (statistics.lowestPriceMinor)
+            value.insert(QStringLiteral("lowestPriceMinor"), *statistics.lowestPriceMinor);
+        if (statistics.highestPriceMinor)
+            value.insert(QStringLiteral("highestPriceMinor"), *statistics.highestPriceMinor);
+        if (statistics.intervalStartPriceMinor)
+            value.insert(QStringLiteral("intervalStartPriceMinor"),
+                          *statistics.intervalStartPriceMinor);
+        if (statistics.intervalEndPriceMinor)
+            value.insert(QStringLiteral("intervalEndPriceMinor"),
+                          *statistics.intervalEndPriceMinor);
+        if (statistics.intervalAbsoluteChangeMinor)
+            value.insert(QStringLiteral("intervalAbsoluteChangeMinor"),
+                          *statistics.intervalAbsoluteChangeMinor);
+        if (statistics.intervalPercentageChange)
+            value.insert(QStringLiteral("intervalPercentageChange"),
+                          *statistics.intervalPercentageChange);
+
+        storage::StorageReply reply;
+        reply.values.insert(QStringLiteral("statistics"), value);
+        return reply;
+    };
+}
+
 storage::StorageCommand SteamService::setCountry(QString countryCode)
 {
     countryCode = countryCode.trimmed().toUpper();

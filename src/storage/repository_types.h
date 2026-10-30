@@ -220,6 +220,33 @@ struct SteamSettings {
     QString countryCode{QStringLiteral("TR")};
 };
 
+enum class SteamPriceHistoryRange { Days7, Days30, Days90, Year1, All };
+
+struct SteamPriceHistoryStatistics final {
+    QString countryCode;
+    QString currencyCode;
+    QString latestObservationState;
+    QString latestObservationAtUtc;
+    std::optional<qint64> latestPriceMinor;
+    QString latestPriceState;
+    QString latestPriceAtUtc;
+    std::optional<qint64> lowestPriceMinor;
+    std::optional<qint64> highestPriceMinor;
+    QString firstObservationAtUtc;
+    QString mostRecentObservationAtUtc;
+    qint64 observationCount{0};
+    qint64 comparablePriceCount{0};
+    // True when at least two observations in this market contain a price.
+    bool hasSufficientHistory{false};
+    bool hasComparableInterval{false};
+    QString intervalStartAtUtc;
+    QString intervalEndAtUtc;
+    std::optional<qint64> intervalStartPriceMinor;
+    std::optional<qint64> intervalEndPriceMinor;
+    std::optional<qint64> intervalAbsoluteChangeMinor; // signed end minus start
+    std::optional<double> intervalPercentageChange;
+};
+
 struct SteamRefreshUpdate final {
     qint64 gameId{0};
     QString attemptedAt;

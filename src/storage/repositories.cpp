@@ -3236,6 +3236,175 @@ RepositoryResult<SteamGame> SteamRepository::get(qint64 id) const
     return load(id);
 }
 
+RepositoryResult<SteamPriceHistoryStatistics> SteamRepository::priceHistoryStatistics(
+    qint64 gameId, QString countryCode, QString currencyCode,
+    SteamPriceHistoryRange range) const
+{
+    Q_ASSERT(QThread::currentThread() == m_database.driver()->thread());
+    countryCode = countryCode.trimmed().toUpper();
+    currencyCode = currencyCode.trimmed().toUpper();
+    static const QRegularExpression countryPattern(QStringLiteral("^[A-Z]{2}$"));
+    static const QRegularExpression currencyPattern(QStringLiteral("^[A-Z]{3}$"));
+    if (gameId <= 0 || !countryPattern.match(countryCode).hasMatch()
+        || (!currencyCode.isEmpty() && !currencyPattern.match(currencyCode).hasMatch())) {
+        return failure<SteamPriceHistoryStatistics>(domain::ErrorCategory::Validation);
+    }
+
+    QString intervalStartUtc;
+    const QDateTime nowUtc = QDateTime::currentDateTimeUtc();
+    switch (range) {
+    case SteamPriceHistoryRange::Days7:
+        intervalStartUtc = nowUtc.addDays(-7).toString(Qt::ISODateWithMs);
+        break;
+    case SteamPriceHistoryRange::Days30:
+        intervalStartUtc = nowUtc.addDays(-30).toString(Qt::ISODateWithMs);
+        break;
+    case SteamPriceHistoryRange::Days90:
+        intervalStartUtc = nowUtc.addDays(-90).toString(Qt::ISODateWithMs);
+        break;
+    case SteamPriceHistoryRange::Year1:
+        intervalStartUtc = nowUtc.addYears(-1).toString(Qt::ISODateWithMs);
+        break;
+    case SteamPriceHistoryRange::All:
+        break;
+    default:
+        return failure<SteamPriceHistoryStatistics>(domain::ErrorCategory::Validation);
+    }
+
+    QSqlQuery exists(m_database);
+    exists.prepare(QStringLiteral("SELECT 1 FROM steam_games WHERE id=?"));
+    exists.addBindValue(gameId);
+    if (!exists.exec())
+        return failure<SteamPriceHistoryStatistics>(queryFailure(exists));
+    if (!exists.next())
+        return failure<SteamPriceHistoryStatistics>(domain::ErrorCategory::NotFound);
+    exists.finish();
+
+    SteamPriceHistoryStatistics statistics;
+    statistics.countryCode = countryCode;
+    statistics.currencyCode = currencyCode;
+
+    QSqlQuery aggregate(m_database);
+    aggregate.prepare(QStringLiteral(
+        "SELECT COUNT(*),COALESCE(SUM(CASE WHEN current_price_minor IS NOT NULL "
+        "THEN 1 ELSE 0 END),0),MIN(current_price_minor),MAX(current_price_minor),"
+        "MIN(observed_at_utc),MAX(observed_at_utc) FROM steam_price_observations "
+        "WHERE steam_game_id=? AND country_code=? AND currency_code IS ?"));
+    aggregate.addBindValue(gameId);
+    aggregate.addBindValue(countryCode);
+    aggregate.addBindValue(nullableString(currencyCode));
+    if (!aggregate.exec())
+        return failure<SteamPriceHistoryStatistics>(queryFailure(aggregate));
+    if (!aggregate.next())
+        return failure<SteamPriceHistoryStatistics>(domain::ErrorCategory::Storage);
+    statistics.observationCount = aggregate.value(0).toLongLong();
+    statistics.comparablePriceCount = aggregate.value(1).toLongLong();
+    if (!aggregate.value(2).isNull())
+        statistics.lowestPriceMinor = aggregate.value(2).toLongLong();
+    if (!aggregate.value(3).isNull())
+        statistics.highestPriceMinor = aggregate.value(3).toLongLong();
+    statistics.firstObservationAtUtc = aggregate.value(4).toString();
+    statistics.mostRecentObservationAtUtc = aggregate.value(5).toString();
+    statistics.hasSufficientHistory = statistics.comparablePriceCount >= 2;
+    aggregate.finish();
+
+    QSqlQuery latestObservation(m_database);
+    latestObservation.prepare(QStringLiteral(
+        "SELECT price_state,observed_at_utc FROM steam_price_observations "
+        "WHERE steam_game_id=? AND country_code=? AND currency_code IS ? "
+        "ORDER BY observed_at_utc DESC,id DESC LIMIT 1"));
+    latestObservation.addBindValue(gameId);
+    latestObservation.addBindValue(countryCode);
+    latestObservation.addBindValue(nullableString(currencyCode));
+    if (!latestObservation.exec())
+        return failure<SteamPriceHistoryStatistics>(queryFailure(latestObservation));
+    if (latestObservation.next()) {
+        statistics.latestObservationState = latestObservation.value(0).toString();
+        statistics.latestObservationAtUtc = latestObservation.value(1).toString();
+    }
+    latestObservation.finish();
+
+    QSqlQuery latestPrice(m_database);
+    latestPrice.prepare(QStringLiteral(
+        "SELECT current_price_minor,price_state,observed_at_utc "
+        "FROM steam_price_observations WHERE steam_game_id=? AND country_code=? "
+        "AND currency_code IS ? AND current_price_minor IS NOT NULL "
+        "ORDER BY observed_at_utc DESC,id DESC LIMIT 1"));
+    latestPrice.addBindValue(gameId);
+    latestPrice.addBindValue(countryCode);
+    latestPrice.addBindValue(nullableString(currencyCode));
+    if (!latestPrice.exec())
+        return failure<SteamPriceHistoryStatistics>(queryFailure(latestPrice));
+    if (latestPrice.next()) {
+        statistics.latestPriceMinor = latestPrice.value(0).toLongLong();
+        statistics.latestPriceState = latestPrice.value(1).toString();
+        statistics.latestPriceAtUtc = latestPrice.value(2).toString();
+    }
+    latestPrice.finish();
+
+    struct PricePoint final {
+        qint64 id{0};
+        qint64 priceMinor{0};
+        QString observedAtUtc;
+    };
+    const auto loadIntervalPoint = [&](bool first,
+                                       std::optional<PricePoint> *point,
+                                       domain::ErrorCategory *errorCategory) {
+        QString sql = QStringLiteral(
+            "SELECT id,current_price_minor,observed_at_utc FROM steam_price_observations "
+            "WHERE steam_game_id=? AND country_code=? AND currency_code IS ? "
+            "AND current_price_minor IS NOT NULL");
+        if (!intervalStartUtc.isEmpty())
+            sql += QStringLiteral(" AND observed_at_utc>=?");
+        sql += first ? QStringLiteral(" ORDER BY observed_at_utc ASC,id ASC LIMIT 1")
+                     : QStringLiteral(" ORDER BY observed_at_utc DESC,id DESC LIMIT 1");
+
+        QSqlQuery query(m_database);
+        query.prepare(sql);
+        query.addBindValue(gameId);
+        query.addBindValue(countryCode);
+        query.addBindValue(nullableString(currencyCode));
+        if (!intervalStartUtc.isEmpty()) query.addBindValue(intervalStartUtc);
+        if (!query.exec()) {
+            *errorCategory = queryFailure(query);
+            return false;
+        }
+        if (query.next()) {
+            *point = PricePoint{query.value(0).toLongLong(),
+                                query.value(1).toLongLong(),
+                                query.value(2).toString()};
+        }
+        return true;
+    };
+
+    std::optional<PricePoint> intervalFirst;
+    std::optional<PricePoint> intervalLast;
+    domain::ErrorCategory intervalError = domain::ErrorCategory::None;
+    if (!loadIntervalPoint(true, &intervalFirst, &intervalError)
+        || !loadIntervalPoint(false, &intervalLast, &intervalError)) {
+        return failure<SteamPriceHistoryStatistics>(intervalError);
+    }
+    if (intervalFirst && intervalLast && intervalFirst->id != intervalLast->id) {
+        statistics.hasComparableInterval = true;
+        statistics.intervalStartAtUtc = intervalFirst->observedAtUtc;
+        statistics.intervalEndAtUtc = intervalLast->observedAtUtc;
+        statistics.intervalStartPriceMinor = intervalFirst->priceMinor;
+        statistics.intervalEndPriceMinor = intervalLast->priceMinor;
+        const qint64 change = intervalLast->priceMinor - intervalFirst->priceMinor;
+        statistics.intervalAbsoluteChangeMinor = change;
+        if (intervalFirst->priceMinor != 0) {
+            const long double percentage =
+                static_cast<long double>(change) * 100.0L
+                / static_cast<long double>(intervalFirst->priceMinor);
+            statistics.intervalPercentageChange = static_cast<double>(percentage);
+        }
+    }
+
+    RepositoryResult<SteamPriceHistoryStatistics> result;
+    result.value = std::move(statistics);
+    return result;
+}
+
 RepositoryResult<SteamGame> SteamRepository::load(qint64 id) const
 {
     QSqlQuery query(m_database);
