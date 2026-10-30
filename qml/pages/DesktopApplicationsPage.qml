@@ -18,6 +18,11 @@ Item {
     property int iconId: 0
     property string selectedFilter: "all"
     property var categoryOptions: []
+    property int editingCategoryId: 0
+    property int categoryToDeleteId: 0
+    property string categoryToDeleteName: ""
+    property bool categoryDeletePending: false
+    property bool deleteWasSelected: false
 
     function rebuildCategoryOptions() {
         const options = [{ id: 0, label: qsTr("Uncategorized") }]
@@ -67,6 +72,80 @@ Item {
         return String(text).toLocaleLowerCase().includes(categorySearch.text.trim().toLocaleLowerCase())
     }
 
+    function openNewCategory() {
+        controller.clearMessages()
+        editingCategoryId = 0
+        categoryNameField.text = ""
+        categoryDescriptionField.text = ""
+        categoryColorField.text = ""
+        categoryIconField.text = ""
+        categoryEditor.open()
+        categoryNameField.forceActiveFocus()
+    }
+
+    function openCategoryEditor(id) {
+        let record = {}
+        for (let i = 0; i < controller.categories.count; ++i) {
+            const candidate = controller.categories.rowAt(i)
+            if (Number(candidate.id) === Number(id)) {
+                record = candidate
+                break
+            }
+        }
+        if (!record.id || Number(record.id) <= 0) return
+        controller.clearMessages()
+        editingCategoryId = Number(record.id)
+        categoryNameField.text = String(record.name || "")
+        categoryDescriptionField.text = String(record.description || "")
+        categoryColorField.text = String(record.color || "")
+        categoryIconField.text = String(record.iconIdentifier || "")
+        categoryEditor.open()
+        categoryNameField.forceActiveFocus()
+    }
+
+    function saveCategory() {
+        if (editingCategoryId > 0) {
+            controller.updateCategory(editingCategoryId, categoryNameField.text,
+                                      categoryDescriptionField.text, categoryColorField.text,
+                                      categoryIconField.text)
+        } else {
+            controller.createCategory(categoryNameField.text, categoryDescriptionField.text,
+                                      categoryColorField.text, categoryIconField.text)
+        }
+    }
+
+    function moveCategory(row, direction) {
+        const target = row + direction
+        if (target < 0 || target >= controller.categories.count) return
+        const orderedIds = []
+        for (let i = 0; i < controller.categories.count; ++i)
+            orderedIds.push(controller.categories.rowAt(i).id)
+        const moved = orderedIds[row]
+        orderedIds[row] = orderedIds[target]
+        orderedIds[target] = moved
+        controller.reorderCategories(orderedIds)
+    }
+
+    function requestCategoryDelete(id, name) {
+        controller.clearMessages()
+        categoryToDeleteId = Number(id)
+        categoryToDeleteName = String(name)
+        deleteWasSelected = selectedFilter === String(id)
+        deleteCategoryDialog.title = qsTr("Delete category?")
+        deleteCategoryDialog.open()
+    }
+
+    function openCategoryManagement() {
+        controller.clearMessages()
+        categoryManagementDialog.open()
+        controller.loadCategories()
+    }
+
+    function confirmCategoryDelete() {
+        categoryDeletePending = true
+        controller.deleteCategory(categoryToDeleteId)
+    }
+
     onVisibleChanged: if (controller) controller.setPageVisible(visible)
     Component.onDestruction: controller.setPageVisible(false)
     Component.onCompleted: {
@@ -93,6 +172,13 @@ Item {
                     root.controller.reload()
                     root.controller.loadCategories()
                 }
+            }
+            Shared.AppButton {
+                text: qsTr("Manage categories")
+                quiet: true
+                visible: root.width < 760
+                enabled: !root.controller.busy
+                onClicked: root.openCategoryManagement()
             }
             Item { Layout.fillWidth: true }
             BusyIndicator { running: root.controller.loading || root.controller.busy; visible: running }
@@ -232,6 +318,13 @@ Item {
                                 textFormat: Text.PlainText
                             }
                         }
+                    }
+                    Shared.AppButton {
+                        Layout.fillWidth: true
+                        text: qsTr("Manage categories")
+                        quiet: true
+                        enabled: !root.controller.busy
+                        onClicked: root.openCategoryManagement()
                     }
                 }
             }
@@ -488,6 +581,236 @@ Item {
     }
 
     Dialog {
+        id: categoryManagementDialog
+        modal: true
+        focus: true
+        title: qsTr("Manage application categories")
+        anchors.centerIn: Overlay.overlay
+        width: Math.min(620, parent ? parent.width - 32 : 580)
+        height: Math.min(560, parent ? parent.height - 32 : 520)
+        padding: 16
+        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+        background: Rectangle {
+            color: ThemeModule.Theme.raisedSurface
+            radius: ThemeModule.Theme.panelRadius
+            border.color: ThemeModule.Theme.strongBorder
+        }
+        contentItem: ColumnLayout {
+            spacing: 10
+            Label {
+                Layout.fillWidth: true
+                text: qsTr("Create and organize custom categories. Uncategorized is a virtual group and cannot be deleted.")
+                color: ThemeModule.Theme.textSecondary
+                wrapMode: Text.Wrap
+                textFormat: Text.PlainText
+            }
+            RowLayout {
+                Layout.fillWidth: true
+                Label {
+                    Layout.fillWidth: true
+                    text: qsTr("Custom categories")
+                    color: ThemeModule.Theme.textPrimary
+                    font.family: ThemeModule.Theme.fontFamily
+                    font.pixelSize: 16
+                    font.weight: Font.DemiBold
+                }
+                Shared.AppButton {
+                    text: qsTr("Create category")
+                    enabled: !root.controller.busy
+                    onClicked: root.openNewCategory()
+                }
+            }
+            Label {
+                Layout.fillWidth: true
+                visible: root.controller.errorMessage.length > 0
+                text: root.controller.errorMessage
+                color: ThemeModule.Theme.error
+                wrapMode: Text.Wrap
+                textFormat: Text.PlainText
+            }
+            Shared.StatePanel {
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                visible: root.controller.categories.count === 0
+                state: root.controller.categoriesLoading ? "loading" : "empty"
+                title: root.controller.categoriesLoading
+                       ? qsTr("Loading categories") : qsTr("No custom categories")
+                message: root.controller.categoriesLoading ? ""
+                         : qsTr("Create a category to start organizing saved applications.")
+            }
+            ListView {
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                visible: root.controller.categories.count > 0
+                clip: true
+                spacing: 7
+                model: root.controller.categories
+                boundsBehavior: Flickable.StopAtBounds
+                delegate: Shared.AppCard {
+                    id: categoryEntry
+                    required property int categoryId
+                    required property string name
+                    required property string color
+                    required property int applicationCount
+                    required property int index
+                    width: ListView.view.width
+                    implicitHeight: categoryRow.implicitHeight + 18
+                    RowLayout {
+                        id: categoryRow
+                        anchors.fill: parent
+                        spacing: 8
+                        Rectangle {
+                            Layout.preferredWidth: 18
+                            Layout.preferredHeight: 18
+                            radius: ThemeModule.Theme.controlRadius
+                            color: categoryEntry.color.length > 0
+                                   ? categoryEntry.color : ThemeModule.Theme.accentCyan
+                            border.color: ThemeModule.Theme.borderColor
+                        }
+                        Label {
+                            Layout.fillWidth: true
+                            text: name + " · " + applicationCount
+                            color: ThemeModule.Theme.textPrimary
+                            font.family: ThemeModule.Theme.fontFamily
+                            font.pixelSize: 13
+                            textFormat: Text.PlainText
+                            elide: Text.ElideRight
+                        }
+                        Shared.AppButton {
+                            text: "↑"
+                            quiet: true
+                            Layout.preferredWidth: 40
+                            Layout.minimumWidth: 40
+                            enabled: !root.controller.busy && index > 0
+                            Accessible.name: qsTr("Move %1 up").arg(name)
+                            onClicked: root.moveCategory(index, -1)
+                        }
+                        Shared.AppButton {
+                            text: "↓"
+                            quiet: true
+                            Layout.preferredWidth: 40
+                            Layout.minimumWidth: 40
+                            enabled: !root.controller.busy && index < root.controller.categories.count - 1
+                            Accessible.name: qsTr("Move %1 down").arg(name)
+                            onClicked: root.moveCategory(index, 1)
+                        }
+                        Shared.AppButton {
+                            text: qsTr("Edit")
+                            quiet: true
+                            Layout.preferredWidth: 68
+                            Layout.minimumWidth: 68
+                            enabled: !root.controller.busy
+                            Accessible.name: qsTr("Edit %1").arg(name)
+                            onClicked: root.openCategoryEditor(categoryId)
+                        }
+                        Shared.AppButton {
+                            text: qsTr("Delete")
+                            destructive: true
+                            Layout.preferredWidth: 74
+                            Layout.minimumWidth: 74
+                            enabled: !root.controller.busy
+                            Accessible.name: qsTr("Delete %1").arg(name)
+                            onClicked: root.requestCategoryDelete(categoryId, name)
+                        }
+                    }
+                }
+            }
+        }
+        footer: DialogButtonBox {
+            alignment: Qt.AlignRight
+            Shared.AppButton {
+                text: qsTr("Close")
+                quiet: true
+                DialogButtonBox.buttonRole: DialogButtonBox.RejectRole
+            }
+        }
+    }
+
+    Dialog {
+        id: categoryEditor
+        modal: true
+        focus: true
+        title: root.editingCategoryId > 0 ? qsTr("Edit category") : qsTr("Create category")
+        anchors.centerIn: Overlay.overlay
+        width: Math.min(500, parent ? parent.width - 32 : 460)
+        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+        background: Rectangle {
+            color: ThemeModule.Theme.raisedSurface
+            radius: ThemeModule.Theme.panelRadius
+            border.color: ThemeModule.Theme.strongBorder
+        }
+        contentItem: ColumnLayout {
+            spacing: 10
+            Label {
+                Layout.fillWidth: true
+                text: qsTr("Category names are unique ignoring case and surrounding spaces.")
+                color: ThemeModule.Theme.textSecondary
+                wrapMode: Text.Wrap
+            }
+            Shared.AppTextField {
+                id: categoryNameField
+                Layout.fillWidth: true
+                accessibleLabel: qsTr("Category name")
+                placeholderText: qsTr("Category name")
+                maximumLength: 160
+                onAccepted: root.saveCategory()
+            }
+            Shared.AppTextField {
+                id: categoryDescriptionField
+                Layout.fillWidth: true
+                accessibleLabel: qsTr("Category description")
+                placeholderText: qsTr("Description (optional)")
+                maximumLength: 600
+            }
+            Shared.AppTextField {
+                id: categoryColorField
+                Layout.fillWidth: true
+                accessibleLabel: qsTr("Category color")
+                placeholderText: qsTr("Color, e.g. #4477CC (optional)")
+                maximumLength: 16
+            }
+            Shared.AppTextField {
+                id: categoryIconField
+                Layout.fillWidth: true
+                accessibleLabel: qsTr("Category icon identifier")
+                placeholderText: qsTr("Icon identifier (optional)")
+                maximumLength: 160
+            }
+            Label {
+                Layout.fillWidth: true
+                visible: root.controller.errorMessage.length > 0
+                text: root.controller.errorMessage
+                color: ThemeModule.Theme.error
+                wrapMode: Text.Wrap
+                textFormat: Text.PlainText
+            }
+        }
+        footer: DialogButtonBox {
+            alignment: Qt.AlignRight
+            Shared.AppButton {
+                text: qsTr("Cancel")
+                quiet: true
+                DialogButtonBox.buttonRole: DialogButtonBox.RejectRole
+            }
+            Shared.AppButton {
+                text: qsTr("Save")
+                enabled: !root.controller.busy
+                DialogButtonBox.buttonRole: DialogButtonBox.ActionRole
+                onClicked: root.saveCategory()
+            }
+        }
+    }
+
+    Dialogs.ConfirmationDialog {
+        id: deleteCategoryDialog
+        title: qsTr("Delete category?")
+        confirmText: qsTr("Delete category")
+        destructive: true
+        message: qsTr("Deleting ‘%1’ keeps its applications and moves them to Uncategorized. Applications and their Setup memberships will not be deleted.").arg(root.categoryToDeleteName)
+        onConfirmed: root.confirmCategoryDelete()
+    }
+
+    Dialog {
         id: editDialog
         modal: true
         focus: true
@@ -549,6 +872,13 @@ Item {
         }
         function onMutationFinished(success) {
             if (success && renameDialog.visible) renameDialog.close()
+            if (success && categoryEditor.visible) categoryEditor.close()
+            if (root.categoryDeletePending) {
+                if (success && root.deleteWasSelected)
+                    root.selectedFilter = "uncategorized"
+                root.categoryDeletePending = false
+                root.deleteWasSelected = false
+            }
         }
     }
 

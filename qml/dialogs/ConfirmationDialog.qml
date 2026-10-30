@@ -30,6 +30,7 @@ Dialog {
 
     contentItem: Label {
         text: root.message
+        textFormat: Text.PlainText
         color: ThemeModule.Theme.textSecondary
         font.family: ThemeModule.Theme.fontFamily
         font.pixelSize: 14
