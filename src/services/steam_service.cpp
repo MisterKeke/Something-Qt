@@ -153,6 +153,9 @@ storage::StorageCommand SteamService::loadPriceHistory(
             gameId, countryCode, currencyCode, range, cancelled);
         if (!loaded.succeeded()) return failed(loaded.error);
         if (cancelled()) return failed(domain::AppError::cancelled());
+        const auto availableMarkets = repositories.steam.priceHistoryMarkets(gameId, cancelled);
+        if (!availableMarkets.succeeded()) return failed(availableMarkets.error);
+        if (cancelled()) return failed(domain::AppError::cancelled());
 
         const storage::SteamPriceHistoryStatistics &statistics = loaded.value.statistics;
         QVariantMap value{
@@ -255,9 +258,22 @@ storage::StorageCommand SteamService::loadPriceHistory(
             points.push_back(std::move(pointValue));
         }
 
+        QVariantList markets;
+        markets.reserve(availableMarkets.value.size());
+        for (const storage::SteamPriceHistoryMarket &market : availableMarkets.value) {
+            markets.push_back(QVariantMap{
+                {QStringLiteral("countryCode"), market.countryCode},
+                {QStringLiteral("currencyCode"), market.currencyCode},
+                {QStringLiteral("observationCount"), market.observationCount},
+                {QStringLiteral("firstObservationAtUtc"), market.firstObservationAtUtc},
+                {QStringLiteral("mostRecentObservationAtUtc"), market.mostRecentObservationAtUtc},
+            });
+        }
+
         storage::StorageReply reply;
         reply.values.insert(QStringLiteral("statistics"), value);
         reply.values.insert(QStringLiteral("points"), points);
+        reply.values.insert(QStringLiteral("markets"), markets);
         return reply;
     };
 }

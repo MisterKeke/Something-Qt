@@ -12,6 +12,23 @@ Dialog {
     readonly property var game: historyController ? historyController.historyGame : ({})
     readonly property var statistics: historyController ? historyController.historyStatistics : ({})
     readonly property var historyPoints: historyController ? historyController.historyPoints : []
+    readonly property var historyMarketChoices: {
+        const markets = historyController ? historyController.historyMarkets : []
+        const choices = []
+        for (let i = 0; i < markets.length; ++i) {
+            const market = markets[i]
+            const currency = market.currencyCode || qsTr("currency unavailable")
+            choices.push({
+                countryCode: market.countryCode,
+                currencyCode: market.currencyCode,
+                label: qsTr("%1 (%2) · %3")
+                       .arg(countryName(market.countryCode))
+                       .arg(market.countryCode)
+                       .arg(currency)
+            })
+        }
+        return choices
+    }
     readonly property int rangePriceCount: {
         let count = 0
         const points = historyPoints || []
@@ -40,6 +57,33 @@ Dialog {
         return code || qsTr("Unknown country")
     }
 
+    function selectedMarketIndex() {
+        if (!historyController) return -1
+        const markets = historyController.historyMarkets
+        for (let i = 0; i < markets.length; ++i) {
+            if (markets[i].countryCode === historyController.historyCountryCode
+                    && markets[i].currencyCode === historyController.historyCurrencyCode)
+                return i
+        }
+        return -1
+    }
+
+    function syncMarketSelection() {
+        if (!historyController) {
+            historyMarketCombo.currentIndex = -1
+            return
+        }
+        historyMarketCombo.currentIndex = selectedMarketIndex()
+    }
+
+    function selectedMarketMatchesCurrentGame() {
+        if (!historyController) return false
+        const gameCountry = String(game.priceCountryCode || historyController.countryCode || "")
+        const gameCurrency = String(game.currency || "")
+        return historyController.historyCountryCode === gameCountry
+                && historyController.historyCurrencyCode === gameCurrency
+    }
+
     function formatTimestamp(value) {
         const date = new Date(String(value || ""))
         return isNaN(date.getTime()) ? (value || qsTr("Not recorded"))
@@ -55,6 +99,18 @@ Dialog {
     }
 
     function currentPriceText() {
+        if (Number(statistics.observationCount || 0) > 0) {
+            if (statistics.latestObservationState === "free") return qsTr("Free")
+            if (statistics.latestObservationState === "priced")
+                return statistics.latestPriceDisplay || qsTr("Price unavailable")
+            if (statistics.latestObservationState === "unavailable")
+                return qsTr("Temporarily unavailable")
+            if (statistics.latestObservationState === "unsupported")
+                return qsTr("No supported pricing")
+            return qsTr("No price recorded")
+        }
+        if (!selectedMarketMatchesCurrentGame())
+            return qsTr("No price recorded for this market")
         if (game.priceStatus === "priced" || game.priceStatus === "free")
             return game.priceDisplay || (game.priceStatus === "free" ? qsTr("Free") : qsTr("Price unavailable"))
         if (game.priceStatus === "unavailable")
@@ -83,6 +139,11 @@ Dialog {
     onHistoryPointsChanged: Qt.callLater(selectNewestPricePoint)
     onSelectedPointIndexChanged: chart.requestPaint()
     onClosed: if (historyController) historyController.closePriceHistory()
+
+    Connections {
+        target: root.historyController
+        function onStateChanged() { root.syncMarketSelection() }
+    }
 
     background: Rectangle {
         color: ThemeModule.Theme.raisedSurface
@@ -149,15 +210,62 @@ Dialog {
                     }
                     Label {
                         Layout.fillWidth: true
-                        text: qsTr("Selected market: %1 (%2) · %3")
-                              .arg(root.countryName(root.statistics.countryCode || root.game.priceCountryCode))
-                              .arg(root.statistics.countryCode || root.game.priceCountryCode || "—")
-                              .arg(root.statistics.currencyCode || root.game.currency || qsTr("currency unavailable"))
+                        text: qsTr("Chart market: %1 (%2) · %3")
+                              .arg(root.countryName(root.historyController
+                                  ? root.historyController.historyCountryCode : root.game.priceCountryCode))
+                              .arg(root.historyController
+                                  ? (root.historyController.historyCountryCode || "—")
+                                  : (root.game.priceCountryCode || "—"))
+                              .arg(root.historyController
+                                  ? (root.historyController.historyCurrencyCode || qsTr("currency unavailable"))
+                                  : (root.game.currency || qsTr("currency unavailable")))
                         color: ThemeModule.Theme.textSecondary
                         font.family: ThemeModule.Theme.fontFamily
                         font.pixelSize: 12
                         wrapMode: Text.Wrap
                     }
+                }
+            }
+
+            ColumnLayout {
+                Layout.fillWidth: true
+                spacing: 5
+                Label {
+                    Layout.fillWidth: true
+                    text: qsTr("Historical country and currency")
+                    color: ThemeModule.Theme.textSecondary
+                    font.family: ThemeModule.Theme.fontFamily
+                    font.pixelSize: 12
+                }
+                Shared.AppComboBox {
+                    id: historyMarketCombo
+                    Layout.fillWidth: true
+                    model: root.historyMarketChoices
+                    textRole: "label"
+                    displayText: currentIndex < 0
+                                 ? qsTr("No recorded history for the selected market") : currentText
+                    accessibleLabel: qsTr("Select a country and currency with recorded price history")
+                    enabled: root.historyController && root.historyMarketChoices.length > 0
+                    Component.onCompleted: root.syncMarketSelection()
+                    onActivated: function(index) {
+                        if (!root.historyController || index < 0
+                                || index >= root.historyController.historyMarkets.length)
+                            return
+                        const market = root.historyController.historyMarkets[index]
+                        root.historyController.setPriceHistoryMarket(
+                            market.countryCode, market.currencyCode)
+                    }
+                }
+                Label {
+                    Layout.fillWidth: true
+                    visible: root.historyController
+                             && root.historyController.historyMarkets.length > 0
+                             && root.selectedMarketIndex() < 0
+                    text: qsTr("This market has no saved observations. Choose a market with history from the list.")
+                    color: ThemeModule.Theme.warning
+                    font.family: ThemeModule.Theme.fontFamily
+                    font.pixelSize: 11
+                    wrapMode: Text.Wrap
                 }
             }
 
@@ -232,7 +340,12 @@ Dialog {
                                   ? (root.formatTimestamp(root.statistics.firstObservationAtUtc) + " → "
                                      + root.formatTimestamp(root.statistics.mostRecentObservationAtUtc))
                                   : qsTr("No observations") },
-                        { label: qsTr("Last successful refresh"), value: root.formatTimestamp(root.game.lastCheckedAt) },
+                        { label: root.selectedMarketMatchesCurrentGame()
+                                  ? qsTr("Last successful refresh")
+                                  : qsTr("Most recent recorded observation"),
+                          value: root.selectedMarketMatchesCurrentGame()
+                                  ? root.formatTimestamp(root.game.lastCheckedAt)
+                                  : root.formatTimestamp(root.statistics.mostRecentObservationAtUtc) },
                         { label: qsTr("Recorded observations"), value: String(root.statistics.observationCount || 0) }
                     ]
                     delegate: Rectangle {
@@ -276,8 +389,16 @@ Dialog {
                          && root.historyController.historyError.length === 0
                          && Number(root.statistics.observationCount || 0) === 0
                 state: "empty"
-                title: qsTr("No price history recorded yet")
-                message: qsTr("Earlier prices are not reconstructed. New observations appear after successful Steam checks.")
+                title: root.historyMarketChoices.length > 0
+                       ? qsTr("No history for the selected market")
+                       : qsTr("No price history recorded yet")
+                message: root.historyMarketChoices.length > 0
+                         ? qsTr("No observations are recorded for %1 (%2) · %3. Choose a market with saved observations above.")
+                               .arg(root.countryName(root.historyController.historyCountryCode))
+                               .arg(root.historyController.historyCountryCode || "—")
+                               .arg(root.historyController.historyCurrencyCode
+                                    || qsTr("currency unavailable"))
+                         : qsTr("Earlier prices are not reconstructed. New observations appear after successful Steam checks.")
             }
 
             Shared.StatePanel {

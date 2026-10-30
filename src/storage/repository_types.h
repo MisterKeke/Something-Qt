@@ -261,6 +261,14 @@ struct SteamPriceHistorySnapshot final {
     QVector<SteamPriceHistoryPoint> points;
 };
 
+struct SteamPriceHistoryMarket final {
+    QString countryCode;
+    QString currencyCode;
+    qint64 observationCount{0};
+    QString firstObservationAtUtc;
+    QString mostRecentObservationAtUtc;
+};
+
 struct SteamRefreshUpdate final {
     qint64 gameId{0};
     QString attemptedAt;

@@ -229,6 +229,9 @@ public:
     RepositoryResult<void> setCountry(QString countryCode);
     RepositoryResult<QVector<SteamGame>> list() const;
     RepositoryResult<SteamGame> get(qint64 id) const;
+    RepositoryResult<QVector<SteamPriceHistoryMarket>> priceHistoryMarkets(
+        qint64 gameId,
+        const std::function<bool()> &cancellationRequested = {}) const;
     RepositoryResult<SteamPriceHistorySnapshot> priceHistory(
         qint64 gameId, QString countryCode, QString currencyCode,
         SteamPriceHistoryRange range,

@@ -37,6 +37,9 @@ class SteamGamesController final : public QObject {
     Q_PROPERTY(QVariantMap historyGame READ historyGame NOTIFY stateChanged)
     Q_PROPERTY(QVariantMap historyStatistics READ historyStatistics NOTIFY stateChanged)
     Q_PROPERTY(QVariantList historyPoints READ historyPoints NOTIFY stateChanged)
+    Q_PROPERTY(QVariantList historyMarkets READ historyMarkets NOTIFY stateChanged)
+    Q_PROPERTY(QString historyCountryCode READ historyCountryCode NOTIFY stateChanged)
+    Q_PROPERTY(QString historyCurrencyCode READ historyCurrencyCode NOTIFY stateChanged)
     Q_PROPERTY(QString historyRange READ historyRange NOTIFY stateChanged)
 
 public:
@@ -63,6 +66,9 @@ public:
     QVariantMap historyGame() const { return m_historyGame; }
     QVariantMap historyStatistics() const { return m_historyStatistics; }
     QVariantList historyPoints() const { return m_historyPoints; }
+    QVariantList historyMarkets() const { return m_historyMarkets; }
+    QString historyCountryCode() const { return m_historyCountryCode; }
+    QString historyCurrencyCode() const { return m_historyCurrencyCode; }
     QString historyRange() const { return m_historyRange; }
 
     Q_INVOKABLE void setSelectedCountry(QString countryCode);
@@ -75,6 +81,7 @@ public:
     Q_INVOKABLE void clearNotification();
     Q_INVOKABLE void openPriceHistory(qint64 gameId);
     Q_INVOKABLE void setPriceHistoryRange(QString range);
+    Q_INVOKABLE void setPriceHistoryMarket(QString countryCode, QString currencyCode);
     Q_INVOKABLE void reloadPriceHistory();
     Q_INVOKABLE void closePriceHistory();
     Q_INVOKABLE QString formatPrice(qint64 amountMinor, QString currencyCode) const;
@@ -154,6 +161,9 @@ private:
     QVariantMap m_historyGame;
     QVariantMap m_historyStatistics;
     QVariantList m_historyPoints;
+    QVariantList m_historyMarkets;
+    QString m_historyCountryCode;
+    QString m_historyCurrencyCode;
     QString m_historyError;
     QString m_historyRange{QStringLiteral("all")};
     quint64 m_refreshGeneration{0};

@@ -3236,6 +3236,42 @@ RepositoryResult<SteamGame> SteamRepository::get(qint64 id) const
     return load(id);
 }
 
+RepositoryResult<QVector<SteamPriceHistoryMarket>> SteamRepository::priceHistoryMarkets(
+    qint64 gameId, const std::function<bool()> &cancellationRequested) const
+{
+    Q_ASSERT(QThread::currentThread() == m_database.driver()->thread());
+    if (cancellationRequested && cancellationRequested())
+        return failure<QVector<SteamPriceHistoryMarket>>(domain::ErrorCategory::Cancelled);
+    if (gameId <= 0)
+        return failure<QVector<SteamPriceHistoryMarket>>(domain::ErrorCategory::Validation);
+
+    QSqlQuery query(m_database);
+    query.prepare(QStringLiteral(
+        "SELECT country_code,currency_code,COUNT(*),MIN(observed_at_utc),"
+        "MAX(observed_at_utc) FROM steam_price_observations WHERE steam_game_id=? "
+        "GROUP BY country_code,currency_code "
+        "ORDER BY MAX(observed_at_utc) DESC,country_code ASC,currency_code ASC"));
+    query.addBindValue(gameId);
+    if (!query.exec())
+        return failure<QVector<SteamPriceHistoryMarket>>(queryFailure(query));
+
+    RepositoryResult<QVector<SteamPriceHistoryMarket>> result;
+    while (query.next()) {
+        if (cancellationRequested && cancellationRequested())
+            return failure<QVector<SteamPriceHistoryMarket>>(domain::ErrorCategory::Cancelled);
+        SteamPriceHistoryMarket market;
+        market.countryCode = query.value(0).toString();
+        market.currencyCode = query.value(1).toString();
+        market.observationCount = query.value(2).toLongLong();
+        market.firstObservationAtUtc = query.value(3).toString();
+        market.mostRecentObservationAtUtc = query.value(4).toString();
+        result.value.push_back(std::move(market));
+    }
+    if (query.lastError().isValid())
+        return failure<QVector<SteamPriceHistoryMarket>>(queryFailure(query));
+    return result;
+}
+
 RepositoryResult<SteamPriceHistorySnapshot> SteamRepository::priceHistory(
     qint64 gameId, QString countryCode, QString currencyCode,
     SteamPriceHistoryRange range,
