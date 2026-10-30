@@ -72,6 +72,13 @@ Item {
         return String(text).toLocaleLowerCase().includes(categorySearch.text.trim().toLocaleLowerCase())
     }
 
+    function matchingCategoryCount() {
+        let matches = 0
+        for (let i = 0; i < controller.categories.count; ++i)
+            if (filterMatches(controller.categories.rowAt(i).name)) ++matches
+        return matches
+    }
+
     function openNewCategory() {
         controller.clearMessages()
         editingCategoryId = 0
@@ -181,7 +188,10 @@ Item {
                 onClicked: root.openCategoryManagement()
             }
             Item { Layout.fillWidth: true }
-            BusyIndicator { running: root.controller.loading || root.controller.busy; visible: running }
+            BusyIndicator {
+                running: root.controller.loading || root.controller.categoriesLoading || root.controller.busy
+                visible: running
+            }
         }
 
         Shared.StatePanel {
@@ -311,8 +321,12 @@ Item {
                             }
                             Label {
                                 Layout.fillWidth: true
-                                visible: root.controller.categories.count === 0
-                                text: qsTr("Create a category to organize saved applications.")
+                                visible: !root.controller.categoriesLoading
+                                         && (root.controller.categories.count === 0
+                                             || root.matchingCategoryCount() === 0)
+                                text: root.controller.categories.count === 0
+                                      ? qsTr("Create a category to organize saved applications.")
+                                      : qsTr("No categories match this filter.")
                                 color: ThemeModule.Theme.textSecondary
                                 wrapMode: Text.Wrap
                                 textFormat: Text.PlainText
