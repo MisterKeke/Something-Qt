@@ -16,6 +16,7 @@ set(CMAKE_C_EXTENSIONS OFF)
 find_package(Qt6 6.5 REQUIRED COMPONENTS
     Core
     Gui
+    Widgets
     Qml
     Quick
     QuickControls2
@@ -68,6 +69,7 @@ qt_add_executable(SomethingQt WIN32
     src/application/capability_registry.cpp
     src/application/operation_coordinator.cpp
     src/controllers/application_controller.cpp
+    src/controllers/background_controller.cpp
     src/controllers/calendar_controller.cpp
     src/controllers/currency_controller.cpp
     src/controllers/cursor_trail_controller.cpp
@@ -255,6 +257,7 @@ qt_add_resources(SomethingQt something_assets
 target_link_libraries(SomethingQt PRIVATE
     Qt6::Core
     Qt6::Gui
+    Qt6::Widgets
     Qt6::Qml
     Qt6::Quick
     Qt6::QuickControls2

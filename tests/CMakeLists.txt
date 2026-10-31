@@ -68,6 +68,18 @@ target_link_libraries(SomethingQtTerminalOutputTests PRIVATE Qt6::Core Qt6::Test
 add_test(NAME SomethingQtTerminalOutputTests COMMAND SomethingQtTerminalOutputTests
     -o "${CMAKE_CURRENT_BINARY_DIR}/terminal-output-results.txt,txt")
 
+add_executable(SomethingQtBackgroundControllerTests
+    background_controller_test.cpp
+    ../src/controllers/background_controller.cpp
+)
+target_include_directories(SomethingQtBackgroundControllerTests PRIVATE ../src)
+target_link_libraries(SomethingQtBackgroundControllerTests PRIVATE
+    Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Test)
+add_test(NAME SomethingQtBackgroundControllerTests COMMAND SomethingQtBackgroundControllerTests
+    -o "${CMAKE_CURRENT_BINARY_DIR}/background-controller-results.txt,txt")
+set_tests_properties(SomethingQtBackgroundControllerTests PROPERTIES
+    ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
 add_executable(SomethingQtConsolePhaseThreeTests
     console_phase_three_test.cpp
     ../src/application/application_lifecycle.cpp

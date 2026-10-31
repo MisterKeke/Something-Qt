@@ -1,4 +1,6 @@
-#include <QGuiApplication>
+#include <QApplication>
+#include <QCommandLineOption>
+#include <QCommandLineParser>
 #include <QFont>
 #include <QFontDatabase>
 #include <QIcon>
@@ -12,12 +14,15 @@
 #include <QVariantList>
 #include <QVariantMap>
 #include <QWindow>
+#include <QQuickWindow>
+#include <QSessionManager>
 
 #include <algorithm>
 
 #include "application/application_service_graph.h"
 #include "application/route_catalog.h"
 #include "controllers/application_controller.h"
+#include "controllers/background_controller.h"
 #include "controllers/calendar_controller.h"
 #include "controllers/currency_controller.h"
 #include "controllers/cursor_trail_controller.h"
@@ -89,7 +94,14 @@ void showCenteredOnLaunch(QWindow &window)
 
 int main(int argc, char *argv[])
 {
-    QGuiApplication app(argc, argv);
+    QApplication app(argc, argv);
+    QCommandLineParser commandLine;
+    commandLine.addHelpOption();
+    const QCommandLineOption backgroundOption(
+        QStringLiteral("background"),
+        QStringLiteral("Start Something hidden in the system tray when available."));
+    commandLine.addOption(backgroundOption);
+    commandLine.process(app);
     const int bundledFontId = QFontDatabase::addApplicationFont(
         QStringLiteral(":/something/assets/fonts/CascadiaCode.ttf"));
     if (bundledFontId >= 0) {
@@ -122,6 +134,8 @@ int main(int argc, char *argv[])
     something::services::FileExplorerService fileExplorerService(
         &fileExplorerPlatform, &fileExplorerShell);
     something::controllers::ApplicationController controller(&services);
+    something::controllers::BackgroundController backgroundController(
+        commandLine.isSet(backgroundOption));
     something::controllers::CursorTrailController cursorTrailController;
     something::controllers::LegacyDataImportController legacyDataImportController(&services);
     auto *wallpaperImages = new something::providers::WallpaperImageProvider(
@@ -257,6 +271,8 @@ int main(int argc, char *argv[])
     engine.addImageProvider(QStringLiteral("setup-icons"), setupImages);
     engine.addImageProvider(QStringLiteral("steam-artwork"), steamArtworkImages);
     engine.rootContext()->setContextProperty(QStringLiteral("appController"), &controller);
+    engine.rootContext()->setContextProperty(QStringLiteral("backgroundController"),
+                                             &backgroundController);
     engine.rootContext()->setContextProperty(QStringLiteral("routeCatalog"), QVariantMap{
         {QStringLiteral("routeTitles"), something::application::RouteCatalog::titleMap()},
         {QStringLiteral("navigationItems"), something::application::RouteCatalog::navigationItems()}});
@@ -311,6 +327,15 @@ int main(int argc, char *argv[])
     auto *consoleWindow = mainWindow->findChild<QWindow *>(QStringLiteral("consoleWindow"));
     if (!consoleWindow) return 1;
     cursorTrailController.attachToWindow(mainWindow);
+    backgroundController.attachWindows(mainWindow, consoleWindow);
+    if (auto *quickWindow = qobject_cast<QQuickWindow *>(mainWindow)) {
+        quickWindow->setPersistentGraphics(false);
+        quickWindow->setPersistentSceneGraph(false);
+    }
+    if (auto *quickWindow = qobject_cast<QQuickWindow *>(consoleWindow)) {
+        quickWindow->setPersistentGraphics(false);
+        quickWindow->setPersistentSceneGraph(false);
+    }
 
     QObject::connect(&commandService, &something::services::ApplicationCommandService::fullWindowRequested,
                      &controller, &something::controllers::ApplicationController::requestFullWindow);
@@ -320,8 +345,11 @@ int main(int argc, char *argv[])
             firstShow = false;
             mainWindow->setProperty("fullUiOpened", true);
             showCenteredOnLaunch(*mainWindow);
-        } else if (mainWindow->windowState() == Qt::WindowMinimized) {
-            mainWindow->showNormal();
+        } else if (mainWindow->windowState() & Qt::WindowMinimized) {
+            if (mainWindow->windowState() & Qt::WindowMaximized)
+                mainWindow->showMaximized();
+            else
+                mainWindow->showNormal();
         } else if (!mainWindow->isVisible()) {
             // show() selects the normal window state and can restore an old
             // smaller geometry. Revealing an existing window must retain its
@@ -332,13 +360,46 @@ int main(int argc, char *argv[])
         mainWindow->requestActivate();
     });
 
+    QObject::connect(&backgroundController,
+                     &something::controllers::BackgroundController::openMainRequested,
+                     &controller,
+                     &something::controllers::ApplicationController::requestFullWindow);
+    QObject::connect(&backgroundController,
+                     &something::controllers::BackgroundController::exitRequested,
+                     &controller,
+                     &something::controllers::ApplicationController::requestShutdown);
+    QObject::connect(&controller,
+                     &something::controllers::ApplicationController::shutdownRequestedChanged,
+                     &backgroundController,
+                     &something::controllers::BackgroundController::setShutdownRequested);
+    QObject::connect(&controller,
+                     &something::controllers::ApplicationController::stateChanged,
+                     &backgroundController, [&controller, &backgroundController] {
+        if (controller.lifecycleState() == QStringLiteral("failed")
+            && !backgroundController.hasVisibleWindow()) {
+            backgroundController.openConsoleWindow();
+        }
+    });
+    QObject::connect(&app, &QGuiApplication::commitDataRequest,
+                     &backgroundController,
+                     [&backgroundController](QSessionManager &) {
+        backgroundController.beginSystemShutdown();
+    });
+
     QObject::connect(&app, &QGuiApplication::lastWindowClosed,
-                     &controller, &something::controllers::ApplicationController::requestShutdown);
+                     &backgroundController, [&backgroundController, &controller] {
+        if ((!backgroundController.inTrayMode()
+             || !backgroundController.minimizeToTrayOnClose())
+            && !controller.shutdownRequested())
+            controller.requestShutdown();
+    });
     QObject::connect(&controller, &something::controllers::ApplicationController::shutdownFinished,
                      &app, [&app] { app.quit(); });
 
-    // Start with Console only. The full window is fitted and shown on demand.
-    showCenteredOnLaunch(*consoleWindow);
+    // Keep the existing Console-first workflow unless startup explicitly asks
+    // for the tray. A missing tray always falls back to a visible Console.
+    if (!backgroundController.presentInitiallyInTray())
+        showCenteredOnLaunch(*consoleWindow);
     services.start();
 
     return app.exec();

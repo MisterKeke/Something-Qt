@@ -105,7 +105,12 @@ Item {
                 font.pixelSize: ThemeModule.Theme.headingFontSize
                 font.weight: Font.DemiBold
             }
-            BusyIndicator { visible: root.controller.loading; running: visible; implicitWidth: 24; implicitHeight: 24 }
+            BusyIndicator {
+                visible: root.controller.loading
+                running: root.visible && visible
+                implicitWidth: 24
+                implicitHeight: 24
+            }
             Shared.AppButton {
                 text: qsTr("Create setup")
                 enabled: !root.controller.busy && !root.controller.loading

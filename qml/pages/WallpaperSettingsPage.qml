@@ -12,6 +12,7 @@ Item {
     required property var controller
     required property var importController
     required property var settingsController
+    required property var backgroundController
     implicitHeight: 640
 
     property string pendingDeleteId: ""
@@ -155,6 +156,74 @@ Item {
                     font.pixelSize: 13
                     wrapMode: Text.Wrap
                     Accessible.role: Accessible.AlertMessage
+                }
+            }
+
+            Shared.AppCard {
+                Layout.fillWidth: true
+                Layout.preferredHeight: backgroundLayout.implicitHeight + padding * 2
+
+                ColumnLayout {
+                    id: backgroundLayout
+                    width: parent.width
+                    spacing: 8
+
+                    Label {
+                        Layout.fillWidth: true
+                        text: qsTr("Background & System Tray")
+                        color: ThemeModule.Theme.textPrimary
+                        font.family: ThemeModule.Theme.fontFamily
+                        font.pixelSize: 18
+                        font.weight: Font.DemiBold
+                    }
+
+                    Shared.AppCheckBox {
+                        Layout.fillWidth: true
+                        text: qsTr("Enable system tray integration")
+                        checked: root.backgroundController.systemTrayEnabled
+                        onToggled: root.backgroundController.systemTrayEnabled = checked
+                    }
+                    Shared.AppCheckBox {
+                        Layout.fillWidth: true
+                        text: qsTr("Minimize to system tray when closing")
+                        checked: root.backgroundController.minimizeToTrayOnClose
+                        onToggled: root.backgroundController.minimizeToTrayOnClose = checked
+                    }
+                    Shared.AppCheckBox {
+                        Layout.fillWidth: true
+                        text: qsTr("Launch Something-Qt when Windows starts")
+                        checked: root.backgroundController.launchWithWindows
+                        enabled: root.backgroundController.startupSupported
+                        onToggled: root.backgroundController.launchWithWindows = checked
+                    }
+                    Shared.AppCheckBox {
+                        Layout.fillWidth: true
+                        text: qsTr("Start minimized to system tray")
+                        checked: root.backgroundController.startMinimizedToTray
+                        onToggled: root.backgroundController.startMinimizedToTray = checked
+                    }
+                    Shared.AppCheckBox {
+                        Layout.fillWidth: true
+                        text: qsTr("Show a notification the first time Something is hidden")
+                        checked: root.backgroundController.notifyOnFirstHide
+                        onToggled: root.backgroundController.notifyOnFirstHide = checked
+                    }
+
+                    Label {
+                        Layout.fillWidth: true
+                        visible: root.backgroundController.statusMessage.length > 0
+                        text: root.backgroundController.statusMessage
+                        color: ThemeModule.Theme.warning
+                        wrapMode: Text.Wrap
+                        Accessible.role: Accessible.AlertMessage
+                    }
+                    Label {
+                        Layout.fillWidth: true
+                        text: qsTr("These preferences are saved in your user settings and are available before the application profile loads. Windows startup is configured for your Windows account only.")
+                        color: ThemeModule.Theme.textSecondary
+                        font.pixelSize: 12
+                        wrapMode: Text.Wrap
+                    }
                 }
             }
 

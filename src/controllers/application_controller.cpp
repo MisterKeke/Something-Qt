@@ -54,6 +54,7 @@ void ApplicationController::requestShutdown()
         return;
     }
     m_shutdownRequested = true;
+    emit shutdownRequestedChanged(true);
     if (m_graph->isShutdownComplete()) {
         emit shutdownFinished();
         return;
