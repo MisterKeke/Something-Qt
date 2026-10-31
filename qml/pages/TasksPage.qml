@@ -858,6 +858,7 @@ Item {
                     ScrollBar.vertical: ThemeModule.AppScrollBar { policy: ScrollBar.AsNeeded }
 
                     delegate: Shared.AppCard {
+                        id: recommendationDelegate
                         required property double taskId
                         required property string title
                         required property string dueDate
@@ -899,8 +900,9 @@ Item {
                                     wrapMode: Text.Wrap
                                 }
                                 Shared.StatusBadge {
-                                    text: state === "scheduled" ? qsTr("Scheduled") : qsTr("Unscheduled")
-                                    badgeColor: state === "scheduled"
+                                    text: recommendationDelegate.state === "scheduled"
+                                          ? qsTr("Scheduled") : qsTr("Unscheduled")
+                                    badgeColor: recommendationDelegate.state === "scheduled"
                                                 ? ThemeModule.Theme.success : ThemeModule.Theme.error
                                 }
                             }
@@ -921,14 +923,14 @@ Item {
 
                             Label {
                                 Layout.fillWidth: true
-                                text: state === "scheduled"
+                                text: recommendationDelegate.state === "scheduled"
                                       ? qsTr("Proposed: %1%2")
                                         .arg(plannedDate)
                                         .arg(plannedStartTime.length > 0
                                              ? qsTr(" at %1").arg(plannedStartTime) : qsTr(" · start time unspecified"))
                                       : qsTr("No available work block")
-                                color: state === "scheduled" ? ThemeModule.Theme.accentCyanLight
-                                                               : ThemeModule.Theme.error
+                                color: recommendationDelegate.state === "scheduled"
+                                       ? ThemeModule.Theme.accentCyanLight : ThemeModule.Theme.error
                                 wrapMode: Text.Wrap
                                 font.family: ThemeModule.Theme.fontFamily
                                 font.weight: Font.DemiBold
