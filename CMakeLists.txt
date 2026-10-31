@@ -69,6 +69,7 @@ qt_add_executable(SomethingQt WIN32
     src/application/capability_registry.cpp
     src/application/operation_coordinator.cpp
     src/controllers/application_controller.cpp
+    src/controllers/application_usage_controller.cpp
     src/controllers/background_controller.cpp
     src/controllers/calendar_controller.cpp
     src/controllers/currency_controller.cpp
@@ -108,6 +109,7 @@ qt_add_executable(SomethingQt WIN32
     src/platform/profile_instance_lock.cpp
     src/platform/file_explorer_platform.cpp
     src/platform/desktop_applications_platform.cpp
+    src/platform/application_usage_platform.cpp
     src/platform/location_provider.cpp
     src/platform/system_clock.cpp
     src/providers/network_worker.cpp
@@ -120,11 +122,13 @@ qt_add_executable(SomethingQt WIN32
     src/providers/provider_image_provider.cpp
     src/providers/wallpaper_image_provider.cpp
     src/providers/application_icon_image_provider.cpp
+    src/providers/application_usage_icon_image_provider.cpp
     src/providers/setup_icon_image_provider.cpp
     src/providers/steam_artwork_image_provider.cpp
     src/providers/steam_release_provider.cpp
     src/providers/steam_news_provider.cpp
     src/services/bounded_worker_pool.cpp
+    src/services/application_usage_service.cpp
     src/services/calendar_service.cpp
     src/services/dashboard_service.cpp
     src/services/desktop_app_icon_store.cpp
@@ -150,6 +154,7 @@ qt_add_executable(SomethingQt WIN32
     src/services/wallpaper_asset_store.cpp
     src/services/wallpaper_service.cpp
     src/storage/repositories.cpp
+    src/storage/application_usage_repository.cpp
     src/storage/data_import_repository.cpp
     src/storage/schema_migrator.cpp
     src/storage/storage_worker.cpp
@@ -212,6 +217,7 @@ qt_add_qml_module(SomethingQt
         qml/pages/FavoritesPage.qml
         qml/pages/FileExplorerPage.qml
         qml/pages/RunningApplicationsPage.qml
+        qml/pages/ApplicationUsageStatisticsPage.qml
         qml/pages/SetupsPage.qml
         qml/pages/SteamPriceTrackingPanel.qml
         qml/pages/SteamReleaseRadarPage.qml

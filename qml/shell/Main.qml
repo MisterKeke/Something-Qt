@@ -77,6 +77,11 @@ ApplicationWindow {
     readonly property var navigationItems: routeCatalog.navigationItems
     property bool shuttingDown: false
 
+    onVisibleChanged: applicationUsageController.setPageVisible(
+        visible && currentRoute === "usageStatistics")
+    onCurrentRouteChanged: applicationUsageController.setPageVisible(
+        visible && currentRoute === "usageStatistics")
+
     onClosing: {
         if (window.trayIntegration.handleWindowClose(window)) {
             close.accepted = false
@@ -171,6 +176,7 @@ ApplicationWindow {
             importController: legacyDataImportController
             settingsController: appSettingsController
             backgroundController: window.trayIntegration
+            usageController: applicationUsageController
         }
     }
 
@@ -232,6 +238,11 @@ ApplicationWindow {
     Component {
         id: runningApplicationsPageComponent
         Pages.RunningApplicationsPage { controller: runningApplicationsController }
+    }
+
+    Component {
+        id: applicationUsageStatisticsPageComponent
+        Pages.ApplicationUsageStatisticsPage { controller: applicationUsageController }
     }
 
     Component {
@@ -425,6 +436,7 @@ ApplicationWindow {
                         : window.currentRoute === "currencies" ? currenciesPageComponent
                         : window.currentRoute === "applications" ? desktopApplicationsPageComponent
                         : window.currentRoute === "runningApplications" ? runningApplicationsPageComponent
+                        : window.currentRoute === "usageStatistics" ? applicationUsageStatisticsPageComponent
                         : window.currentRoute === "setups" ? setupsPageComponent
                         : window.currentRoute === "fileExplorer" ? fileExplorerPageComponent
                         : window.currentRoute === "gameUpdates" ? gameUpdatesPageComponent
@@ -447,6 +459,11 @@ ApplicationWindow {
             setupLaunchResult.summary = summary
             setupLaunchResult.open()
         }
+    }
+
+    Connections {
+        target: backgroundController
+        function onOpenUsageStatisticsRequested() { window.navigateTo("usageStatistics") }
     }
 
     Dialog {

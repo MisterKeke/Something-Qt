@@ -4,6 +4,7 @@
 set(CMAKE_AUTORCC ON)
 add_library(SomethingQtTestRepositories STATIC
     ../src/storage/repositories.cpp
+    ../src/storage/application_usage_repository.cpp
     ../src/domain/steam_game.cpp
     ../src/domain/steam_game_catalog.cpp
     ../src/domain/steam_release.cpp
@@ -633,3 +634,13 @@ foreach(storage_test IN ITEMS
 )
     target_link_libraries(${storage_test} PRIVATE SomethingQtTestRepositories)
 endforeach()
+
+add_executable(SomethingQtApplicationUsageTests
+    application_usage_feature_test.cpp
+    ../src/storage/schema_migrator.cpp
+)
+target_include_directories(SomethingQtApplicationUsageTests PRIVATE ../src)
+target_link_libraries(SomethingQtApplicationUsageTests PRIVATE
+    Qt6::Core Qt6::Sql Qt6::Test SomethingQtTestRepositories)
+add_test(NAME SomethingQtApplicationUsageTests COMMAND SomethingQtApplicationUsageTests
+    -o "${CMAKE_CURRENT_BINARY_DIR}/application-usage-results.txt,txt")

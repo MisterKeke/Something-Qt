@@ -29,6 +29,7 @@ const QVariantList &routeTable()
         makeRoute(QStringLiteral("currencies"), "Currencies", QStringLiteral("¤"), QStringLiteral("qrc:/something/assets/navigation/currency-zhongli.png"), true),
         makeRoute(QStringLiteral("applications"), "Saved applications", QStringLiteral("▣"), QStringLiteral("qrc:/something/assets/navigation/apps-furina.png"), true),
         makeRoute(QStringLiteral("runningApplications"), "Running applications", QStringLiteral("↗"), {}, true, "Running apps"),
+        makeRoute(QStringLiteral("usageStatistics"), "Application Usage Statistics", QStringLiteral("◷"), QStringLiteral("qrc:/something/assets/navigation/apps-furina.png"), true),
         makeRoute(QStringLiteral("setups"), "Setups", QStringLiteral("▱"), QStringLiteral("qrc:/something/assets/navigation/setups-layers.svg"), true),
         makeRoute(QStringLiteral("fileExplorer"), "File Explorer", QStringLiteral("▰"), QStringLiteral("qrc:/something/assets/navigation/file-explorer-aino.png"), true),
         makeRoute(QStringLiteral("gameUpdates"), "Game Updates", QStringLiteral("◉"), QStringLiteral("qrc:/something/assets/navigation/games-controller.svg"), true),

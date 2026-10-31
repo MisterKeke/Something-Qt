@@ -27,6 +27,8 @@ class BackgroundController final : public QObject {
     Q_PROPERTY(bool inTrayMode READ inTrayMode NOTIFY presentationChanged)
     Q_PROPERTY(bool shutdownRequested READ shutdownRequested NOTIFY presentationChanged)
     Q_PROPERTY(QString statusMessage READ statusMessage NOTIFY presentationChanged)
+    Q_PROPERTY(bool usageTrackingEnabled READ usageTrackingEnabled NOTIFY presentationChanged)
+    Q_PROPERTY(QString usageTrackingStatus READ usageTrackingStatus NOTIFY presentationChanged)
 
 public:
     explicit BackgroundController(bool backgroundArgumentRequested,
@@ -44,6 +46,8 @@ public:
     bool inTrayMode() const noexcept;
     bool shutdownRequested() const noexcept { return m_shutdownRequested; }
     QString statusMessage() const { return m_statusMessage; }
+    bool usageTrackingEnabled() const noexcept { return m_usageTrackingEnabled; }
+    QString usageTrackingStatus() const { return m_usageTrackingStatus; }
 
     void attachWindows(QWindow *mainWindow, QWindow *consoleWindow);
     bool presentInitiallyInTray();
@@ -53,6 +57,7 @@ public:
     void setLaunchWithWindows(bool enabled);
     void setStartMinimizedToTray(bool enabled);
     void setNotifyOnFirstHide(bool enabled);
+    void setUsageTrackingState(bool enabled, QString status);
 
     Q_INVOKABLE bool handleWindowClose(QObject *window);
     Q_INVOKABLE void openMainWindow();
@@ -79,6 +84,8 @@ signals:
     void openConsoleRequested();
     void openSettingsRequested();
     void exitRequested();
+    void openUsageStatisticsRequested();
+    void toggleUsageTrackingRequested();
 
 private:
     void createTrayMenu();
@@ -95,10 +102,13 @@ private:
     QSettings m_settings;
     QSystemTrayIcon *m_trayIcon{nullptr};
     QMenu *m_trayMenu{nullptr};
+    QAction *m_usageTrackingAction{nullptr};
+    QAction *m_usageStatusAction{nullptr};
     QPointer<QWindow> m_mainWindow;
     QPointer<QWindow> m_consoleWindow;
     QTimer m_watchdog;
     QString m_statusMessage;
+    QString m_usageTrackingStatus{QStringLiteral("Waiting for local storage")};
     bool m_systemTrayEnabled{true};
     bool m_minimizeToTrayOnClose{false};
     bool m_launchWithWindows{false};
@@ -109,6 +119,7 @@ private:
     bool m_shutdownRequested{false};
     bool m_systemShutdown{false};
     bool m_firstHideNotificationShown{false};
+    bool m_usageTrackingEnabled{true};
     int m_consecutiveUnavailableChecks{0};
     bool m_backgroundArgumentRequested{false};
 };

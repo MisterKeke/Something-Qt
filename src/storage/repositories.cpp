@@ -5665,6 +5665,7 @@ StorageRepositories::StorageRepositories(QSqlDatabase &database)
     , steamReleases(database)
     , gameUpdates(database)
     , dataImport(database)
+    , applicationUsage(database)
 {
 }
 

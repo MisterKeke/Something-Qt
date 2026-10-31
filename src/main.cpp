@@ -22,6 +22,7 @@
 #include "application/application_service_graph.h"
 #include "application/route_catalog.h"
 #include "controllers/application_controller.h"
+#include "controllers/application_usage_controller.h"
 #include "controllers/background_controller.h"
 #include "controllers/calendar_controller.h"
 #include "controllers/currency_controller.h"
@@ -47,15 +48,18 @@
 #include "services/application_mutation_workflow.h"
 #include "platform/location_provider.h"
 #include "platform/desktop_applications_platform.h"
+#include "platform/application_usage_platform.h"
 #include "platform/file_explorer_platform.h"
 #include "platform/system_clock.h"
 #include "providers/wallpaper_image_provider.h"
 #include "providers/provider_image_provider.h"
 #include "providers/application_icon_image_provider.h"
+#include "providers/application_usage_icon_image_provider.h"
 #include "providers/setup_icon_image_provider.h"
 #include "providers/steam_artwork_image_provider.h"
 #include "services/file_explorer_service.h"
 #include "services/application_command_service.h"
+#include "services/application_usage_service.h"
 
 namespace {
 
@@ -121,6 +125,9 @@ int main(int argc, char *argv[])
     QQuickStyle::setStyle(QStringLiteral("Basic"));
 
     something::application::ApplicationServiceGraph services;
+    something::platform::NativeApplicationUsagePlatform applicationUsagePlatform;
+    something::services::ApplicationUsageService applicationUsageService(
+        &services, &applicationUsagePlatform);
     something::services::ApplicationMutationWorkflow mutationWorkflow(&services);
     something::services::ApplicationCommandService commandService(&services);
     commandService.setMutationWorkflow(&mutationWorkflow);
@@ -143,6 +150,8 @@ int main(int argc, char *argv[])
     auto *providerImages = new something::providers::ProviderImageProvider();
     auto *applicationImages = new something::providers::ApplicationIconImageProvider(
         services.profileDirectory());
+    auto *applicationUsageImages = new something::providers::ApplicationUsageIconImageProvider(
+        &desktopApplicationsPlatform);
     auto *setupImages = new something::providers::SetupIconImageProvider(
         services.profileDirectory());
     auto *steamArtworkImages = new something::providers::SteamArtworkImageProvider(
@@ -164,6 +173,8 @@ int main(int argc, char *argv[])
         &services, &desktopApplicationsPlatform, applicationImages);
     something::controllers::RunningApplicationsController runningApplicationsController(
         &services, &runningWindowsPlatform);
+    something::controllers::ApplicationUsageController applicationUsageController(
+        &services, &applicationUsageService);
     something::controllers::SettingsController settingsController(&services, &clock, &mutationWorkflow);
     something::controllers::SetupsController setupsController(
         &services, &desktopApplicationsPlatform, setupImages);
@@ -268,6 +279,7 @@ int main(int argc, char *argv[])
     engine.addImageProvider(QStringLiteral("wallpapers"), wallpaperImages);
     engine.addImageProvider(QStringLiteral("provider-media"), providerImages);
     engine.addImageProvider(QStringLiteral("application-icons"), applicationImages);
+    engine.addImageProvider(QStringLiteral("application-usage-icons"), applicationUsageImages);
     engine.addImageProvider(QStringLiteral("setup-icons"), setupImages);
     engine.addImageProvider(QStringLiteral("steam-artwork"), steamArtworkImages);
     engine.rootContext()->setContextProperty(QStringLiteral("appController"), &controller);
@@ -303,6 +315,8 @@ int main(int argc, char *argv[])
                                              &desktopApplicationsController);
     engine.rootContext()->setContextProperty(QStringLiteral("runningApplicationsController"),
                                              &runningApplicationsController);
+    engine.rootContext()->setContextProperty(QStringLiteral("applicationUsageController"),
+                                             &applicationUsageController);
     engine.rootContext()->setContextProperty(QStringLiteral("appSettingsController"),
                                              &settingsController);
     engine.rootContext()->setContextProperty(QStringLiteral("setupsController"),
@@ -370,8 +384,21 @@ int main(int argc, char *argv[])
                      &something::controllers::ApplicationController::requestShutdown);
     QObject::connect(&controller,
                      &something::controllers::ApplicationController::shutdownRequestedChanged,
-                     &backgroundController,
-                     &something::controllers::BackgroundController::setShutdownRequested);
+                     &backgroundController, [&backgroundController, &applicationUsageService](bool requested) {
+        if (requested) applicationUsageService.prepareShutdown();
+        backgroundController.setShutdownRequested(requested);
+    });
+    QObject::connect(&backgroundController,
+                     &something::controllers::BackgroundController::toggleUsageTrackingRequested,
+                     &applicationUsageService, [&applicationUsageService] {
+        applicationUsageService.setTrackingEnabled(!applicationUsageService.trackingEnabled());
+    });
+    QObject::connect(&applicationUsageService,
+                     &something::services::ApplicationUsageService::stateChanged,
+                     &backgroundController, [&applicationUsageService, &backgroundController] {
+        backgroundController.setUsageTrackingState(applicationUsageService.trackingEnabled(),
+                                                    applicationUsageService.trackingStatus());
+    });
     QObject::connect(&controller,
                      &something::controllers::ApplicationController::stateChanged,
                      &backgroundController, [&controller, &backgroundController] {

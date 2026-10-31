@@ -740,6 +740,11 @@ void SteamFeatureTest::releaseRadarMigrationPreservesExistingPriceProfiles()
         QVERIFY(legacy.exec(QStringLiteral("DROP TABLE steam_game_update_news_items")));
         QVERIFY(legacy.exec(QStringLiteral("DROP TABLE steam_game_update_follows")));
         QVERIFY(legacy.exec(QStringLiteral("DROP TABLE steam_release_follows")));
+        QVERIFY(legacy.exec(QStringLiteral("DROP TABLE usage_segments")));
+        QVERIFY(legacy.exec(QStringLiteral("DROP TABLE usage_sessions")));
+        QVERIFY(legacy.exec(QStringLiteral("DROP TABLE usage_tracked_applications")));
+        QVERIFY(legacy.exec(QStringLiteral("DROP TABLE usage_tracking_settings")));
+        QVERIFY(legacy.exec(QStringLiteral("DROP TABLE usage_excluded_applications")));
         QVERIFY(legacy.exec(QStringLiteral(
             "DELETE FROM preferences WHERE key='calendar.game_releases_visible'")));
         QVERIFY(legacy.exec(QStringLiteral("DELETE FROM schema_migrations WHERE version>=13")));
@@ -747,7 +752,7 @@ void SteamFeatureTest::releaseRadarMigrationPreservesExistingPriceProfiles()
 
     QString diagnostic;
     QVERIFY2(storage::SchemaMigrator::apply(database, &diagnostic), qPrintable(diagnostic));
-    QCOMPARE(storage::SchemaMigrator::latestVersion(), 19);
+    QCOMPARE(storage::SchemaMigrator::latestVersion(), 20);
     {
         storage::StorageRepositories repositories(database);
         const auto preserved = repositories.steam.get(priceGameId);
@@ -916,12 +921,17 @@ void SteamFeatureTest::steamPriceHistoryMigrationPreservesLegacyGamesWithoutFabr
     QVERIFY(legacy.exec(QStringLiteral("DROP TABLE steam_release_follows")));
     QVERIFY(legacy.exec(QStringLiteral("DROP TABLE steam_game_update_news_items")));
     QVERIFY(legacy.exec(QStringLiteral("DROP TABLE steam_game_update_follows")));
+    QVERIFY(legacy.exec(QStringLiteral("DROP TABLE usage_segments")));
+    QVERIFY(legacy.exec(QStringLiteral("DROP TABLE usage_sessions")));
+    QVERIFY(legacy.exec(QStringLiteral("DROP TABLE usage_tracked_applications")));
+    QVERIFY(legacy.exec(QStringLiteral("DROP TABLE usage_tracking_settings")));
+    QVERIFY(legacy.exec(QStringLiteral("DROP TABLE usage_excluded_applications")));
     QVERIFY(legacy.exec(QStringLiteral("DELETE FROM schema_migrations WHERE version>=12")));
     legacy.finish();
 
     QString diagnostic;
     QVERIFY2(storage::SchemaMigrator::apply(database, &diagnostic), qPrintable(diagnostic));
-    QCOMPARE(storage::SchemaMigrator::latestVersion(), 19);
+    QCOMPARE(storage::SchemaMigrator::latestVersion(), 20);
 
     {
         storage::StorageRepositories repositories(database);
