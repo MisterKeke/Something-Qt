@@ -2,12 +2,12 @@
 
 Latest portable build: [`out/portable/SomethingQt-0.1.0-win64-smart-schedule-fix-20261031.zip`](out/portable/SomethingQt-0.1.0-win64-smart-schedule-fix-20261031.zip). It includes the Smart Schedule preview status binding fix. Release C++/QML compilation, Qt deployment, and static ZIP checks passed (145 files and 22 runtime requirements); tests and application launch were not run for this artifact. Extract the entire ZIP, run `bin/SomethingQt.exe`, and enter `run full` in Console to open the main window. Profiles use schema 19 and remain in the normal Windows application-data location. Full visual and clean-machine acceptance remain pending. See the [portable build record](docs/portable-build.md) and [window-size repair](docs/window-size-fix-20261030.md).
 
-An independent C++20 and Qt Quick rewrite of Something. The shell owns a lifecycle-managed service graph with per-profile locking, GUI-thread operation coordination, bounded CPU jobs, a dedicated SQLite worker, and a dedicated direct-HTTPS worker. Retained behavior is specified in [`docs/feature-parity.md`](docs/feature-parity.md).
+An independent C++20 and Qt Quick rewrite of Something. The shell owns a lifecycle-managed service graph with per-profile locking, GUI-thread operation coordination, bounded CPU jobs, a dedicated SQLite worker, and a dedicated direct-HTTPS worker. It also supports Windows tray presentation and an optional hidden background start. Retained behavior is specified in [`docs/feature-parity.md`](docs/feature-parity.md).
 
 ## Technology baseline
 
 - C++20 with CMake 3.21 or newer.
-- Qt 6.5 or newer, using Core, Gui, Qml, Quick, Quick Controls 2, Quick Dialogs 2, Network, and Sql.
+- Qt 6.5 or newer, using Core, Gui, Widgets, Qml, Quick, Quick Controls 2, Quick Dialogs 2, Network, and Sql.
 - The portable testing build uses Qt 6.11.0 for 64-bit MinGW, paired with the Qt-provided MinGW-w64 GCC 13.1.0 toolchain and CMake 3.30.5. Configuration, compilation and deployment succeeded with that kit. Details are in [`docs/toolchain.md`](docs/toolchain.md).
 - Qt package discovery is supplied by the user's Qt kit/environment. No machine-specific Qt, compiler, or CMake path is embedded in project files.
 

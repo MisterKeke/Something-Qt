@@ -29,6 +29,10 @@ ApplicationWindow {
     contentItem.enabled: !interactionBlocked
 
     onVisibleChanged: if (visible) focusInput()
+    onClosing: {
+        if (backgroundController.handleWindowClose(consoleWindow))
+            close.accepted = false
+    }
 
     function focusInput() {
         Qt.callLater(function() {
@@ -51,7 +55,6 @@ ApplicationWindow {
 
     // Closing hides this persistent instance; reopening retains the command draft,
     // completion list and transcript scroll position, including pending output.
-    // If the main window is still hidden, C++ shuts down on lastWindowClosed.
     Pages.TerminalPage {
         id: terminalPage
         anchors.fill: parent

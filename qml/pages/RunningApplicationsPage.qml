@@ -26,7 +26,10 @@ Item {
                 font.family: ThemeModule.Theme.fontFamily
                 font.pixelSize: 13
             }
-            BusyIndicator { running: root.controller.loading || root.controller.activating; visible: running }
+            BusyIndicator {
+                running: root.visible && (root.controller.loading || root.controller.activating)
+                visible: running
+            }
             Shared.AppButton {
                 text: qsTr("Refresh")
                 quiet: true

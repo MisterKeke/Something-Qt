@@ -105,7 +105,7 @@ Item {
                     id: releasePanel
                     width: parent.width
                     controller: root.releaseController
-                    active: root.currentSection === "releases"
+                    active: root.visible && root.currentSection === "releases"
                 }
             }
 

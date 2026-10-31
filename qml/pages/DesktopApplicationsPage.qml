@@ -189,7 +189,8 @@ Item {
             }
             Item { Layout.fillWidth: true }
             BusyIndicator {
-                running: root.controller.loading || root.controller.categoriesLoading || root.controller.busy
+                running: root.visible && (root.controller.loading
+                         || root.controller.categoriesLoading || root.controller.busy)
                 visible: running
             }
         }

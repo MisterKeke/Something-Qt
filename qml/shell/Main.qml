@@ -72,11 +72,16 @@ ApplicationWindow {
     property bool fullUiOpened: false
     property bool pageActive: fullUiOpened
     property var routeState: ({})
+    readonly property var trayIntegration: backgroundController
     readonly property var routeTitles: routeCatalog.routeTitles
     readonly property var navigationItems: routeCatalog.navigationItems
     property bool shuttingDown: false
 
     onClosing: {
+        if (window.trayIntegration.handleWindowClose(window)) {
+            close.accepted = false
+            return
+        }
         shuttingDown = true
         consoleWindow.hide()
         appController.requestShutdown()
@@ -165,6 +170,7 @@ ApplicationWindow {
             controller: wallpaperController
             importController: legacyDataImportController
             settingsController: appSettingsController
+            backgroundController: window.trayIntegration
         }
     }
 
@@ -520,6 +526,12 @@ ApplicationWindow {
     Connections {
         target: terminalController
         function onRouteRequested(routeId) { window.navigateTo(routeId) }
+    }
+
+    Connections {
+        target: window.trayIntegration
+        function onOpenConsoleRequested() { consoleWindow.present() }
+        function onOpenSettingsRequested() { window.navigateTo("settings") }
     }
 
     Shared.NotificationToast {
