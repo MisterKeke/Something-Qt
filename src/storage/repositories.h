@@ -1,6 +1,7 @@
 #pragma once
 
 #include "repository_types.h"
+#include "application_usage_repository.h"
 #include "data_import_repository.h"
 
 #include <QDate>
@@ -397,6 +398,7 @@ public:
     SteamReleaseRepository steamReleases;
     SteamGameUpdatesRepository gameUpdates;
     DataImportRepository dataImport;
+    ApplicationUsageRepository applicationUsage;
 };
 
 } // namespace something::storage

@@ -13,10 +13,13 @@ Item {
     required property var importController
     required property var settingsController
     required property var backgroundController
+    required property var usageController
     implicitHeight: 640
 
     property string pendingDeleteId: ""
     property url sourceDatabaseFile: ""
+    property string usageExclusionSearch: ""
+    property string usageFilenameToExclude: ""
     Component.onCompleted: root.importController.refreshStatus()
 
     function importReportText(json) {
@@ -41,6 +44,16 @@ Item {
             lines = lines.concat(report.warnings || [], report.failures || [])
             return lines.join("\n")
         } catch (error) { return qsTr("The stored import report could not be displayed.") }
+    }
+
+    function matchingUsageExclusions() {
+        const query = usageExclusionSearch.trim().toLowerCase()
+        const entries = usageController.exclusions || []
+        if (!query) return entries
+        return entries.filter(function(entry) {
+            return String(entry.executableName || "").toLowerCase().indexOf(query) >= 0
+                || String(entry.canonicalPath || "").toLowerCase().indexOf(query) >= 0
+        })
     }
 
     function captureViewState() {
@@ -96,6 +109,15 @@ Item {
             root.controller.deleteWallpaper(root.pendingDeleteId)
             root.pendingDeleteId = ""
         }
+    }
+
+    Dialogs.ConfirmationDialog {
+        id: deleteUsageHistoryConfirmation
+        title: qsTr("Delete application usage history?")
+        message: qsTr("All saved application usage sessions and time segments will be permanently deleted. Exclusions and tracking settings will remain.")
+        confirmText: qsTr("Delete history")
+        destructive: true
+        onConfirmed: root.usageController.deleteHistory("")
     }
 
     Flickable {
@@ -223,6 +245,148 @@ Item {
                         color: ThemeModule.Theme.textSecondary
                         font.pixelSize: 12
                         wrapMode: Text.Wrap
+                    }
+                }
+            }
+
+            Shared.AppCard {
+                Layout.fillWidth: true
+                Layout.preferredHeight: usageTrackingLayout.implicitHeight + padding * 2
+
+                ColumnLayout {
+                    id: usageTrackingLayout
+                    width: parent.width
+                    spacing: 10
+
+                    Label {
+                        Layout.fillWidth: true
+                        text: qsTr("Application Usage Tracking")
+                        color: ThemeModule.Theme.textPrimary
+                        font.family: ThemeModule.Theme.fontFamily
+                        font.pixelSize: 18
+                        font.weight: Font.DemiBold
+                    }
+                    Label {
+                        Layout.fillWidth: true
+                        text: qsTr("Eligible taskbar applications are tracked automatically, including applications started outside Something-Qt. No catalog registration is required. Tracking is local: screenshots, keystrokes, window contents, and communications are not recorded.")
+                        color: ThemeModule.Theme.textSecondary
+                        font.pixelSize: 12
+                        wrapMode: Text.Wrap
+                    }
+                    Shared.AppCheckBox {
+                        Layout.fillWidth: true
+                        text: qsTr("Enable automatic application usage tracking")
+                        checked: root.usageController.trackingEnabled
+                        enabled: root.usageController.ready && root.usageController.supported
+                        onToggled: root.usageController.setTrackingEnabled(checked)
+                    }
+                    Label {
+                        Layout.fillWidth: true
+                        text: root.usageController.trackingStatus
+                        color: root.usageController.trackingActive
+                               ? ThemeModule.Theme.success : ThemeModule.Theme.warning
+                        font.pixelSize: 12
+                        wrapMode: Text.Wrap
+                    }
+
+                    RowLayout {
+                        Layout.fillWidth: true
+                        Label {
+                            Layout.fillWidth: true
+                            text: qsTr("Keep usage history")
+                            color: ThemeModule.Theme.textSecondary
+                        }
+                        Shared.AppComboBox {
+                            id: usageRetentionChoice
+                            Layout.preferredWidth: 190
+                            model: [qsTr("Unlimited"), qsTr("90 days"), qsTr("1 year"), qsTr("2 years")]
+                            currentIndex: root.usageController.retentionDays === 0 ? 0
+                                          : root.usageController.retentionDays <= 90 ? 1
+                                          : root.usageController.retentionDays <= 365 ? 2 : 3
+                            enabled: root.usageController.ready
+                            accessibleLabel: qsTr("Usage history retention period")
+                            onActivated: function(index) {
+                                root.usageController.setRetentionDays([0, 90, 365, 730][index])
+                            }
+                        }
+                    }
+
+                    Label {
+                        Layout.fillWidth: true
+                        text: qsTr("Excluded applications")
+                        color: ThemeModule.Theme.textPrimary
+                        font.pixelSize: 15
+                        font.weight: Font.DemiBold
+                    }
+                    Shared.AppTextField {
+                        Layout.fillWidth: true
+                        placeholderText: qsTr("Search exclusions")
+                        accessibleLabel: qsTr("Search excluded applications")
+                        text: root.usageExclusionSearch
+                        onTextChanged: root.usageExclusionSearch = text
+                    }
+                    RowLayout {
+                        Layout.fillWidth: true
+                        Shared.AppTextField {
+                            Layout.fillWidth: true
+                            placeholderText: qsTr("Executable filename, for example game.exe")
+                            accessibleLabel: qsTr("Exclude applications by executable filename")
+                            text: root.usageFilenameToExclude
+                            onTextChanged: root.usageFilenameToExclude = text
+                        }
+                        Shared.AppButton {
+                            text: qsTr("Exclude filename")
+                            enabled: root.usageController.ready && root.usageFilenameToExclude.trim().length > 0
+                            onClicked: {
+                                root.usageController.addFilenameExclusion(root.usageFilenameToExclude.trim())
+                                root.usageFilenameToExclude = ""
+                            }
+                        }
+                    }
+                    Label {
+                        Layout.fillWidth: true
+                        text: qsTr("Filename exclusions can match different applications that use the same executable name.")
+                        color: ThemeModule.Theme.textSecondary
+                        font.pixelSize: 11
+                        wrapMode: Text.Wrap
+                    }
+                    Repeater {
+                        model: root.matchingUsageExclusions()
+                        delegate: RowLayout {
+                            required property var modelData
+                            Layout.fillWidth: true
+                            Label {
+                                Layout.fillWidth: true
+                                text: modelData.executableName || modelData.applicationId
+                                color: ThemeModule.Theme.textPrimary
+                                elide: Text.ElideMiddle
+                            }
+                            Label {
+                                text: modelData.matchByName ? qsTr("Filename match") : qsTr("Application")
+                                color: ThemeModule.Theme.textSecondary
+                                font.pixelSize: 11
+                            }
+                            Shared.AppButton {
+                                text: qsTr("Remove")
+                                quiet: true
+                                onClicked: root.usageController.removeExclusion(modelData.applicationId)
+                            }
+                        }
+                    }
+                    Label {
+                        Layout.fillWidth: true
+                        visible: root.matchingUsageExclusions().length === 0
+                        text: root.usageController.exclusions.length === 0
+                              ? qsTr("No applications are excluded.") : qsTr("No exclusions match this search.")
+                        color: ThemeModule.Theme.textSecondary
+                        font.pixelSize: 12
+                    }
+                    Shared.AppButton {
+                        text: qsTr("Delete usage history")
+                        quiet: true
+                        destructive: true
+                        enabled: root.usageController.ready
+                        onClicked: deleteUsageHistoryConfirmation.open()
                     }
                 }
             }

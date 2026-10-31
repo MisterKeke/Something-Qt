@@ -56,7 +56,7 @@ void StorageRepositoryTest::migrationsAreTransactionalIndependentAndRepeatable()
     QString connectionName;
     QSqlDatabase database;
     QVERIFY(openTestDatabase(&database, &connectionName));
-    QCOMPARE(storage::SchemaMigrator::latestVersion(), 19);
+    QCOMPARE(storage::SchemaMigrator::latestVersion(), 20);
     QVERIFY(storage::SchemaMigrator::apply(database));
 
     QSqlQuery history(database);
@@ -748,7 +748,11 @@ void StorageRepositoryTest::applicationCategoryMigrationPreservesExistingProfile
         QStringLiteral("task_history"), QStringLiteral("setup_apps"),
         QStringLiteral("setup_icons"), QStringLiteral("desktop_app_icons"),
         QStringLiteral("setups"), QStringLiteral("desktop_apps"),
-        QStringLiteral("application_categories")};
+        QStringLiteral("application_categories"),
+        QStringLiteral("usage_segments"), QStringLiteral("usage_sessions"),
+        QStringLiteral("usage_tracked_applications"),
+        QStringLiteral("usage_tracking_settings"),
+        QStringLiteral("usage_excluded_applications")};
     for (const QString &table : newerTables)
         QVERIFY(fixture.exec(QStringLiteral("DROP TABLE ") + table));
     QVERIFY(fixture.exec(QStringLiteral("DELETE FROM schema_migrations WHERE version>=8")));

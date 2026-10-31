@@ -699,6 +699,60 @@ constexpr const char *steamUnsupportedPriceState[] = {
     "DROP TABLE steam_sequence_v19",
 };
 
+constexpr const char *applicationUsage[] = {
+    R"SQL(CREATE TABLE usage_tracked_applications (
+        application_id TEXT PRIMARY KEY CHECK(length(application_id) > 0),
+        canonical_path TEXT NOT NULL DEFAULT '',
+        executable_name TEXT NOT NULL DEFAULT '',
+        display_name TEXT NOT NULL DEFAULT '',
+        first_seen_utc TEXT NOT NULL,
+        last_seen_utc TEXT NOT NULL,
+        last_detection_status TEXT NOT NULL DEFAULT 'eligible'
+    ))SQL",
+    R"SQL(CREATE TABLE usage_sessions (
+        session_id TEXT PRIMARY KEY CHECK(length(session_id) > 0),
+        application_id TEXT NOT NULL REFERENCES usage_tracked_applications(application_id) ON DELETE CASCADE,
+        started_utc TEXT NOT NULL,
+        ended_utc TEXT,
+        duration_ms INTEGER NOT NULL DEFAULT 0 CHECK(duration_ms >= 0),
+        end_reason TEXT,
+        last_checkpoint_utc TEXT NOT NULL
+    ))SQL",
+    R"SQL(CREATE TABLE usage_segments (
+        segment_id TEXT PRIMARY KEY CHECK(length(segment_id) > 0),
+        session_id TEXT NOT NULL REFERENCES usage_sessions(session_id) ON DELETE CASCADE,
+        application_id TEXT NOT NULL REFERENCES usage_tracked_applications(application_id) ON DELETE CASCADE,
+        state TEXT NOT NULL CHECK(state IN ('ForegroundFullscreen','ForegroundWindowed','BackgroundVisible','Minimized','Unknown')),
+        started_utc TEXT NOT NULL,
+        ended_utc TEXT NOT NULL,
+        local_day TEXT NOT NULL CHECK(length(local_day)=10),
+        local_hour INTEGER NOT NULL CHECK(local_hour BETWEEN 0 AND 23),
+        duration_ms INTEGER NOT NULL CHECK(duration_ms > 0)
+    ))SQL",
+    R"SQL(CREATE TABLE usage_tracking_settings (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+    ))SQL",
+    R"SQL(CREATE TABLE usage_excluded_applications (
+        application_id TEXT PRIMARY KEY CHECK(length(application_id) > 0),
+        canonical_path TEXT NOT NULL DEFAULT '',
+        executable_name TEXT NOT NULL DEFAULT '',
+        match_by_name INTEGER NOT NULL DEFAULT 0 CHECK(match_by_name IN (0,1)),
+        created_at_utc TEXT NOT NULL
+    ))SQL",
+    "CREATE INDEX idx_usage_segments_app_day_state ON usage_segments(application_id, local_day, state)",
+    "CREATE INDEX idx_usage_segments_day_hour ON usage_segments(local_day, local_hour)",
+    "CREATE INDEX idx_usage_segments_session ON usage_segments(session_id)",
+    "CREATE INDEX idx_usage_sessions_app_start ON usage_sessions(application_id, started_utc)",
+    "CREATE INDEX idx_usage_sessions_open ON usage_sessions(ended_utc, application_id)",
+    "CREATE INDEX idx_usage_sessions_checkpoint ON usage_sessions(last_checkpoint_utc, ended_utc)",
+    "CREATE INDEX idx_usage_applications_last_seen ON usage_tracked_applications(last_seen_utc)",
+    "CREATE INDEX idx_usage_exclusions_path ON usage_excluded_applications(canonical_path)",
+    "CREATE INDEX idx_usage_exclusions_name ON usage_excluded_applications(executable_name, match_by_name)",
+    "INSERT INTO usage_tracking_settings(key, value) VALUES('enabled','1')",
+    "INSERT INTO usage_tracking_settings(key, value) VALUES('retention_days','365')"
+};
+
 constexpr std::array migrations{
     Migration{1, "core tasks currencies preferences", core, qsizetype(std::size(core))},
     Migration{2, "favorites and retained update news", favorites, qsizetype(std::size(favorites))},
@@ -732,6 +786,8 @@ constexpr std::array migrations{
               qsizetype(std::size(steamCatalogAndCollections))},
     Migration{19, "Steam unsupported price state", steamUnsupportedPriceState,
               qsizetype(std::size(steamUnsupportedPriceState))},
+    Migration{20, "application usage tracking and statistics", applicationUsage,
+              qsizetype(std::size(applicationUsage))},
 };
 
 bool fail(QString *diagnostic, const QString &message)
@@ -795,6 +851,11 @@ bool hasUnexpectedTables(const QSqlDatabase &database, QString *diagnostic, bool
         QStringLiteral("steam_game_catalog"),
         QStringLiteral("steam_collections"),
         QStringLiteral("steam_collection_games"),
+        QStringLiteral("usage_tracked_applications"),
+        QStringLiteral("usage_sessions"),
+        QStringLiteral("usage_segments"),
+        QStringLiteral("usage_tracking_settings"),
+        QStringLiteral("usage_excluded_applications"),
         QStringLiteral("task_history"), QStringLiteral("task_schedules"),
         QStringLiteral("scheduling_preferences"),
         QStringLiteral("weather_comparison_cities")

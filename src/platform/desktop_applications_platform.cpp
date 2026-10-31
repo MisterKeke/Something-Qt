@@ -1,4 +1,5 @@
 #include "desktop_applications_platform.h"
+#include "application_usage_platform.h"
 
 #include <QFileInfo>
 #include <QBuffer>
@@ -6,18 +7,22 @@
 #include <QMutexLocker>
 #include <QProcess>
 #include <QSet>
+#include <QDateTime>
 
 #if defined(Q_OS_WIN)
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
+#ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
+#endif
 #include <windows.h>
 #include <dwmapi.h>
 #include <shellapi.h>
 #endif
 
 #include <algorithm>
+#include <cstdlib>
 #include <cstring>
 #include <limits>
 
@@ -32,8 +37,10 @@ struct WindowSnapshot final {
     QString title;
     QString processName;
     QString executablePath;
+    QString processCreationIdentity;
     QString className;
     LONG_PTR extendedStyle{0};
+    LONG_PTR style{0};
     bool visible{false};
     bool cloaked{false};
     bool minimized{false};
@@ -42,10 +49,13 @@ struct WindowSnapshot final {
 };
 
 struct EnumerationContext final {
+    struct ProcessMetadata final { QString imagePath; QString creationIdentity; };
     QVector<WindowSnapshot> snapshots;
+    QHash<DWORD, ProcessMetadata> processMetadata;
     application::CancellationToken cancellation;
     DWORD currentProcessId{0};
     HWND foreground{nullptr};
+    bool readTitles{true};
     bool cancelled{false};
     bool failed{false};
 };
@@ -121,13 +131,28 @@ QString processImagePath(DWORD processId)
     return result;
 }
 
-WindowSnapshot readWindow(HWND handle, HWND foreground)
+QString processCreationIdentity(DWORD processId)
+{
+    HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, processId);
+    if (!process) return QStringLiteral("pid:%1:unavailable").arg(processId);
+    FILETIME created{}, exited{}, kernel{}, user{};
+    const bool succeeded = GetProcessTimes(process, &created, &exited, &kernel, &user) != FALSE;
+    CloseHandle(process);
+    if (!succeeded) return QStringLiteral("pid:%1:unavailable").arg(processId);
+    ULARGE_INTEGER value{};
+    value.LowPart = created.dwLowDateTime;
+    value.HighPart = created.dwHighDateTime;
+    return QStringLiteral("pid:%1:%2").arg(processId).arg(value.QuadPart);
+}
+
+WindowSnapshot readWindow(HWND handle, HWND foreground, bool readTitle)
 {
     WindowSnapshot item;
     item.handle = handle;
     if (!IsWindow(handle)) return item;
     item.visible = IsWindowVisible(handle) != FALSE;
     item.extendedStyle = GetWindowLongPtrW(handle, GWL_EXSTYLE);
+    item.style = GetWindowLongPtrW(handle, GWL_STYLE);
     item.processId = 0;
     GetWindowThreadProcessId(handle, &item.processId);
     item.active = handle == foreground;
@@ -142,11 +167,13 @@ WindowSnapshot readWindow(HWND handle, HWND foreground)
     const int classLength = GetClassNameW(handle, classBuffer, 256);
     if (classLength > 0) item.className = QString::fromWCharArray(classBuffer, classLength);
 
-    const int titleLength = std::clamp(GetWindowTextLengthW(handle), 0, 4096);
-    if (titleLength > 0) {
-        QVector<wchar_t> title(static_cast<qsizetype>(titleLength + 1));
-        const int copied = GetWindowTextW(handle, title.data(), titleLength + 1);
-        if (copied > 0) item.title = QString::fromWCharArray(title.constData(), copied).trimmed();
+    if (readTitle) {
+        const int titleLength = std::clamp(GetWindowTextLengthW(handle), 0, 4096);
+        if (titleLength > 0) {
+            QVector<wchar_t> title(static_cast<qsizetype>(titleLength + 1));
+            const int copied = GetWindowTextW(handle, title.data(), titleLength + 1);
+            if (copied > 0) item.title = QString::fromWCharArray(title.constData(), copied).trimmed();
+        }
     }
     return item;
 }
@@ -169,14 +196,61 @@ BOOL CALLBACK enumerateWindow(HWND handle, LPARAM parameter)
         context->cancelled = true;
         return FALSE;
     }
-    WindowSnapshot item = readWindow(handle, context->foreground);
+    WindowSnapshot item = readWindow(handle, context->foreground, context->readTitles);
     if (shouldReadProcess(item, context->currentProcessId)) {
-        item.executablePath = processImagePath(item.processId);
+        auto metadata = context->processMetadata.find(item.processId);
+        if (metadata == context->processMetadata.cend()) {
+            EnumerationContext::ProcessMetadata entry;
+            entry.imagePath = processImagePath(item.processId);
+            entry.creationIdentity = processCreationIdentity(item.processId);
+            metadata = context->processMetadata.insert(item.processId, std::move(entry));
+        }
+        item.executablePath = metadata->imagePath;
         item.processName = QFileInfo(item.executablePath).fileName();
-        if (item.title.isEmpty() && item.processName.isEmpty()) return TRUE;
+        item.processCreationIdentity = metadata->creationIdentity;
+        if (context->readTitles && item.title.isEmpty() && item.processName.isEmpty()) return TRUE;
         context->snapshots.push_back(std::move(item));
     }
     return TRUE;
+}
+
+bool isBorderlessFullscreen(HWND handle, LONG_PTR style)
+{
+    if (!handle || (style & WS_CAPTION) != 0) return false;
+    RECT bounds{};
+    if (!GetWindowRect(handle, &bounds)) return false;
+    const HMONITOR monitor = MonitorFromWindow(handle, MONITOR_DEFAULTTONEAREST);
+    if (!monitor) return false;
+    MONITORINFO info{};
+    info.cbSize = sizeof(info);
+    if (!GetMonitorInfoW(monitor, &info)) return false;
+    constexpr LONG tolerance = 2;
+    return std::abs(bounds.left - info.rcMonitor.left) <= tolerance
+        && std::abs(bounds.top - info.rcMonitor.top) <= tolerance
+        && std::abs(bounds.right - info.rcMonitor.right) <= tolerance
+        && std::abs(bounds.bottom - info.rcMonitor.bottom) <= tolerance;
+}
+
+bool inputDesktopIsDefault(bool *available)
+{
+    if (available) *available = false;
+    HDESK desktop = OpenInputDesktop(0, FALSE, DESKTOP_READOBJECTS);
+    if (!desktop) return false;
+    DWORD bytesNeeded = 0;
+    GetUserObjectInformationW(desktop, UOI_NAME, nullptr, 0, &bytesNeeded);
+    if (bytesNeeded < sizeof(wchar_t)) {
+        CloseDesktop(desktop);
+        return false;
+    }
+    QVector<wchar_t> name(static_cast<qsizetype>(bytesNeeded / sizeof(wchar_t) + 1));
+    const bool read = GetUserObjectInformationW(desktop, UOI_NAME, name.data(),
+                                                 static_cast<DWORD>(name.size() * sizeof(wchar_t)),
+                                                 &bytesNeeded) != FALSE;
+    CloseDesktop(desktop);
+    if (!read) return false;
+    if (available) *available = true;
+    return QString::fromWCharArray(name.constData()).compare(QStringLiteral("Default"),
+                                                              Qt::CaseInsensitive) == 0;
 }
 
 QImage imageFromIcon(HICON icon)
@@ -268,12 +342,14 @@ QString iconDataUrl(const WindowSnapshot &snapshot)
 }
 
 QVector<WindowSnapshot> enumerateSnapshots(const application::CancellationToken &cancellation,
-                                           bool *cancelled, bool *failed)
+                                           bool *cancelled, bool *failed,
+                                           bool readTitles = true)
 {
     EnumerationContext context;
     context.cancellation = cancellation;
     context.currentProcessId = GetCurrentProcessId();
     context.foreground = GetForegroundWindow();
+    context.readTitles = readTitles;
     SetLastError(ERROR_SUCCESS);
     const BOOL result = EnumWindows(enumerateWindow, reinterpret_cast<LPARAM>(&context));
     if (cancelled) *cancelled = context.cancelled || cancellation.isCancellationRequested();
@@ -481,6 +557,107 @@ WindowActionResult NativeRunningWindowsPlatform::activate(
 #else
     Q_UNUSED(windowId)
     return WindowActionResult::Unsupported;
+#endif
+}
+
+QVector<ApplicationUsageObservation> NativeApplicationUsagePlatform::snapshot(
+    bool *succeeded, QString *diagnostic) const
+{
+    if (succeeded) *succeeded = false;
+    if (diagnostic) diagnostic->clear();
+#if defined(Q_OS_WIN)
+    bool desktopAvailable = false;
+    if (!inputDesktopIsDefault(&desktopAvailable)) {
+        if (diagnostic) *diagnostic = desktopAvailable
+            ? QStringLiteral("The Windows session is locked or on a secure desktop.")
+            : QStringLiteral("The Windows input desktop is unavailable.");
+        return {};
+    }
+    bool cancelled = false;
+    bool failed = false;
+    const QVector<WindowSnapshot> windows = enumerateSnapshots(
+        application::CancellationToken{}, &cancelled, &failed, false);
+    if (cancelled || failed) {
+        if (diagnostic) *diagnostic = QStringLiteral("Windows window enumeration was interrupted.");
+        return {};
+    }
+
+    struct ApplicationState final {
+        ApplicationUsageObservation observation;
+        bool foregroundFullscreen{false};
+        bool foregroundWindowed{false};
+        bool backgroundVisible{false};
+        bool minimized{false};
+    };
+    QHash<QString, ApplicationState> grouped;
+    for (const WindowSnapshot &window : windows) {
+        if (!window.handle || !IsWindow(window.handle) || !window.visible || window.cloaked)
+            continue;
+        const bool appWindow = (window.extendedStyle & WS_EX_APPWINDOW) != 0;
+        const bool toolWindow = (window.extendedStyle & WS_EX_TOOLWINDOW) != 0;
+        if ((toolWindow && !appWindow) || (!appWindow && !window.taskbarRepresentative)) continue;
+
+        const QFileInfo executable(window.executablePath);
+        QString applicationId;
+        if (!window.executablePath.isEmpty()) {
+            const QString normalized = QDir::cleanPath(executable.absoluteFilePath()).toCaseFolded();
+            applicationId = QStringLiteral("path:%1").arg(normalized);
+        } else {
+            applicationId = QStringLiteral("process:%1").arg(window.processCreationIdentity);
+        }
+        auto it = grouped.find(applicationId);
+        if (it == grouped.end()) {
+            ApplicationState app;
+            app.observation.applicationId = applicationId;
+            app.observation.executablePath = window.executablePath.isEmpty()
+                ? QString() : executable.absoluteFilePath();
+            app.observation.executableName = executable.fileName();
+            app.observation.displayName = executable.completeBaseName();
+            if (app.observation.executableName.isEmpty())
+                app.observation.executableName = window.processName;
+            if (app.observation.displayName.isEmpty())
+                app.observation.displayName = QFileInfo(app.observation.executableName).completeBaseName();
+            if (app.observation.displayName.isEmpty())
+                app.observation.displayName = QStringLiteral("Application (process %1)")
+                    .arg(window.processId);
+            app.observation.processIdentity = window.processCreationIdentity;
+            it = grouped.insert(applicationId, std::move(app));
+        }
+        if (window.active) {
+            if (isBorderlessFullscreen(window.handle, window.style)) it->foregroundFullscreen = true;
+            else it->foregroundWindowed = true;
+        } else if (!window.minimized) {
+            it->backgroundVisible = true;
+        } else {
+            it->minimized = true;
+        }
+    }
+
+    QVector<ApplicationUsageObservation> result;
+    result.reserve(grouped.size());
+    for (auto it = grouped.begin(); it != grouped.end(); ++it) {
+        if (it->foregroundFullscreen)
+            it->observation.state = QStringLiteral("ForegroundFullscreen");
+        else if (it->foregroundWindowed)
+            it->observation.state = QStringLiteral("ForegroundWindowed");
+        else if (it->backgroundVisible)
+            it->observation.state = QStringLiteral("BackgroundVisible");
+        else if (it->minimized)
+            it->observation.state = QStringLiteral("Minimized");
+        else
+            it->observation.state = QStringLiteral("Unknown");
+        result.push_back(it->observation);
+    }
+    std::sort(result.begin(), result.end(), [](const auto &left, const auto &right) {
+        const int nameOrder = QString::compare(left.displayName, right.displayName,
+                                               Qt::CaseInsensitive);
+        return nameOrder == 0 ? left.applicationId < right.applicationId : nameOrder < 0;
+    });
+    if (succeeded) *succeeded = true;
+    return result;
+#else
+    if (diagnostic) *diagnostic = QStringLiteral("Application usage tracking is available on Windows.");
+    return {};
 #endif
 }
 

@@ -243,7 +243,41 @@ void BackgroundController::createTrayMenu()
     addAction(tr("Open Console"), [this] { openConsoleWindow(); });
     addAction(tr("Settings"), [this] { openSettings(); });
     m_trayMenu->addSeparator();
+    auto *statistics = new QAction(tr("Usage Statistics"), m_trayMenu);
+    m_trayMenu->addAction(statistics);
+    connect(statistics, &QAction::triggered, this,
+            &BackgroundController::openUsageStatisticsRequested);
+    m_usageTrackingAction = new QAction(m_trayMenu);
+    m_trayMenu->addAction(m_usageTrackingAction);
+    connect(m_usageTrackingAction, &QAction::triggered, this,
+            &BackgroundController::toggleUsageTrackingRequested);
+    m_usageStatusAction = new QAction(m_trayMenu);
+    m_usageStatusAction->setEnabled(false);
+    m_trayMenu->addAction(m_usageStatusAction);
+    updateUsageActions();
+    m_trayMenu->addSeparator();
     addAction(tr("Exit Completely"), [this] { exitCompletely(); });
+}
+
+void BackgroundController::setUsageTrackingState(bool enabled, QString status)
+{
+    if (m_usageTrackingEnabled == enabled && m_usageTrackingStatus == status) return;
+    m_usageTrackingEnabled = enabled;
+    m_usageTrackingStatus = std::move(status);
+    updateUsageActions();
+    emit presentationChanged();
+}
+
+void BackgroundController::updateUsageActions()
+{
+    if (m_usageTrackingAction)
+        m_usageTrackingAction->setText(m_usageTrackingEnabled
+            ? tr("Pause Tracking") : tr("Resume Tracking"));
+    if (m_usageStatusAction) {
+        const QString state = m_usageTrackingEnabled ? tr("Enabled") : tr("Paused");
+        m_usageStatusAction->setText(tr("Usage tracking: %1").arg(state));
+        m_usageStatusAction->setToolTip(m_usageTrackingStatus);
+    }
 }
 
 void BackgroundController::readSettings()

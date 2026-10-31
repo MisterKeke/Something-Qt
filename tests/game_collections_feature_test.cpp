@@ -174,6 +174,11 @@ void GameCollectionsFeatureTest::migrationSeedsTheCatalogWithoutChangingExisting
         QVERIFY(legacy.exec(QStringLiteral("DROP TABLE steam_collection_games")));
         QVERIFY(legacy.exec(QStringLiteral("DROP TABLE steam_collections")));
         QVERIFY(legacy.exec(QStringLiteral("DROP TABLE steam_game_catalog")));
+        QVERIFY(legacy.exec(QStringLiteral("DROP TABLE usage_segments")));
+        QVERIFY(legacy.exec(QStringLiteral("DROP TABLE usage_sessions")));
+        QVERIFY(legacy.exec(QStringLiteral("DROP TABLE usage_tracked_applications")));
+        QVERIFY(legacy.exec(QStringLiteral("DROP TABLE usage_tracking_settings")));
+        QVERIFY(legacy.exec(QStringLiteral("DROP TABLE usage_excluded_applications")));
         QVERIFY(legacy.exec(QStringLiteral("DELETE FROM schema_migrations WHERE version>=18")));
         QVERIFY(legacy.exec(QStringLiteral("SELECT MAX(version) FROM schema_migrations")));
         QVERIFY(legacy.next());
@@ -183,7 +188,7 @@ void GameCollectionsFeatureTest::migrationSeedsTheCatalogWithoutChangingExisting
 
     QString diagnostic;
     QVERIFY2(storage::SchemaMigrator::apply(database, &diagnostic), qPrintable(diagnostic));
-    QCOMPARE(storage::SchemaMigrator::latestVersion(), 19);
+    QCOMPARE(storage::SchemaMigrator::latestVersion(), 20);
     {
         storage::StorageRepositories repositories(database);
         const auto price = repositories.steam.get(priceRowId);
