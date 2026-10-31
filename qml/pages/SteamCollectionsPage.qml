@@ -561,9 +561,9 @@ Item {
                                 anchors.fill: parent
                                 radius: ThemeModule.Theme.controlRadius
                                 color: ThemeModule.Theme.insetSurface
-                                visible: gameArtwork.status !== Image.Ready
                                 Text {
                                     anchors.centerIn: parent
+                                    visible: gameArtwork.status !== Image.Ready
                                     text: String(gameCard.game.name || "?").length > 0
                                           ? String(gameCard.game.name).charAt(0).toUpperCase() : "?"
                                     color: ThemeModule.Theme.textSecondary
@@ -577,22 +577,9 @@ Item {
                                 source: String(gameCard.game.artworkSource || "")
                                 asynchronous: true
                                 cache: false
-                                fillMode: Image.PreserveAspectCrop
+                                fillMode: Image.PreserveAspectFit
                                 visible: status === Image.Ready
                                 clip: true
-                            }
-                            Shared.AppButton {
-                                anchors.right: parent.right
-                                anchors.top: parent.top
-                                anchors.margins: 6
-                                text: "⋯"
-                                quiet: true
-                                Accessible.name: qsTr("Actions for %1")
-                                                    .arg(gameCard.game.name)
-                                onClicked: {
-                                    gameActionMenu.game = gameCard.game
-                                    gameActionMenu.popup()
-                                }
                             }
                         }
                         Label {
@@ -604,28 +591,66 @@ Item {
                             font.weight: Font.DemiBold
                             elide: Text.ElideRight
                         }
-                        Label {
+                        RowLayout {
                             width: parent.width
-                            visible: root.controller.selectedCollectionId > 0
-                            text: root.statusLabel(gameCard.game.status)
-                                  + (Number(gameCard.game.rating || 0) > 0
-                                     ? "  ·  " + root.ratingStars(gameCard.game.rating) : "")
-                            color: ThemeModule.Theme.accentCyan
-                            font.pixelSize: 12
-                            elide: Text.ElideRight
-                        }
-                        Label {
-                            width: parent.width
-                            visible: root.controller.selectedCollectionId === 0
-                            text: (gameCard.game.memberships || []).map(function(membership) {
-                                return String(membership.collectionName)
-                                    + (membership.status ? " · " + root.statusLabel(membership.status) : "")
-                            }).join("  /  ")
-                            color: ThemeModule.Theme.textSecondary
-                            font.pixelSize: 11
-                            wrapMode: Text.Wrap
-                            maximumLineCount: 2
-                            elide: Text.ElideRight
+                            spacing: 6
+                            Label {
+                                Layout.fillWidth: true
+                                Layout.minimumWidth: 0
+                                Layout.alignment: Qt.AlignVCenter
+                                visible: root.controller.selectedCollectionId > 0
+                                text: root.statusLabel(gameCard.game.status)
+                                color: ThemeModule.Theme.accentCyan
+                                font.pixelSize: 12
+                                elide: Text.ElideRight
+                            }
+                            Label {
+                                Layout.alignment: Qt.AlignVCenter
+                                visible: root.controller.selectedCollectionId > 0
+                                         && Number(gameCard.game.rating || 0) > 0
+                                text: root.ratingStars(gameCard.game.rating)
+                                color: ThemeModule.Theme.accentCyan
+                                font.pixelSize: 12
+                            }
+                            Label {
+                                Layout.fillWidth: true
+                                Layout.minimumWidth: 0
+                                Layout.alignment: Qt.AlignVCenter
+                                visible: root.controller.selectedCollectionId === 0
+                                text: (gameCard.game.memberships || []).map(function(membership) {
+                                    return String(membership.collectionName)
+                                        + (membership.status ? " · " + root.statusLabel(membership.status) : "")
+                                }).join("  /  ")
+                                color: ThemeModule.Theme.textSecondary
+                                font.pixelSize: 11
+                                wrapMode: Text.Wrap
+                                maximumLineCount: 2
+                                elide: Text.ElideRight
+                            }
+                            Shared.AppButton {
+                                Layout.preferredWidth: 34
+                                Layout.minimumWidth: 34
+                                Layout.maximumWidth: 34
+                                Layout.preferredHeight: 30
+                                Layout.minimumHeight: 30
+                                Layout.maximumHeight: 30
+                                Layout.alignment: Qt.AlignVCenter
+                                implicitWidth: 34
+                                implicitHeight: 30
+                                leftPadding: 0
+                                rightPadding: 0
+                                topPadding: 0
+                                bottomPadding: 0
+                                text: "⋯"
+                                quiet: true
+                                font.pixelSize: 16
+                                Accessible.name: qsTr("Actions for %1")
+                                                    .arg(String(gameCard.game.name || ""))
+                                onClicked: {
+                                    gameActionMenu.game = gameCard.game
+                                    gameActionMenu.popup()
+                                }
+                            }
                         }
                         Label {
                             width: parent.width
