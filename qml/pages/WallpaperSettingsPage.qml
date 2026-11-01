@@ -14,6 +14,8 @@ Item {
     required property var settingsController
     required property var backgroundController
     required property var usageController
+    required property var automationController
+    signal navigateRequested(string routeId)
     implicitHeight: 640
 
     property string pendingDeleteId: ""
@@ -133,6 +135,45 @@ Item {
             id: pageColumn
             width: pageScroll.width
             spacing: 16
+
+            Shared.AppCard {
+                Layout.fillWidth: true
+                RowLayout {
+                    width: parent.width
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        Label {
+                            text: qsTr("Automation Rules")
+                            color: ThemeModule.Theme.textPrimary
+                            font.family: ThemeModule.Theme.fontFamily
+                            font.pixelSize: 18
+                            font.weight: Font.DemiBold
+                        }
+                        Label {
+                            Layout.fillWidth: true
+                            text: root.automationController.paused
+                                  ? qsTr("Automations are paused.")
+                                  : qsTr("Manage background rules, actions, and execution history.")
+                            color: ThemeModule.Theme.textSecondary
+                            font.family: ThemeModule.Theme.fontFamily
+                            font.pixelSize: 13
+                            wrapMode: Text.Wrap
+                        }
+                    }
+                    Shared.AppButton {
+                        text: qsTr("Open rules")
+                        enabled: root.automationController.ready
+                        onClicked: root.navigateRequested("automationRules")
+                    }
+                    Shared.AppButton {
+                        text: root.automationController.paused ? qsTr("Resume") : qsTr("Pause")
+                        quiet: true
+                        enabled: root.automationController.ready
+                        onClicked: root.automationController.setPaused(!root.automationController.paused)
+                    }
+                }
+                Layout.preferredHeight: 116
+            }
 
             Shared.AppCard {
                 Layout.fillWidth: true

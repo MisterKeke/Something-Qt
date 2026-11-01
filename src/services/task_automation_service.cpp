@@ -75,7 +75,7 @@ TaskAutomationService::TaskAutomationService(
     ApplicationMutationWorkflow *mutations,
     platform::DesktopApplicationsPlatform *desktopPlatform,
     controllers::BackgroundController *background,
-    QObject *parent, TaskAutomationAdapters adapters)
+    QObject *parent, TaskAutomationAdapters adapters, bool completionEventsEnabled)
     : QObject(parent)
     , m_graph(graph)
     , m_mutations(mutations)
@@ -111,8 +111,10 @@ TaskAutomationService::TaskAutomationService(
             return m_background && m_background->showAutomationNotification(title, message);
         };
     }
-    connect(m_mutations, &ApplicationMutationWorkflow::taskCompletionCommitted,
-            this, &TaskAutomationService::onCompletionCommitted);
+    if (completionEventsEnabled) {
+        connect(m_mutations, &ApplicationMutationWorkflow::taskCompletionCommitted,
+                this, &TaskAutomationService::onCompletionCommitted);
+    }
     connect(m_graph, &application::ApplicationServiceGraph::storageOperationFinished,
             this, &TaskAutomationService::onStorageFinished);
     connect(m_graph, &application::ApplicationServiceGraph::expensiveValueJobFinished,

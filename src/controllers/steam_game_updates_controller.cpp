@@ -806,6 +806,7 @@ void SteamGameUpdatesController::onValueJobFinished(
         for (const QVariant &article : encoded)
             articles.push_back(articleFromMap(article.toMap()));
         Pending save = pending;
+        save.sourceArticles = encoded;
         if (!submitStorage(Kind::SaveNewsPage,
                 services::SteamGameUpdatesService::saveNewsPage(
                     pending.appId, std::move(articles), currentTimestamp()), save)) {
@@ -986,6 +987,21 @@ void SteamGameUpdatesController::onStorageFinished(
                                QStringLiteral("Steam news was received but could not be saved."),
                                pending.generation);
         } else {
+            QSet<QString> insertedIds;
+            for (const QString &newsId : values.value(QStringLiteral("insertedNewsIds")).toStringList())
+                insertedIds.insert(newsId);
+            QVariantList newlyDiscovered;
+            const int gameRow = gameIndex(pending.appId);
+            const QString gameName = gameRow >= 0
+                ? m_games.at(gameRow).toMap().value(QStringLiteral("name")).toString() : QString();
+            for (const QVariant &value : pending.sourceArticles) {
+                QVariantMap article = value.toMap();
+                if (!insertedIds.remove(article.value(QStringLiteral("newsId")).toString())) continue;
+                article.insert(QStringLiteral("gameName"), gameName);
+                newlyDiscovered.push_back(std::move(article));
+            }
+            if (!newlyDiscovered.isEmpty())
+                emit newNewsDiscovered(pending.appId, newlyDiscovered, pending.attemptedAtUtc);
             const QVariantMap counts = values.value(QStringLiteral("unreadNewsCounts")).toMap();
             for (QVariant &value : m_games) {
                 QVariantMap game = value.toMap();

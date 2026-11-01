@@ -23,6 +23,7 @@
 #include "application/route_catalog.h"
 #include "controllers/application_controller.h"
 #include "controllers/application_usage_controller.h"
+#include "controllers/automation_controller.h"
 #include "controllers/background_controller.h"
 #include "controllers/calendar_controller.h"
 #include "controllers/currency_controller.h"
@@ -61,7 +62,6 @@
 #include "services/file_explorer_service.h"
 #include "services/application_command_service.h"
 #include "services/application_usage_service.h"
-#include "services/task_automation_service.h"
 
 namespace {
 
@@ -182,14 +182,15 @@ int main(int argc, char *argv[])
     something::controllers::SettingsController settingsController(&services, &clock, &mutationWorkflow);
     something::controllers::SetupsController setupsController(
         &services, &desktopApplicationsPlatform, setupImages);
-    something::services::TaskAutomationService taskAutomationService(
-        &services, &mutationWorkflow, &desktopApplicationsPlatform, &backgroundController);
     something::controllers::FileExplorerController fileExplorerController(
         &services, &fileExplorerService, &fileExplorerShell);
     something::controllers::SteamGamesController steamGamesController(&services);
     something::controllers::SteamReleaseController steamReleaseController(&services);
     something::controllers::SteamCollectionsController steamCollectionsController(&services);
     something::controllers::SteamGameUpdatesController steamGameUpdatesController(&services);
+    something::controllers::AutomationController automationController(
+        &services, &mutationWorkflow, &applicationUsageService,
+        &desktopApplicationsPlatform, &backgroundController);
     commandService.setSnapshotProvider(QStringLiteral("settings"), [&settingsController, &wallpaperController,
                                                                      &steamGamesController] {
         QVariantMap fields;
@@ -264,10 +265,26 @@ int main(int argc, char *argv[])
     QObject::connect(&tasksController, &something::controllers::TasksController::taskMutationCommitted,
                      &schedulingController, &something::controllers::SchedulingController::onTaskMutationCommitted);
     QObject::connect(&tasksController, &something::controllers::TasksController::taskMutationCommitted,
-                     &taskAutomationService, &something::services::TaskAutomationService::observeTaskMutation);
-    QObject::connect(&taskAutomationService, &something::services::TaskAutomationService::executionChanged,
-                     &tasksController, [&tasksController](qint64, const QString &,
-                         const QString &, const QString &) { tasksController.refresh(); });
+                     &automationController, [&automationController](qint64, const QVariantMap &, bool) {
+        automationController.reload();
+    });
+    QObject::connect(&automationController, &something::controllers::AutomationController::executionChanged,
+                     &tasksController, [&tasksController](qint64 taskId, const QString &,
+                         const QString &, const QString &) {
+        if (taskId > 0) tasksController.refresh();
+    });
+    QObject::connect(&steamGamesController,
+                     &something::controllers::SteamGamesController::priceRefreshCommitted,
+                     &automationController,
+                     &something::controllers::AutomationController::onSteamPriceRefreshCommitted);
+    QObject::connect(&steamReleaseController,
+                     &something::controllers::SteamReleaseController::releaseRefreshCommitted,
+                     &automationController,
+                     &something::controllers::AutomationController::onSteamReleaseRefreshCommitted);
+    QObject::connect(&steamGameUpdatesController,
+                     &something::controllers::SteamGameUpdatesController::newNewsDiscovered,
+                     &automationController,
+                     &something::controllers::AutomationController::onSteamNewsRefreshCommitted);
     QObject::connect(&tasksController, &something::controllers::TasksController::taskMutationMayHaveCommitted,
                      &calendarController, &something::controllers::CalendarController::refreshSelectedDate);
     QObject::connect(&tasksController, &something::controllers::TasksController::taskMutationMayHaveCommitted,
@@ -306,8 +323,8 @@ int main(int argc, char *argv[])
                                              &legacyDataImportController);
     engine.rootContext()->setContextProperty(QStringLiteral("taskController"),
                                              &tasksController);
-    engine.rootContext()->setContextProperty(QStringLiteral("taskAutomationService"),
-                                             &taskAutomationService);
+    engine.rootContext()->setContextProperty(QStringLiteral("automationRulesController"),
+                                             &automationController);
     engine.rootContext()->setContextProperty(QStringLiteral("schedulingController"),
                                              &schedulingController);
     engine.rootContext()->setContextProperty(QStringLiteral("taskHistoryController"),
@@ -399,11 +416,9 @@ int main(int argc, char *argv[])
                      &something::controllers::ApplicationController::requestShutdown);
     QObject::connect(&controller,
                      &something::controllers::ApplicationController::shutdownRequestedChanged,
-                     &backgroundController, [&backgroundController, &applicationUsageService,
-                         &taskAutomationService](bool requested) {
+                     &backgroundController, [&backgroundController, &applicationUsageService](bool requested) {
         if (requested) {
             applicationUsageService.prepareShutdown();
-            taskAutomationService.prepareShutdown();
         }
         backgroundController.setShutdownRequested(requested);
     });

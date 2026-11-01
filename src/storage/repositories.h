@@ -66,6 +66,30 @@ private:
     QSqlDatabase &m_database;
 };
 
+class AutomationRepository final {
+public:
+    explicit AutomationRepository(QSqlDatabase &database);
+    RepositoryResult<QVector<AutomationRule>> rules() const;
+    RepositoryResult<AutomationRule> saveRule(AutomationRule rule, qint64 expectedRevision);
+    RepositoryResult<void> removeRule(const QString &ruleId);
+    RepositoryResult<bool> insertExecution(const QString &executionId,
+        const QString &ruleId, const QString &ruleName, const AutomationEvent &event,
+        const QString &requestedAtUtc);
+    RepositoryResult<void> updateExecution(const QString &executionId, QString status,
+        QString startedAtUtc, QString finishedAtUtc, QString errorMessage);
+    RepositoryResult<void> recordActionResult(const QString &executionId,
+        const AutomationAction &action, QString startedAtUtc, QString finishedAtUtc,
+        QString status, QString errorMessage);
+    RepositoryResult<QVariantList> history(const QString &ruleId, const QString &status,
+        const QString &triggerType, const QString &startUtc, const QString &endExclusiveUtc,
+        int limit, int offset) const;
+    RepositoryResult<int> cancelUnfinished(QString finishedAtUtc);
+
+private:
+    RepositoryResult<AutomationRule> loadRule(const QString &ruleId) const;
+    QSqlDatabase &m_database;
+};
+
 class SchedulingRepository final {
 public:
     explicit SchedulingRepository(QSqlDatabase &database);
@@ -411,6 +435,7 @@ public:
     TaskRepository tasks;
     TaskHistoryRepository taskHistory;
     TaskAutomationRepository taskAutomations;
+    AutomationRepository automations;
     SchedulingRepository scheduling;
     CurrencyFavoritesRepository currencies;
     FavoritesRepository favorites;

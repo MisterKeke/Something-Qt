@@ -90,6 +90,7 @@ signals:
     void stateChanged();
     void settingsChanged();
     void artworkInvalidated(const QString &filename);
+    void priceRefreshCommitted(const QVariantMap &previous, const QVariantMap &current);
 
 private:
     enum class Kind { Snapshot, CountrySave, AddNetwork, AddParse, AddInsert,

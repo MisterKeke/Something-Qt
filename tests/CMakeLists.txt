@@ -4,7 +4,9 @@
 set(CMAKE_AUTORCC ON)
 add_library(SomethingQtTestRepositories STATIC
     ../src/storage/repositories.cpp
+    ../src/storage/automation_repository.cpp
     ../src/storage/application_usage_repository.cpp
+    ../src/domain/automation_rules.cpp
     ../src/domain/steam_game.cpp
     ../src/domain/steam_game_catalog.cpp
     ../src/domain/steam_release.cpp
@@ -14,6 +16,15 @@ add_library(SomethingQtTestRepositories STATIC
     ../src/domain/universal_search.cpp
 )
 target_link_libraries(SomethingQtTestRepositories PUBLIC Qt6::Core Qt6::Sql)
+
+add_executable(SomethingQtAutomationRulesTests
+    automation_rules_test.cpp
+    ../src/domain/automation_rules.cpp
+)
+target_include_directories(SomethingQtAutomationRulesTests PRIVATE ../src)
+target_link_libraries(SomethingQtAutomationRulesTests PRIVATE Qt6::Core Qt6::Test)
+add_test(NAME SomethingQtAutomationRulesTests COMMAND SomethingQtAutomationRulesTests
+    -o "${CMAKE_CURRENT_BINARY_DIR}/automation-rules-results.txt,txt")
 
 add_executable(SomethingQtApplicationCommandTests
     application_command_test.cpp

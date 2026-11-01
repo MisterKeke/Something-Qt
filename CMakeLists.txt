@@ -70,6 +70,7 @@ qt_add_executable(SomethingQt WIN32
     src/application/operation_coordinator.cpp
     src/controllers/application_controller.cpp
     src/controllers/application_usage_controller.cpp
+    src/controllers/automation_controller.cpp
     src/controllers/background_controller.cpp
     src/controllers/calendar_controller.cpp
     src/controllers/currency_controller.cpp
@@ -94,6 +95,7 @@ qt_add_executable(SomethingQt WIN32
     src/controllers/wallpaper_controller.cpp
     src/controllers/weather_controller.cpp
     src/domain/app_error.cpp
+    src/domain/automation_rules.cpp
     src/domain/desktop_application_rules.cpp
     src/domain/favorite_rules.cpp
     src/domain/task_date_rules.cpp
@@ -147,7 +149,6 @@ qt_add_executable(SomethingQt WIN32
     src/services/currency_service.cpp
     src/services/favorites_service.cpp
     src/services/task_service.cpp
-    src/services/task_automation_service.cpp
     src/services/universal_search_service.cpp
     src/services/task_history_service.cpp
     src/services/application_command_service.cpp
@@ -158,6 +159,7 @@ qt_add_executable(SomethingQt WIN32
     src/services/wallpaper_asset_store.cpp
     src/services/wallpaper_service.cpp
     src/storage/repositories.cpp
+    src/storage/automation_repository.cpp
     src/storage/application_usage_repository.cpp
     src/storage/data_import_repository.cpp
     src/storage/schema_migrator.cpp
@@ -224,6 +226,7 @@ qt_add_qml_module(SomethingQt
         qml/pages/FileExplorerPage.qml
         qml/pages/RunningApplicationsPage.qml
         qml/pages/ApplicationUsageStatisticsPage.qml
+        qml/pages/AutomationRulesPage.qml
         qml/pages/SetupsPage.qml
         qml/pages/SteamPriceTrackingPanel.qml
         qml/pages/SteamReleaseRadarPage.qml

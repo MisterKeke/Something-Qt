@@ -53,6 +53,8 @@ const QVariantList &routeTable()
                   nullptr, {QStringLiteral("console"), QStringLiteral("command line")}),
         makeRoute(QStringLiteral("settings"), "Settings", QStringLiteral("⚙"), QStringLiteral("qrc:/something/assets/navigation/settings-sandrone.png"), true,
                   nullptr, {QStringLiteral("preferences"), QStringLiteral("configuration")}),
+        makeRoute(QStringLiteral("automationRules"), "Automation Rules", QStringLiteral("↻"), {}, false,
+                  nullptr, {QStringLiteral("automations"), QStringLiteral("rules"), QStringLiteral("automation history")}),
     };
     return value;
 }

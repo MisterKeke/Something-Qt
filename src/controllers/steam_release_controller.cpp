@@ -775,6 +775,11 @@ void SteamReleaseController::onStorageFinished(quint64 id, const QVariantMap &va
                 const QString newFilename = artworkFilename(nextByAppId.value(appId));
                 if (oldFilename != newFilename) emit artworkInvalidated(oldFilename);
             }
+            for (const QVariantMap &oldRelease : previous) {
+                const quint32 appId = oldRelease.value(QStringLiteral("appId")).toUInt();
+                const auto next = nextByAppId.constFind(appId);
+                if (next != nextByAppId.cend()) emit releaseRefreshCommitted(oldRelease, next.value());
+            }
             m_releases.replace(fresh);
             emit releaseCalendarDataChanged();
         }

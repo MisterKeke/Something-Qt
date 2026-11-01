@@ -792,6 +792,107 @@ constexpr const char *taskAutomation[] = {
     "CREATE INDEX idx_task_automation_execution_automation_requested ON task_automation_executions(automation_id, requested_at_utc DESC)",
 };
 
+constexpr const char *globalAutomation[] = {
+    R"SQL(CREATE TABLE automation_rules (
+        id TEXT PRIMARY KEY CHECK(length(id) BETWEEN 1 AND 64),
+        source_task_id INTEGER UNIQUE REFERENCES tasks(id) ON DELETE CASCADE,
+        name TEXT NOT NULL CHECK(length(name) BETWEEN 1 AND 100),
+        description TEXT NOT NULL DEFAULT '' CHECK(length(description) <= 500),
+        trigger_type TEXT NOT NULL CHECK(trigger_type IN
+            ('task.completed','task.overdue','application.session_started',
+             'application.foreground_entered','steam.price_target_reached',
+             'steam.release_date_changed','steam.game_news_available','schedule.time_reached')),
+        trigger_config_json TEXT NOT NULL,
+        enabled INTEGER NOT NULL CHECK(enabled IN (0,1)),
+        cooldown_seconds INTEGER NOT NULL CHECK(cooldown_seconds BETWEEN 0 AND 86400),
+        revision INTEGER NOT NULL CHECK(revision > 0),
+        created_at_utc TEXT NOT NULL,
+        updated_at_utc TEXT NOT NULL
+    ))SQL",
+    R"SQL(CREATE TABLE automation_conditions (
+        rule_id TEXT NOT NULL REFERENCES automation_rules(id) ON DELETE CASCADE,
+        position INTEGER NOT NULL CHECK(position >= 0),
+        condition_type TEXT NOT NULL,
+        operator TEXT NOT NULL CHECK(operator IN ('equals','less_equal','contains','between')),
+        operand TEXT NOT NULL,
+        PRIMARY KEY(rule_id, position)
+    ))SQL",
+    R"SQL(CREATE TABLE automation_actions (
+        action_id TEXT PRIMARY KEY,
+        rule_id TEXT NOT NULL REFERENCES automation_rules(id) ON DELETE CASCADE,
+        execution_order INTEGER NOT NULL CHECK(execution_order BETWEEN 0 AND 11),
+        action_type TEXT NOT NULL CHECK(action_type IN
+            ('launch_application','launch_setup','open_url','show_notification')),
+        target_id INTEGER,
+        url TEXT,
+        message TEXT NOT NULL DEFAULT '',
+        delay_ms INTEGER NOT NULL CHECK(delay_ms BETWEEN 0 AND 3600000),
+        enabled INTEGER NOT NULL CHECK(enabled IN (0,1)),
+        UNIQUE(rule_id, execution_order),
+        CHECK ((action_type IN ('launch_application','launch_setup') AND target_id > 0
+                AND url IS NULL)
+            OR (action_type='open_url' AND target_id IS NULL AND url IS NOT NULL)
+            OR (action_type='show_notification' AND target_id IS NULL AND url IS NULL))
+    ))SQL",
+    R"SQL(CREATE TABLE automation_executions (
+        execution_id TEXT PRIMARY KEY,
+        rule_id TEXT REFERENCES automation_rules(id) ON DELETE SET NULL,
+        rule_name_snapshot TEXT NOT NULL,
+        event_id TEXT NOT NULL,
+        trigger_type TEXT NOT NULL,
+        source_module TEXT NOT NULL,
+        requested_at_utc TEXT NOT NULL,
+        event_occurred_at_utc TEXT NOT NULL,
+        started_at_utc TEXT,
+        finished_at_utc TEXT,
+        status TEXT NOT NULL CHECK(status IN
+            ('pending','running','succeeded','failed','canceled','skipped')),
+        error_message TEXT NOT NULL DEFAULT '',
+        UNIQUE(rule_id, event_id)
+    ))SQL",
+    R"SQL(CREATE TABLE automation_action_results (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        execution_id TEXT NOT NULL REFERENCES automation_executions(execution_id) ON DELETE CASCADE,
+        action_id TEXT NOT NULL,
+        action_type TEXT NOT NULL,
+        execution_order INTEGER NOT NULL,
+        started_at_utc TEXT NOT NULL,
+        finished_at_utc TEXT NOT NULL,
+        status TEXT NOT NULL CHECK(status IN ('succeeded','failed','canceled','skipped')),
+        error_message TEXT NOT NULL DEFAULT ''
+    ))SQL",
+    "CREATE INDEX idx_automation_rules_trigger_enabled ON automation_rules(trigger_type, enabled)",
+    "CREATE INDEX idx_automation_executions_requested ON automation_executions(requested_at_utc DESC, execution_id DESC)",
+    "CREATE INDEX idx_automation_executions_rule_requested ON automation_executions(rule_id, requested_at_utc DESC)",
+    "CREATE INDEX idx_automation_actions_rule_order ON automation_actions(rule_id, execution_order)"
+    , R"SQL(INSERT INTO automation_rules(id,source_task_id,name,description,trigger_type,
+        trigger_config_json,enabled,cooldown_seconds,revision,created_at_utc,updated_at_utc)
+        SELECT 'task-'||a.task_id,a.task_id,substr(t.title,1,88)||' automation',
+            'Managed from the Task Editor.','task.completed',
+            '{"taskId":'||a.task_id||'}',a.enabled,0,a.revision,
+            strftime('%Y-%m-%dT%H:%M:%fZ',a.created_at),
+            strftime('%Y-%m-%dT%H:%M:%fZ',a.updated_at)
+        FROM task_automations a JOIN tasks t ON t.id=a.task_id)SQL",
+    R"SQL(INSERT INTO automation_actions(action_id,rule_id,execution_order,action_type,target_id,
+        url,message,delay_ms,enabled)
+        SELECT 'task-action-'||a.task_id,'task-'||a.task_id,0,a.action_type,a.target_id,a.url,
+            a.notification_message,a.delay_ms,1 FROM task_automations a)SQL",
+    R"SQL(INSERT INTO automation_executions(execution_id,rule_id,rule_name_snapshot,event_id,
+        trigger_type,source_module,requested_at_utc,event_occurred_at_utc,started_at_utc,finished_at_utc,status,error_message)
+        SELECT e.execution_id,CASE WHEN a.task_id IS NULL THEN NULL ELSE 'task-'||e.task_id END,
+            substr(t.title,1,88)||' automation',
+            'task:completed:'||e.completion_event_id,'task.completed','tasks',e.requested_at_utc,
+            e.requested_at_utc,e.requested_at_utc,e.executed_at_utc,e.status,e.error_message
+        FROM task_automation_executions e JOIN tasks t ON t.id=e.task_id
+        LEFT JOIN task_automations a ON a.task_id=e.task_id)SQL",
+    R"SQL(INSERT INTO automation_action_results(execution_id,action_id,action_type,execution_order,
+        started_at_utc,finished_at_utc,status,error_message)
+        SELECT e.execution_id,'task-action-'||e.task_id,e.action_type,0,e.requested_at_utc,
+            COALESCE(e.executed_at_utc,e.requested_at_utc),e.status,e.error_message
+        FROM task_automation_executions e WHERE e.status IN
+            ('succeeded','failed','canceled','skipped'))SQL"
+};
+
 constexpr std::array migrations{
     Migration{1, "core tasks currencies preferences", core, qsizetype(std::size(core))},
     Migration{2, "favorites and retained update news", favorites, qsizetype(std::size(favorites))},
@@ -829,6 +930,8 @@ constexpr std::array migrations{
               qsizetype(std::size(applicationUsage))},
     Migration{21, "task automations and execution history", taskAutomation,
               qsizetype(std::size(taskAutomation))},
+    Migration{22, "global automation rules and execution history", globalAutomation,
+              qsizetype(std::size(globalAutomation))},
 };
 
 bool fail(QString *diagnostic, const QString &message)
@@ -899,6 +1002,9 @@ bool hasUnexpectedTables(const QSqlDatabase &database, QString *diagnostic, bool
         QStringLiteral("usage_excluded_applications"),
         QStringLiteral("task_automations"),
         QStringLiteral("task_automation_executions"),
+        QStringLiteral("automation_rules"), QStringLiteral("automation_conditions"),
+        QStringLiteral("automation_actions"), QStringLiteral("automation_executions"),
+        QStringLiteral("automation_action_results"),
         QStringLiteral("task_history"), QStringLiteral("task_schedules"),
         QStringLiteral("scheduling_preferences"),
         QStringLiteral("weather_comparison_cities")

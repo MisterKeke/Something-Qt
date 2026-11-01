@@ -95,6 +95,38 @@ void ApplicationUsageController::refresh()
     emit stateChanged();
 }
 
+void ApplicationUsageController::loadApplicationChoices()
+{
+    if (!ready() || !m_graph) return;
+    const quint64 generation = ++m_generation;
+    const QDate last = QDate::currentDate();
+    const QDate first = last.addDays(-qMax(1, retentionDays()) + 1);
+    const QString firstDay = first.toString(Qt::ISODate);
+    const QString lastDay = last.toString(Qt::ISODate);
+    const QString startUtc = QDateTime(first, QTime(0, 0), Qt::LocalTime)
+        .toUTC().toString(Qt::ISODateWithMs);
+    const QString endUtc = QDateTime(last.addDays(1), QTime(0, 0), Qt::LocalTime)
+        .toUTC().toString(Qt::ISODateWithMs);
+    const auto operation = m_graph->beginOperation(QStringLiteral("usage-automation-choices"));
+    if (!operation.isValid()) return;
+    m_requests.insert(operation.id.value, {Request::Kind::ApplicationChoices, generation});
+    if (!m_graph->submitStorage(operation,
+        [firstDay, lastDay, startUtc, endUtc](storage::StorageRepositories &repositories,
+                                               const std::function<bool()> &cancelled) {
+            storage::StorageReply reply;
+            if (cancelled()) { reply.error = domain::AppError::cancelled(); return reply; }
+            QString diagnostic;
+            reply.values = repositories.applicationUsage.queryOverview(
+                firstDay, lastDay, startUtc, endUtc, {}, QStringLiteral("name"), &diagnostic);
+            if (!diagnostic.isEmpty()) reply.error = domain::AppError(domain::ErrorCategory::Storage);
+            return reply;
+        })) {
+        if (m_graph->operations().acceptsResult(operation.id)) m_requests.remove(operation.id.value);
+    }
+    updateLoading();
+    emit stateChanged();
+}
+
 void ApplicationUsageController::setRangePreset(const QString &preset)
 {
     static const QStringList valid{QStringLiteral("today"), QStringLiteral("yesterday"),
@@ -276,7 +308,12 @@ void ApplicationUsageController::onStorageFinished(quint64 operationId,
         } else if (!error.isCancelled()) {
             m_errorMessage.clear();
             if (request.kind == Request::Kind::Overview) m_overview = std::move(values);
-            else m_detail = std::move(values);
+            else if (request.kind == Request::Kind::ApplicationChoices) {
+                m_overview.insert(QStringLiteral("applications"),
+                    values.value(QStringLiteral("applications")));
+                m_overview.insert(QStringLiteral("applicationCount"),
+                    values.value(QStringLiteral("applicationCount")));
+            } else m_detail = std::move(values);
             applyLiveStates();
         }
         updateLoading();

@@ -67,6 +67,7 @@ signals:
     void stateChanged();
     void artworkInvalidated(const QString &filename);
     void releaseCalendarDataChanged();
+    void releaseRefreshCommitted(const QVariantMap &previous, const QVariantMap &current);
 
 private:
     enum class Kind { Snapshot, AddNetwork, AddParse, AddInsert, Delete,

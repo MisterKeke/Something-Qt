@@ -57,6 +57,7 @@ public:
 
     Q_INVOKABLE void setPageVisible(bool visible);
     Q_INVOKABLE void refresh();
+    Q_INVOKABLE void loadApplicationChoices();
     Q_INVOKABLE void setRangePreset(const QString &preset);
     Q_INVOKABLE void setCustomRange(const QString &firstDay, const QString &lastDay);
     Q_INVOKABLE void setSearchText(const QString &text);
@@ -79,7 +80,7 @@ signals:
 
 private:
     struct Request final {
-        enum class Kind { Overview, Detail } kind;
+        enum class Kind { Overview, Detail, ApplicationChoices } kind;
         quint64 generation{0};
     };
 
