@@ -15,16 +15,23 @@ Item {
     property var schedulingSettingsDraft: ({})
     property bool schedulingSettingsDirty: false
     property string schedulingSettingsStatus: ""
+    property double pendingSearchTaskId: 0
+    property string searchTargetMessage: ""
     function openSearchResult(result, action) {
-        const task = result && result.payload ? result.payload : ({})
+        if (!result) return
         activeView = "tasks"
         if (action === "markComplete" || action === "markIncomplete") {
+            const task = result.payload || ({})
             controller.toggleTaskFromView(Number(task.taskId || result.targetId),
                 Number(task.revision), action === "markComplete")
             return
         }
-        if (task.id || task.taskId)
-            editor.openForTask(task)
+        if (action !== "open") return
+        const taskId = Number(result.targetId || (result.payload || ({})).taskId)
+        if (!Number.isFinite(taskId) || taskId <= 0) return
+        pendingSearchTaskId = taskId
+        searchTargetMessage = ""
+        controller.loadTaskForEditor(taskId)
     }
     readonly property var schedulingWeekdays: [
         { label: qsTr("Mon"), accessibleLabel: qsTr("Monday"), value: 1 },
@@ -265,6 +272,18 @@ Item {
     Connections {
         target: taskController
         function onFiltersChanged() { root.refreshControls() }
+        function onEditorTaskLoaded(task) {
+            if (Number(task.id) !== root.pendingSearchTaskId) return
+            root.pendingSearchTaskId = 0
+            if (!root.visible) return
+            root.searchTargetMessage = ""
+            editor.openForTask(task)
+        }
+        function onEditorTaskLoadFailed(taskId, message) {
+            if (Number(taskId) !== root.pendingSearchTaskId) return
+            root.pendingSearchTaskId = 0
+            root.searchTargetMessage = String(message || qsTr("This task is no longer available."))
+        }
     }
 
     Connections {
@@ -1078,11 +1097,13 @@ Item {
 
         Shared.AppCard {
             Layout.fillWidth: true
-            visible: root.activeView === "tasks" && taskController.errorMessage.length > 0
+            visible: root.activeView === "tasks"
+                     && (taskController.errorMessage.length > 0 || root.searchTargetMessage.length > 0)
             padding: 13
             Label {
                 width: parent.width
-                text: taskController.errorMessage
+                text: root.searchTargetMessage.length > 0
+                      ? root.searchTargetMessage : taskController.errorMessage
                 color: ThemeModule.Theme.error
                 wrapMode: Text.Wrap
                 font.family: ThemeModule.Theme.fontFamily

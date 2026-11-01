@@ -69,15 +69,22 @@ void OperationCoordinator::cancelOnOwnerThread(OperationId id)
     emit cancellationRequested(id.value);
 }
 
-void OperationCoordinator::beginShutdown()
+void OperationCoordinator::stopAccepting()
 {
     Q_ASSERT(QThread::currentThread() == thread());
     if (!m_accepting) {
         return;
     }
-
     m_accepting = false;
     emit acceptingOperationsChanged();
+}
+
+void OperationCoordinator::beginShutdown()
+{
+    Q_ASSERT(QThread::currentThread() == thread());
+    if (m_shutdownStarted) return;
+    m_shutdownStarted = true;
+    stopAccepting();
     const auto ids = m_operations.keys();
     for (quint64 value : ids) {
         cancelOnOwnerThread(OperationId{value});

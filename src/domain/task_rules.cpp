@@ -1,4 +1,5 @@
 #include "task_rules.h"
+#include "notification_placeholders.h"
 
 #include <QDate>
 #include <QSet>
@@ -35,6 +36,11 @@ AppError normalizeTaskAutomation(TaskAutomationInput &automation)
         || automation.notificationMessage.toUcs4().size() > 1000) {
         return AppError(ErrorCategory::Validation);
     }
+
+    if (automation.actionType == QStringLiteral("show_notification")
+        && !NotificationPlaceholders::templateSupported(
+            automation.notificationMessage, QStringLiteral("task.completed")))
+        return AppError(ErrorCategory::Validation);
 
     if (automation.actionType == QStringLiteral("launch_application")
         || automation.actionType == QStringLiteral("launch_setup")) {

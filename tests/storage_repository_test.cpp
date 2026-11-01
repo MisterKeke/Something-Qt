@@ -59,7 +59,7 @@ void StorageRepositoryTest::migrationsAreTransactionalIndependentAndRepeatable()
     QString connectionName;
     QSqlDatabase database;
     QVERIFY(openTestDatabase(&database, &connectionName));
-    QCOMPARE(storage::SchemaMigrator::latestVersion(), 22);
+    QCOMPARE(storage::SchemaMigrator::latestVersion(), 23);
     QVERIFY(storage::SchemaMigrator::apply(database));
 
     QSqlQuery history(database);
@@ -87,6 +87,7 @@ void StorageRepositoryTest::migrationsAreTransactionalIndependentAndRepeatable()
                                     QStringLiteral("automation_actions"),
                                     QStringLiteral("automation_executions"),
                                     QStringLiteral("automation_action_results"),
+                                    QStringLiteral("automation_execution_claims"),
                                     QStringLiteral("task_schedules"),
                                     QStringLiteral("scheduling_preferences"),
                                     QStringLiteral("preferences")}) {
@@ -292,7 +293,8 @@ void StorageRepositoryTest::automationRulesPersistRevisionsExecutionAndRetainedH
         QStringLiteral("running"), startedAt, {}, {}).succeeded());
     domain::AutomationAction persistedAction = updated.value.actions.front();
     QVERIFY(repositories.automations.recordActionResult(QStringLiteral("global-execution-1"),
-        persistedAction, startedAt, finishedAt, QStringLiteral("succeeded"), {}).succeeded());
+        persistedAction, startedAt, finishedAt, QStringLiteral("succeeded"),
+        QStringLiteral("Queued for in-app delivery. Message: Write notes complete.")).succeeded());
     QVERIFY(repositories.automations.updateExecution(QStringLiteral("global-execution-1"),
         QStringLiteral("succeeded"), {}, finishedAt, {}).succeeded());
 
@@ -307,6 +309,8 @@ void StorageRepositoryTest::automationRulesPersistRevisionsExecutionAndRetainedH
              QStringLiteral("2026-11-01T12:00:00.000Z"));
     QCOMPARE(row.value(QStringLiteral("actionsCompleted")).toInt(), 1);
     QCOMPARE(row.value(QStringLiteral("actionsAttempted")).toInt(), 1);
+    QVERIFY(row.value(QStringLiteral("actionDetails")).toString().contains(
+        QStringLiteral("Queued for in-app delivery")));
 
     QVERIFY(repositories.automations.removeRule(updated.value.id).succeeded());
     const auto retainedHistory = repositories.automations.history({}, {}, {}, {}, {}, 50, 0);
@@ -315,6 +319,25 @@ void StorageRepositoryTest::automationRulesPersistRevisionsExecutionAndRetainedH
     const QVariantMap retainedRow = retainedHistory.value.front().toMap();
     QVERIFY(retainedRow.value(QStringLiteral("ruleId")).toString().isEmpty());
     QCOMPARE(retainedRow.value(QStringLiteral("ruleName")).toString(), updated.value.name);
+
+    domain::AutomationEvent oldEvent = event;
+    oldEvent.id = QStringLiteral("old-event-that-is-pruned");
+    const auto oldClaim = repositories.automations.insertExecution(
+        QStringLiteral("global-execution-old"), updated.value.id, updated.value.name,
+        oldEvent, QStringLiteral("2020-01-01T00:00:00.000Z"));
+    QVERIFY(oldClaim.succeeded());
+    QVERIFY(oldClaim.value);
+    QVERIFY(repositories.automations.updateExecution(QStringLiteral("global-execution-old"),
+        QStringLiteral("succeeded"), {}, QStringLiteral("2020-01-01T00:00:01.000Z"), {}).succeeded());
+    const auto pruned = repositories.automations.pruneHistory(
+        QStringLiteral("2021-01-01T00:00:00.000Z"));
+    QVERIFY(pruned.succeeded());
+    QCOMPARE(pruned.value, 1);
+    const auto replay = repositories.automations.insertExecution(
+        QStringLiteral("global-execution-old-replay"), updated.value.id, updated.value.name,
+        oldEvent, QStringLiteral("2026-11-02T00:00:00.000Z"));
+    QVERIFY(replay.succeeded());
+    QVERIFY(!replay.value);
 
     database.close();
     database = QSqlDatabase();
@@ -363,6 +386,8 @@ void StorageRepositoryTest::phaseFiveAutomationAndHistorySurviveGlobalEngineMigr
                                  QStringLiteral("automation_rules")})
         QVERIFY2(downgrade.exec(QStringLiteral("DROP TABLE ") + table),
                  qPrintable(downgrade.lastError().text()));
+    QVERIFY(downgrade.exec(QStringLiteral("DROP TABLE automation_execution_claims")));
+    QVERIFY(downgrade.exec(QStringLiteral("DELETE FROM schema_migrations WHERE version=23")));
     QVERIFY(downgrade.exec(QStringLiteral("DELETE FROM schema_migrations WHERE version=22")));
     downgrade.finish();
 

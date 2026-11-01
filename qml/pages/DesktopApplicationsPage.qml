@@ -23,6 +23,8 @@ Item {
     property string categoryToDeleteName: ""
     property bool categoryDeletePending: false
     property bool deleteWasSelected: false
+    property double pendingSearchApplicationId: 0
+    property string searchTargetMessage: ""
 
     function openSearchResult(result, action) {
         const app = result && result.payload ? result.payload : ({})
@@ -30,9 +32,34 @@ Item {
             selectCategory(Number(app.categoryId))
             return
         }
-        if (!app.id || action !== "open") return
+        if (action !== "open") return
+        const applicationId = Number(result.targetId || app.id)
+        if (!Number.isFinite(applicationId) || applicationId <= 0) return
+        pendingSearchApplicationId = applicationId
+        searchTargetMessage = ""
+        loadAllForSearchResult()
+    }
+
+    function loadAllForSearchResult() {
+        selectedFilter = "all"
+        controller.loadAllApplications()
+    }
+
+    function resolvePendingSearchApplication() {
+        if (pendingSearchApplicationId <= 0 || controller.loading) return
+        const applicationId = pendingSearchApplicationId
+        pendingSearchApplicationId = 0
+        if (controller.errorMessage.length > 0) {
+            searchTargetMessage = controller.errorMessage
+            return
+        }
+        const app = controller.applications.rowForId(applicationId)
+        if (!app || !app.id) {
+            searchTargetMessage = qsTr("This saved application is no longer available.")
+            return
+        }
         selectedId = Number(app.id)
-        selectedName = String(app.displayName || result.title || "")
+        selectedName = String(app.displayName || "")
         selectedHasCustomIcon = String(app.iconFilename || "").length > 0
         editDialog.open()
     }
@@ -45,6 +72,11 @@ Item {
                            applicationCount: category.applicationCount })
         }
         categoryOptions = options
+    }
+
+    Connections {
+        target: root.controller
+        function onStateChanged() { root.resolvePendingSearchApplication() }
     }
 
     function categoryIndexFor(id) {
@@ -220,6 +252,15 @@ Item {
             message: !root.controller.supported
                      ? qsTr("Saved application launching is supported on Windows.")
                      : root.controller.errorMessage
+        }
+
+        Label {
+            Layout.fillWidth: true
+            visible: root.searchTargetMessage.length > 0
+            text: root.searchTargetMessage
+            color: ThemeModule.Theme.error
+            wrapMode: Text.Wrap
+            Accessible.role: Accessible.AlertMessage
         }
 
         Shared.AppTextField {

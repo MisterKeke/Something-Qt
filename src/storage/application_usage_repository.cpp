@@ -276,17 +276,17 @@ QVariantMap ApplicationUsageRepository::queryOverview(
         "AND s.local_day BETWEEN ? AND ? WHERE (?='' OR instr(lower(a.display_name), lower(?))>0 "
         "OR instr(lower(a.executable_name), lower(?))>0) GROUP BY a.application_id "
         "HAVING total_ms>0 OR is_running");
-    const auto bindOverviewFilters = [&](QSqlQuery &query) {
+    const auto bindOverviewFilters = [&](QSqlQuery &query, const QString &nameFilter) {
         bindDayRange(query, firstLocalDay, lastLocalDay);
-        query.addBindValue(search.trimmed());
-        query.addBindValue(search.trimmed());
-        query.addBindValue(search.trimmed());
+        query.addBindValue(nameFilter.trimmed());
+        query.addBindValue(nameFilter.trimmed());
+        query.addBindValue(nameFilter.trimmed());
     };
     QSqlQuery totalsQuery(m_database);
     totalsQuery.prepare(QStringLiteral(
         "SELECT COUNT(*), COALESCE(SUM(total_ms),0), COALESCE(SUM(foreground_ms),0), "
         "COALESCE(SUM(fullscreen_ms),0) FROM (%1) usage_rows").arg(aggregateRows));
-    bindOverviewFilters(totalsQuery);
+    bindOverviewFilters(totalsQuery, {});
     if (!totalsQuery.exec() || !totalsQuery.next()) {
         fail(diagnostic, totalsQuery);
         return {};
@@ -296,11 +296,21 @@ QVariantMap ApplicationUsageRepository::queryOverview(
     const qint64 foreground = totalsQuery.value(2).toLongLong();
     const qint64 fullscreen = totalsQuery.value(3).toLongLong();
 
+    QSqlQuery matchingTotalsQuery(m_database);
+    matchingTotalsQuery.prepare(QStringLiteral(
+        "SELECT COUNT(*) FROM (%1) usage_rows").arg(aggregateRows));
+    bindOverviewFilters(matchingTotalsQuery, search);
+    if (!matchingTotalsQuery.exec() || !matchingTotalsQuery.next()) {
+        fail(diagnostic, matchingTotalsQuery);
+        return {};
+    }
+    const qint64 matchingApplicationCount = matchingTotalsQuery.value(0).toLongLong();
+
     QSqlQuery mostUsedQuery(m_database);
     mostUsedQuery.prepare(QStringLiteral(
         "SELECT display_name,total_ms FROM (%1) usage_rows WHERE total_ms>0 "
         "ORDER BY total_ms DESC,display_name COLLATE NOCASE ASC LIMIT 1").arg(aggregateRows));
-    bindOverviewFilters(mostUsedQuery);
+    bindOverviewFilters(mostUsedQuery, {});
     if (!mostUsedQuery.exec()) { fail(diagnostic, mostUsedQuery); return {}; }
     QVariantMap mostUsed;
     if (mostUsedQuery.next()) {
@@ -326,7 +336,7 @@ QVariantMap ApplicationUsageRepository::queryOverview(
         "HAVING total_ms>0 OR is_running ORDER BY %1 LIMIT 500").arg(order);
     QSqlQuery query(m_database);
     query.prepare(sql);
-    bindOverviewFilters(query);
+    bindOverviewFilters(query, search);
     if (!query.exec()) { fail(diagnostic, query); return {}; }
 
     QVariantList applications;
@@ -356,9 +366,31 @@ QVariantMap ApplicationUsageRepository::queryOverview(
     result.insert(QStringLiteral("foregroundMs"), foreground);
     result.insert(QStringLiteral("fullscreenMs"), fullscreen);
     result.insert(QStringLiteral("applicationCount"), applicationCount);
+    result.insert(QStringLiteral("matchingApplicationCount"), matchingApplicationCount);
     result.insert(QStringLiteral("mostUsed"), mostUsed);
     if (diagnostic) diagnostic->clear();
     return result;
+}
+
+QVariantList ApplicationUsageRepository::applicationChoices(QString *diagnostic) const
+{
+    QSqlQuery query(m_database);
+    if (!query.exec(QStringLiteral(
+            "SELECT application_id,display_name,canonical_path,executable_name "
+            "FROM usage_tracked_applications ORDER BY display_name COLLATE NOCASE,application_id"))) {
+        fail(diagnostic, query);
+        return {};
+    }
+    QVariantList choices;
+    while (query.next()) {
+        choices.push_back(QVariantMap{
+            {QStringLiteral("applicationId"), query.value(0)},
+            {QStringLiteral("name"), query.value(1)},
+            {QStringLiteral("executablePath"), query.value(2)},
+            {QStringLiteral("executableName"), query.value(3)}});
+    }
+    if (diagnostic) diagnostic->clear();
+    return choices;
 }
 
 QVariantMap ApplicationUsageRepository::queryApplication(

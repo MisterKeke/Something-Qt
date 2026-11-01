@@ -893,6 +893,18 @@ constexpr const char *globalAutomation[] = {
             ('succeeded','failed','canceled','skipped'))SQL"
 };
 
+constexpr const char *automationExecutionClaims[] = {
+    R"SQL(CREATE TABLE automation_execution_claims (
+        rule_id TEXT NOT NULL,
+        event_id TEXT NOT NULL,
+        claimed_at_utc TEXT NOT NULL,
+        PRIMARY KEY(rule_id,event_id)
+    ))SQL",
+    "CREATE INDEX idx_automation_execution_claims_time ON automation_execution_claims(claimed_at_utc)",
+    R"SQL(INSERT OR IGNORE INTO automation_execution_claims(rule_id,event_id,claimed_at_utc)
+        SELECT rule_id,event_id,requested_at_utc FROM automation_executions WHERE rule_id IS NOT NULL)SQL"
+};
+
 constexpr std::array migrations{
     Migration{1, "core tasks currencies preferences", core, qsizetype(std::size(core))},
     Migration{2, "favorites and retained update news", favorites, qsizetype(std::size(favorites))},
@@ -932,6 +944,8 @@ constexpr std::array migrations{
               qsizetype(std::size(taskAutomation))},
     Migration{22, "global automation rules and execution history", globalAutomation,
               qsizetype(std::size(globalAutomation))},
+    Migration{23, "durable automation event claims", automationExecutionClaims,
+              qsizetype(std::size(automationExecutionClaims))},
 };
 
 bool fail(QString *diagnostic, const QString &message)
@@ -1005,6 +1019,7 @@ bool hasUnexpectedTables(const QSqlDatabase &database, QString *diagnostic, bool
         QStringLiteral("automation_rules"), QStringLiteral("automation_conditions"),
         QStringLiteral("automation_actions"), QStringLiteral("automation_executions"),
         QStringLiteral("automation_action_results"),
+        QStringLiteral("automation_execution_claims"),
         QStringLiteral("task_history"), QStringLiteral("task_schedules"),
         QStringLiteral("scheduling_preferences"),
         QStringLiteral("weather_comparison_cities")

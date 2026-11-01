@@ -99,25 +99,17 @@ void ApplicationUsageController::loadApplicationChoices()
 {
     if (!ready() || !m_graph) return;
     const quint64 generation = ++m_generation;
-    const QDate last = QDate::currentDate();
-    const QDate first = last.addDays(-qMax(1, retentionDays()) + 1);
-    const QString firstDay = first.toString(Qt::ISODate);
-    const QString lastDay = last.toString(Qt::ISODate);
-    const QString startUtc = QDateTime(first, QTime(0, 0), Qt::LocalTime)
-        .toUTC().toString(Qt::ISODateWithMs);
-    const QString endUtc = QDateTime(last.addDays(1), QTime(0, 0), Qt::LocalTime)
-        .toUTC().toString(Qt::ISODateWithMs);
     const auto operation = m_graph->beginOperation(QStringLiteral("usage-automation-choices"));
     if (!operation.isValid()) return;
     m_requests.insert(operation.id.value, {Request::Kind::ApplicationChoices, generation});
     if (!m_graph->submitStorage(operation,
-        [firstDay, lastDay, startUtc, endUtc](storage::StorageRepositories &repositories,
-                                               const std::function<bool()> &cancelled) {
+        [](storage::StorageRepositories &repositories,
+           const std::function<bool()> &cancelled) {
             storage::StorageReply reply;
             if (cancelled()) { reply.error = domain::AppError::cancelled(); return reply; }
             QString diagnostic;
-            reply.values = repositories.applicationUsage.queryOverview(
-                firstDay, lastDay, startUtc, endUtc, {}, QStringLiteral("name"), &diagnostic);
+            reply.values.insert(QStringLiteral("applicationChoices"),
+                repositories.applicationUsage.applicationChoices(&diagnostic));
             if (!diagnostic.isEmpty()) reply.error = domain::AppError(domain::ErrorCategory::Storage);
             return reply;
         })) {
@@ -309,10 +301,7 @@ void ApplicationUsageController::onStorageFinished(quint64 operationId,
             m_errorMessage.clear();
             if (request.kind == Request::Kind::Overview) m_overview = std::move(values);
             else if (request.kind == Request::Kind::ApplicationChoices) {
-                m_overview.insert(QStringLiteral("applications"),
-                    values.value(QStringLiteral("applications")));
-                m_overview.insert(QStringLiteral("applicationCount"),
-                    values.value(QStringLiteral("applicationCount")));
+                m_applicationChoices = values.value(QStringLiteral("applicationChoices")).toList();
             } else m_detail = std::move(values);
             applyLiveStates();
         }
@@ -331,6 +320,7 @@ void ApplicationUsageController::applyLiveStates()
         liveById.insert(map.value(QStringLiteral("applicationId")).toString(), map);
     }
     QVariantList rows = m_overview.value(QStringLiteral("applications")).toList();
+    const int loadedRowCount = rows.size();
     QSet<QString> present;
     for (int index = 0; index < rows.size(); ++index) {
         QVariantMap row = rows.at(index).toMap();
@@ -360,7 +350,9 @@ void ApplicationUsageController::applyLiveStates()
             {QStringLiteral("currentState"), it->value(QStringLiteral("state"))}});
     }
     m_overview.insert(QStringLiteral("applications"), rows);
-    m_overview.insert(QStringLiteral("applicationCount"), rows.size());
+    m_overview.insert(QStringLiteral("loadedRowCount"), loadedRowCount);
+    m_overview.insert(QStringLiteral("visibleRowCount"), rows.size());
+    m_overview.insert(QStringLiteral("runningApplicationCount"), liveById.size());
     if (!m_selectedApplicationId.isEmpty()) {
         const auto current = liveById.constFind(m_selectedApplicationId);
         m_detail.insert(QStringLiteral("running"), current != liveById.cend());

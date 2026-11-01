@@ -12,6 +12,9 @@ private slots:
     void steamPriceRuleRequiresMarketAndThresholdCrossing();
     void applicationAndSteamTriggersMatchExactIdentities();
     void scheduledRulesEvaluateLocalCalendarConditions();
+    void timeRangeIncludesItsEntireFinalMinute();
+    void scheduledTimeMatchesMinuteWhenSecondsAndMillisecondsArePresent();
+    void foregroundEntriesIgnoreStateChangesInsideOneForegroundSession();
     void rejectsConditionsThatDoNotFitTheTrigger();
     void rejectsInvalidEventAndConditionOperator();
     void notificationPlaceholdersRequireEventData();
@@ -180,6 +183,58 @@ void AutomationRulesTest::scheduledRulesEvaluateLocalCalendarConditions()
     QVERIFY(AutomationRules::conditionsMatch(rule, event));
     rule.conditions.last().operand = QString::number(localDay == 7 ? 1 : localDay + 1);
     QVERIFY(!AutomationRules::conditionsMatch(rule, event));
+}
+
+void AutomationRulesTest::scheduledTimeMatchesMinuteWhenSecondsAndMillisecondsArePresent()
+{
+    const QDateTime localNow(QDate(2026, 11, 1), QTime(9, 0, 37, 842), Qt::UTC);
+    QVERIFY(AutomationRules::scheduledTimeMatchesMinute(QStringLiteral("09:00"), localNow));
+    QVERIFY(!AutomationRules::scheduledTimeMatchesMinute(QStringLiteral("09:01"), localNow));
+    QVERIFY(!AutomationRules::scheduledTimeMatchesMinute(QStringLiteral("09:0x"), localNow));
+}
+
+void AutomationRulesTest::timeRangeIncludesItsEntireFinalMinute()
+{
+    const auto matchesAtLocalTime = [](const QString &range, const QTime &time) {
+        AutomationRule rule;
+        rule.id = QStringLiteral("time-range");
+        rule.name = QStringLiteral("Time range");
+        rule.triggerType = QStringLiteral("schedule.time_reached");
+        rule.triggerConfig = {{QStringLiteral("time"), QStringLiteral("09:00")},
+                              {QStringLiteral("weekdays"), QVariantList{1}}};
+        rule.conditions = {{QStringLiteral("time_range"), range, QStringLiteral("between")}};
+        AutomationAction action;
+        action.type = QStringLiteral("show_notification");
+        action.message = QStringLiteral("Scheduled");
+        rule.actions.push_back(action);
+        if (AutomationRules::normalizeRule(rule).isError()) return false;
+
+        const QDate date(2026, 6, 15); // Monday, outside local DST transition dates.
+        const QDateTime local(date, time, QTimeZone::systemTimeZone());
+        if (!local.isValid()) return false;
+        AutomationEvent event;
+        event.id = QStringLiteral("schedule:time-range:event");
+        event.type = rule.triggerType;
+        event.sourceModule = QStringLiteral("automation-scheduler");
+        event.sourceEntityId = rule.id;
+        event.occurredAtUtc = local.toUTC();
+        event.payload = {{QStringLiteral("schedule.id"), rule.id}};
+        return AutomationRules::conditionsMatch(rule, event);
+    };
+
+    QVERIFY(matchesAtLocalTime(QStringLiteral("09:00/10:00"), QTime(10, 0, 59, 999)));
+    QVERIFY(!matchesAtLocalTime(QStringLiteral("09:00/10:00"), QTime(10, 1, 0)));
+    QVERIFY(matchesAtLocalTime(QStringLiteral("23:00/01:00"), QTime(1, 0, 59, 999)));
+    QVERIFY(!matchesAtLocalTime(QStringLiteral("23:00/01:00"), QTime(1, 1, 0)));
+}
+
+void AutomationRulesTest::foregroundEntriesIgnoreStateChangesInsideOneForegroundSession()
+{
+    QVERIFY(AutomationRules::isForegroundEntry(false, QStringLiteral("ForegroundFullscreen")));
+    QVERIFY(!AutomationRules::isForegroundEntry(true, QStringLiteral("ForegroundWindowed")));
+    QVERIFY(!AutomationRules::isForegroundEntry(true, QStringLiteral("Unknown")));
+    QVERIFY(!AutomationRules::isForegroundEntry(false, QStringLiteral("BackgroundVisible")));
+    QVERIFY(AutomationRules::isForegroundEntry(false, QStringLiteral("ForegroundWindowed")));
 }
 
 void AutomationRulesTest::rejectsConditionsThatDoNotFitTheTrigger()

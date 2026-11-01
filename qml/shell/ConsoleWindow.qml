@@ -15,6 +15,7 @@ ApplicationWindow {
     property string returnTitle: qsTr("Main Page")
     property bool interactionBlocked: false
     property bool fullApplicationOpened: false
+    property int restoreVisibility: Window.Windowed
     signal navigateRequested(string routeId)
 
     width: 1440
@@ -28,6 +29,12 @@ ApplicationWindow {
     title: qsTr("Something — Console")
     color: ThemeModule.Theme.windowBackground
     contentItem.enabled: !interactionBlocked
+
+    onVisibilityChanged: {
+        if (visibility === Window.Windowed || visibility === Window.Maximized
+                || visibility === Window.FullScreen)
+            restoreVisibility = visibility
+    }
 
     onVisibleChanged: if (visible) focusInput()
     onClosing: {
@@ -45,8 +52,10 @@ ApplicationWindow {
     function present() {
         if (interactionBlocked)
             return
-        if (visibility === Window.Minimized)
-            showNormal()
+        if (restoreVisibility === Window.Maximized)
+            showMaximized()
+        else if (restoreVisibility === Window.FullScreen)
+            showFullScreen()
         else
             show()
         raise()
@@ -73,6 +82,8 @@ ApplicationWindow {
         anchors.bottom: parent.bottom
         anchors.bottomMargin: 20
         z: 100
+        presentationEnabled: consoleWindow.visible && consoleWindow.active
+        presentationKey: backgroundController.notificationSequence
         message: backgroundController.notificationMessage
         onDismissed: backgroundController.clearNotificationMessage()
     }

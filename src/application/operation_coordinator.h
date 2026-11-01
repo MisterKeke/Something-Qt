@@ -48,6 +48,7 @@ public:
 
     OperationContext begin(QString purpose, QString freshnessKey = {});
     bool cancel(OperationId id);
+    void stopAccepting();
     void beginShutdown();
     bool finish(OperationId id, something::domain::AppError error = {});
 
@@ -79,6 +80,7 @@ private:
 
     quint64 m_nextId{1};
     bool m_accepting{true};
+    bool m_shutdownStarted{false};
     QHash<quint64, Entry> m_operations;
     QHash<QString, quint64> m_latestByKey;
 };

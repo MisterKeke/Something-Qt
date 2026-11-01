@@ -27,6 +27,7 @@ private slots:
     void backgroundPreferencesPersistAcrossControllerInstances();
     void repeatedRestoreRequestsReuseTheExistingPresentation();
     void repeatedExitRequestsEmitOneShutdownRequest();
+    void fallbackNotificationsQueueUntilDismissedAndRejectOverflow();
 
 private:
     QTemporaryDir m_settingsDirectory;
@@ -165,6 +166,32 @@ void BackgroundControllerTest::repeatedExitRequestsEmitOneShutdownRequest()
     controller.exitCompletely();
 
     QCOMPARE(exitSpy.count(), 1);
+}
+
+void BackgroundControllerTest::fallbackNotificationsQueueUntilDismissedAndRejectOverflow()
+{
+    BackgroundController controller(false);
+    controller.setSystemTrayEnabled(false);
+    const quint64 startingSequence = controller.notificationSequence();
+    QVERIFY(controller.showAutomationNotification(QStringLiteral("Task"),
+                                                   QStringLiteral("First message")));
+    QVERIFY(controller.showAutomationNotification(QStringLiteral("Task"),
+                                                   QStringLiteral("Second message")));
+    QCOMPARE(controller.notificationSequence(), startingSequence + 2);
+    QCOMPARE(controller.notificationMessage(), QStringLiteral("First message"));
+
+    controller.clearNotificationMessage();
+    QCOMPARE(controller.notificationMessage(), QStringLiteral("Second message"));
+    controller.clearNotificationMessage();
+    QVERIFY(controller.notificationMessage().isEmpty());
+
+    for (int index = 0; index < 100; ++index)
+        QVERIFY(controller.showAutomationNotification(QStringLiteral("Task"),
+            QStringLiteral("Queued %1").arg(index)));
+    QVERIFY(!controller.showAutomationNotification(QStringLiteral("Task"),
+                                                   QStringLiteral("Overflow")));
+    QVERIFY(controller.statusMessage().contains(QStringLiteral("queue is full"),
+                                                Qt::CaseInsensitive));
 }
 
 QTEST_MAIN(BackgroundControllerTest)

@@ -2,6 +2,7 @@
 
 #include "../application/application_service_graph.h"
 #include "../domain/automation_rules.h"
+#include "../domain/clock.h"
 #include "../platform/desktop_applications_platform.h"
 #include "../services/application_mutation_workflow.h"
 #include "../services/application_usage_service.h"
@@ -42,7 +43,8 @@ public:
         platform::DesktopApplicationsPlatform *desktopPlatform,
         BackgroundController *background,
         QObject *parent = nullptr,
-        std::function<bool(const QUrl &)> openUrl = {});
+        std::function<bool(const QUrl &)> openUrl = {},
+        const domain::Clock *clock = nullptr);
 
     bool ready() const noexcept { return m_ready; }
     bool paused() const noexcept { return m_paused; }
@@ -62,6 +64,7 @@ public:
                                  const QString &triggerType = {}, int offset = 0,
                                  const QString &startDate = {}, const QString &endDate = {});
     Q_INVOKABLE void clearMessages();
+    void prepareShutdown();
 
     void onTaskCompletionCommitted(const QString &eventId, const QVariantMap &task,
                                    bool previousCompleted, bool currentCompleted);
@@ -80,6 +83,7 @@ signals:
     void ruleDeleted(const QString &ruleId);
     void executionChanged(qint64 taskId, const QString &status,
                           const QString &errorMessage, const QString &timestampUtc);
+    void shutdownPreparationFinished(bool success, QString diagnostic);
 
 private:
     struct PendingOperation final {
@@ -94,10 +98,19 @@ private:
         QString actionStartedAtUtc;
         bool stopping{false};
     };
+    struct AdmissionCandidate final {
+        QString key;
+        domain::AutomationRule rule;
+        domain::AutomationEvent event;
+    };
+    struct DeferredMaintenanceClaim final {
+        QString executionId;
+        AdmissionCandidate candidate;
+    };
 
     bool submitStorage(storage::StorageCommand command,
                        std::function<void(const QVariantMap &, domain::AppError)> completed,
-                       QString purpose);
+                       QString purpose, bool allowDuringShutdown = false);
     bool submitValue(services::BoundedWorkerPool::ValueWork work,
                      std::function<void(const QVariantMap &, domain::AppError)> completed,
                      QString purpose);
@@ -106,31 +119,42 @@ private:
     void onValueFinished(quint64 operationId, const QVariantMap &values,
                          domain::AppError error);
     void receiveEvent(domain::AutomationEvent event);
-    void claimExecution(const domain::AutomationRule &rule,
-                        const domain::AutomationEvent &event);
+    void queueUntilRulesReady(domain::AutomationEvent event);
+    void drainWaitingForRules();
+    void onProfileMaintenanceChanged(bool active);
+    void enqueueAdmission(const domain::AutomationRule &rule,
+                          const domain::AutomationEvent &event);
+    void pumpAdmissionQueue();
+    void claimExecution(AdmissionCandidate candidate);
+    void finishClaimAsSkipped(const QString &executionId,
+        const domain::AutomationRule &rule, const domain::AutomationEvent &event,
+        const QString &status, const QString &reason);
     void runNextAction(const QString &executionId);
     void executeCurrentAction(const QString &executionId);
     void recordAction(const QString &executionId, const domain::AutomationAction &action,
                      const QString &startedAt, QString status, QString errorMessage,
                      bool continueSequence);
     void finishExecution(const QString &executionId, QString status, QString errorMessage = {});
-    void markBlocked(const domain::AutomationRule &rule, const domain::AutomationEvent &event,
-                     QString reason);
     void scheduleTick();
     void checkOverdueTasks();
-    void checkScheduledRules();
+    void maybeFinishShutdownPreparation();
     static domain::AutomationRule ruleFromMap(const QVariantMap &map);
     static QVariantMap ruleToMap(const domain::AutomationRule &rule);
     static domain::AutomationEvent taskEvent(const QString &eventId,
         const QVariantMap &task, const QString &type, const QString &timestampUtc);
     static QString utcNow();
 
+private slots:
+    void checkScheduledRules();
+
+private:
     application::ApplicationServiceGraph *m_graph{nullptr};
     QPointer<services::ApplicationMutationWorkflow> m_mutations;
     QPointer<services::ApplicationUsageService> m_usage;
     platform::DesktopApplicationsPlatform *m_desktopPlatform{nullptr};
     QPointer<BackgroundController> m_background;
     std::function<bool(const QUrl &)> m_openUrl;
+    const domain::Clock *m_clock{nullptr};
     QHash<quint64, PendingOperation> m_operations;
     QHash<quint64, std::function<void(const QVariantMap &, domain::AppError)>> m_valueOperations;
     QHash<QString, domain::AutomationRule> m_rules;
@@ -138,7 +162,13 @@ private:
     QHash<QString, QDateTime> m_lastAttemptedByRule;
     QHash<QString, QPair<int, QDateTime>> m_automatedLaunchDepthByIdentity;
     QHash<QString, int> m_chainDepthBySession;
+    QHash<QString, bool> m_foregroundBySession;
     QQueue<QDateTime> m_executionRateWindow;
+    QQueue<AdmissionCandidate> m_admissionQueue;
+    QQueue<domain::AutomationEvent> m_waitingForRules;
+    QQueue<DeferredMaintenanceClaim> m_maintenanceClaims;
+    QSet<QString> m_pendingClaimKeys;
+    QSet<QString> m_waitingForRulesIds;
     QTimer m_tickTimer;
     QVariantList m_history;
     bool m_historyHasMore{false};
@@ -147,13 +177,22 @@ private:
     QString m_lastScheduleMinute;
     bool m_ready{false};
     bool m_paused{false};
+    bool m_profileMaintenance{false};
     bool m_stopping{false};
     bool m_firstScheduleScan{true};
     bool m_overdueQueryPending{false};
     bool m_recoveryStarted{false};
     int m_overdueOffset{0};
     int m_claimsPending{0};
+    int m_shutdownStatusWrites{0};
     quint64 m_historyRequestGeneration{0};
+    bool m_shutdownPreparing{false};
+    bool m_shutdownPreparationReported{false};
+    bool m_shutdownPersistenceFailed{false};
+    bool m_admissionRetryScheduled{false};
+    bool m_rulesReloadPending{false};
+    bool m_ruleReloadAgain{false};
+    bool m_ruleReloadRetryScheduled{false};
 };
 
 } // namespace something::controllers

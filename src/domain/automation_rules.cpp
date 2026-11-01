@@ -1,4 +1,5 @@
 #include "automation_rules.h"
+#include "notification_placeholders.h"
 
 #include <QRegularExpression>
 #include <QSet>
@@ -73,33 +74,6 @@ bool validCondition(const AutomationCondition &condition, const QString &trigger
             && QTime::fromString(bounds.at(0), QStringLiteral("HH:mm")).isValid()
             && QTime::fromString(bounds.at(1), QStringLiteral("HH:mm")).isValid();
     }
-    return false;
-}
-
-bool placeholderSupported(const QString &placeholder, const QString &trigger)
-{
-    if (placeholder == QStringLiteral("task.id") || placeholder == QStringLiteral("task.title")
-        || placeholder == QStringLiteral("task.priority"))
-        return trigger == QStringLiteral("task.completed") || trigger == QStringLiteral("task.overdue");
-    if (placeholder == QStringLiteral("task.completedAt"))
-        return trigger == QStringLiteral("task.completed");
-    if (placeholder == QStringLiteral("application.id") || placeholder == QStringLiteral("application.name")
-        || placeholder == QStringLiteral("application.sessionId"))
-        return trigger == QStringLiteral("application.session_started")
-            || trigger == QStringLiteral("application.foreground_entered");
-    if (placeholder == QStringLiteral("steam.appId") || placeholder == QStringLiteral("steam.gameName"))
-        return trigger.startsWith(QStringLiteral("steam."));
-    if (placeholder == QStringLiteral("steam.currency") || placeholder == QStringLiteral("steam.country")
-        || placeholder == QStringLiteral("steam.priceMinor")
-        || placeholder == QStringLiteral("steam.previousPriceMinor"))
-        return trigger == QStringLiteral("steam.price_target_reached");
-    if (placeholder == QStringLiteral("steam.newsTitle") || placeholder == QStringLiteral("steam.newsId"))
-        return trigger == QStringLiteral("steam.game_news_available");
-    if (placeholder == QStringLiteral("steam.releaseDate")
-        || placeholder == QStringLiteral("steam.datePrecision"))
-        return trigger == QStringLiteral("steam.release_date_changed");
-    if (placeholder == QStringLiteral("schedule.id") || placeholder == QStringLiteral("schedule.localTime"))
-        return trigger == QStringLiteral("schedule.time_reached");
     return false;
 }
 
@@ -218,12 +192,9 @@ AppError normalizeRule(AutomationRule &rule)
                 || url.host().isEmpty() || !url.userName().isEmpty() || !url.password().isEmpty())
                 return AppError(ErrorCategory::Validation);
         } else if (action.type == QStringLiteral("show_notification")) {
-            if (action.message.isEmpty() || action.message.size() > 500) return AppError(ErrorCategory::Validation);
-            static const QRegularExpression placeholder(QStringLiteral("\\{([^{}]+)\\}"));
-            auto matches = placeholder.globalMatch(action.message);
-            while (matches.hasNext())
-                if (!placeholderSupported(matches.next().captured(1), rule.triggerType))
-                    return AppError(ErrorCategory::Validation);
+            if (action.message.isEmpty() || action.message.size() > 500
+                || !NotificationPlaceholders::templateSupported(action.message, rule.triggerType))
+                return AppError(ErrorCategory::Validation);
         }
         action.order = index;
     }
@@ -298,12 +269,31 @@ bool conditionsMatch(const AutomationRule &rule, const AutomationEvent &event)
             const QTime current = payload.value(QStringLiteral("event.time")).toDateTime().time();
             const QTime from = QTime::fromString(bounds.at(0), QStringLiteral("HH:mm"));
             const QTime to = QTime::fromString(bounds.at(1), QStringLiteral("HH:mm"));
-            const bool matches = from <= to ? (current >= from && current <= to)
-                                             : (current >= from || current <= to);
+            const int currentMinute = current.hour() * 60 + current.minute();
+            const int fromMinute = from.hour() * 60 + from.minute();
+            const int toMinute = to.hour() * 60 + to.minute();
+            const bool matches = fromMinute <= toMinute
+                ? (currentMinute >= fromMinute && currentMinute <= toMinute)
+                : (currentMinute >= fromMinute || currentMinute <= toMinute);
             if (!matches) return false;
         }
     }
     return true;
+}
+
+bool scheduledTimeMatchesMinute(const QString &configuredTime, const QDateTime &localNow)
+{
+    const QTime configured = QTime::fromString(configuredTime, QStringLiteral("HH:mm"));
+    if (!configured.isValid() || !localNow.isValid()) return false;
+    const QTime observedMinute(localNow.time().hour(), localNow.time().minute());
+    return configured == observedMinute;
+}
+
+bool isForegroundEntry(bool wasForeground, const QString &state)
+{
+    if (state.compare(QStringLiteral("Unknown"), Qt::CaseInsensitive) == 0) return false;
+    return !wasForeground
+        && state.startsWith(QStringLiteral("Foreground"), Qt::CaseInsensitive);
 }
 
 QString conditionSummary(const AutomationRule &rule)

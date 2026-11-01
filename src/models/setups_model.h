@@ -19,7 +19,7 @@ public:
     void replace(QVariantList rows, QVariantList applications);
     void upsert(QVariantMap row, QVariantList applications);
     bool removeById(qint64 id);
-    QVariantMap rowForId(qint64 id) const;
+    Q_INVOKABLE QVariantMap rowForId(qint64 id) const;
 signals:
     void countChanged();
 private:

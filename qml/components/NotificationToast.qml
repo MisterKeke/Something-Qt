@@ -7,16 +7,18 @@ Rectangle {
 
     property string message: ""
     property string displayedMessage: ""
+    property bool presentationEnabled: true
+    property var presentationKey: message
     signal dismissed()
 
-    visible: opacity > 0
+    visible: presentationEnabled && opacity > 0
     implicitWidth: Math.min(parent ? parent.width - 32 : 420, toastText.implicitWidth + 38)
     implicitHeight: 48
     radius: ThemeModule.Theme.panelRadius
     color: ThemeModule.Theme.raisedSurface
     border.color: ThemeModule.Theme.accentCyan
     border.width: 1
-    opacity: root.message.length > 0 ? 1 : 0
+    opacity: root.presentationEnabled && root.message.length > 0 ? 1 : 0
     Accessible.role: Accessible.AlertMessage
     Accessible.name: message
 
@@ -41,7 +43,21 @@ Rectangle {
     onMessageChanged: {
         if (message.length > 0)
             displayedMessage = message
-        if (message.length > 0)
+        if (message.length > 0 && presentationEnabled)
+            dismissTimer.restart()
+        else
+            dismissTimer.stop()
+    }
+
+    onPresentationEnabledChanged: {
+        if (presentationEnabled && message.length > 0)
+            dismissTimer.restart()
+        else
+            dismissTimer.stop()
+    }
+
+    onPresentationKeyChanged: {
+        if (presentationEnabled && message.length > 0)
             dismissTimer.restart()
     }
 

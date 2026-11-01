@@ -29,6 +29,7 @@ public:
     ~ApplicationServiceGraph() override;
 
     void start();
+    void stopAcceptingOperations();
     void shutdown();
 
     ApplicationLifecycle &lifecycle() noexcept { return m_lifecycle; }
@@ -72,6 +73,7 @@ signals:
                                   QVariantMap values,
                                   something::domain::AppError error);
     void shutdownPhaseChanged(const QString &phase);
+    void profileMaintenanceChanged(bool active);
     void shutdownComplete();
 
 private:

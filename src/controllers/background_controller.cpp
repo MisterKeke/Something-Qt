@@ -358,17 +358,30 @@ bool BackgroundController::showAutomationNotification(QString title, QString mes
                                 message, QSystemTrayIcon::Information, 5000);
         return true;
     }
-    // The message remains available to the shell's in-app toast when a window
-    // is restored or the tray integration is unavailable.
-    m_notificationMessage = std::move(message);
+    // Keep fallback messages until an active window presents and dismisses
+    // them. A bounded queue rejects overflow so the automation history records
+    // a failed notification instead of silently losing an accepted message.
+    constexpr qsizetype maximumQueuedNotifications = 100;
+    if (m_notifications.size() >= maximumQueuedNotifications) {
+        setStatusMessage(tr("The in-app notification queue is full."));
+        return false;
+    }
+    m_notifications.enqueue({std::move(title), std::move(message)});
+    ++m_notificationSequence;
     emit presentationChanged();
     return true;
 }
 
+QString BackgroundController::notificationMessage() const
+{
+    return m_notifications.isEmpty() ? QString() : m_notifications.head().message;
+}
+
 void BackgroundController::clearNotificationMessage()
 {
-    if (m_notificationMessage.isEmpty()) return;
-    m_notificationMessage.clear();
+    if (m_notifications.isEmpty()) return;
+    m_notifications.dequeue();
+    ++m_notificationSequence;
     emit presentationChanged();
 }
 

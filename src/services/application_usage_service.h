@@ -61,6 +61,7 @@ signals:
                                  QString state, QString timestampUtc);
     void applicationSessionEnded(QString applicationId, QString sessionId,
                                  QString timestampUtc, QString reason);
+    void shutdownFlushFinished(bool success, QString diagnostic);
 
 private:
     struct ActiveSession final {
@@ -79,12 +80,14 @@ private:
         enum class Kind { LoadConfiguration, SetEnabled, SetRetention, AddExclusion,
                           RemoveExclusion, Checkpoint, DeleteHistory } kind;
         QString applicationId;
+        storage::ApplicationUsageExclusion exclusion;
         storage::ApplicationUsageCheckpoint checkpoint;
     };
 
     bool submitStorage(PendingOperation operation,
                        something::storage::StorageCommand command);
     void loadConfiguration();
+    void onProfileMaintenanceChanged(bool active);
     void onStorageFinished(quint64 operationId, QVariantMap values,
                            something::domain::AppError error);
     void setTrackingActive(bool active);
@@ -107,6 +110,10 @@ private:
     void notifyLiveChanges();
     void processDeferredHistoryDeletes();
     void submitDeleteHistory(const QString &applicationId);
+    void applyExclusion(const storage::ApplicationUsageExclusion &exclusion);
+    void completeShutdownFlush(bool success, QString diagnostic = {});
+    void pauseForStorageBackpressure();
+    qsizetype pendingCheckpointRecordCount() const noexcept;
 
     something::application::ApplicationServiceGraph *m_graph{nullptr};
     something::platform::ApplicationUsagePlatform *m_platform{nullptr};
@@ -128,11 +135,16 @@ private:
     bool m_enabled{true};
     bool m_configurationLoaded{false};
     bool m_trackingActive{false};
+    bool m_profileMaintenance{false};
     int m_checkpointsInFlight{0};
     bool m_deleteInFlight{false};
     bool m_systemLocked{false};
     bool m_systemSuspended{false};
     bool m_checkpointRequested{false};
+    bool m_shutdownPreparing{false};
+    bool m_shutdownFlushReported{false};
+    bool m_shutdownCheckpointFailed{false};
+    bool m_storageBackpressurePaused{false};
 };
 
 } // namespace something::services

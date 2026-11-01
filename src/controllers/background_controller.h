@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QPointer>
+#include <QQueue>
 #include <QSettings>
 #include <QString>
 #include <QSystemTrayIcon>
@@ -28,6 +29,7 @@ class BackgroundController final : public QObject {
     Q_PROPERTY(bool shutdownRequested READ shutdownRequested NOTIFY presentationChanged)
     Q_PROPERTY(QString statusMessage READ statusMessage NOTIFY presentationChanged)
     Q_PROPERTY(QString notificationMessage READ notificationMessage NOTIFY presentationChanged)
+    Q_PROPERTY(quint64 notificationSequence READ notificationSequence NOTIFY presentationChanged)
     Q_PROPERTY(bool usageTrackingEnabled READ usageTrackingEnabled NOTIFY presentationChanged)
     Q_PROPERTY(QString usageTrackingStatus READ usageTrackingStatus NOTIFY presentationChanged)
 
@@ -47,7 +49,8 @@ public:
     bool inTrayMode() const noexcept;
     bool shutdownRequested() const noexcept { return m_shutdownRequested; }
     QString statusMessage() const { return m_statusMessage; }
-    QString notificationMessage() const { return m_notificationMessage; }
+    QString notificationMessage() const;
+    quint64 notificationSequence() const noexcept { return m_notificationSequence; }
     bool usageTrackingEnabled() const noexcept { return m_usageTrackingEnabled; }
     QString usageTrackingStatus() const { return m_usageTrackingStatus; }
 
@@ -93,6 +96,7 @@ signals:
 
 private:
     void createTrayMenu();
+    void updateUsageActions();
     void readSettings();
     void writeSetting(const QString &key, bool value);
     void updateTrayIcon();
@@ -112,7 +116,9 @@ private:
     QPointer<QWindow> m_consoleWindow;
     QTimer m_watchdog;
     QString m_statusMessage;
-    QString m_notificationMessage;
+    struct QueuedNotification final { QString title; QString message; };
+    QQueue<QueuedNotification> m_notifications;
+    quint64 m_notificationSequence{0};
     QString m_usageTrackingStatus{QStringLiteral("Waiting for local storage")};
     bool m_systemTrayEnabled{true};
     bool m_minimizeToTrayOnClose{false};

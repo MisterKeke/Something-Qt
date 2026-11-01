@@ -229,6 +229,7 @@ void SteamFeatureTest::unsupportedPriceMigrationPreservesChildrenAndRollsBackFai
         QVERIFY(repositories.steam.remove(retiredId).succeeded());
     }
     QSqlQuery query(database);
+    QVERIFY(query.exec(QStringLiteral("DROP TABLE automation_execution_claims")));
     QVERIFY(query.exec(QStringLiteral("DROP TABLE automation_action_results")));
     QVERIFY(query.exec(QStringLiteral("DROP TABLE automation_actions")));
     QVERIFY(query.exec(QStringLiteral("DROP TABLE automation_conditions")));
@@ -757,6 +758,7 @@ void SteamFeatureTest::releaseRadarMigrationPreservesExistingPriceProfiles()
         QVERIFY(legacy.exec(QStringLiteral("DROP TABLE usage_tracked_applications")));
         QVERIFY(legacy.exec(QStringLiteral("DROP TABLE usage_tracking_settings")));
         QVERIFY(legacy.exec(QStringLiteral("DROP TABLE usage_excluded_applications")));
+        QVERIFY(legacy.exec(QStringLiteral("DROP TABLE automation_execution_claims")));
         QVERIFY(legacy.exec(QStringLiteral("DROP TABLE automation_action_results")));
         QVERIFY(legacy.exec(QStringLiteral("DROP TABLE automation_actions")));
         QVERIFY(legacy.exec(QStringLiteral("DROP TABLE automation_conditions")));
@@ -771,7 +773,7 @@ void SteamFeatureTest::releaseRadarMigrationPreservesExistingPriceProfiles()
 
     QString diagnostic;
     QVERIFY2(storage::SchemaMigrator::apply(database, &diagnostic), qPrintable(diagnostic));
-    QCOMPARE(storage::SchemaMigrator::latestVersion(), 22);
+    QCOMPARE(storage::SchemaMigrator::latestVersion(), 23);
     {
         storage::StorageRepositories repositories(database);
         const auto preserved = repositories.steam.get(priceGameId);
@@ -945,6 +947,7 @@ void SteamFeatureTest::steamPriceHistoryMigrationPreservesLegacyGamesWithoutFabr
     QVERIFY(legacy.exec(QStringLiteral("DROP TABLE usage_tracked_applications")));
     QVERIFY(legacy.exec(QStringLiteral("DROP TABLE usage_tracking_settings")));
     QVERIFY(legacy.exec(QStringLiteral("DROP TABLE usage_excluded_applications")));
+    QVERIFY(legacy.exec(QStringLiteral("DROP TABLE automation_execution_claims")));
     QVERIFY(legacy.exec(QStringLiteral("DROP TABLE automation_action_results")));
     QVERIFY(legacy.exec(QStringLiteral("DROP TABLE automation_actions")));
     QVERIFY(legacy.exec(QStringLiteral("DROP TABLE automation_conditions")));
@@ -957,7 +960,7 @@ void SteamFeatureTest::steamPriceHistoryMigrationPreservesLegacyGamesWithoutFabr
 
     QString diagnostic;
     QVERIFY2(storage::SchemaMigrator::apply(database, &diagnostic), qPrintable(diagnostic));
-    QCOMPARE(storage::SchemaMigrator::latestVersion(), 22);
+    QCOMPARE(storage::SchemaMigrator::latestVersion(), 23);
 
     {
         storage::StorageRepositories repositories(database);

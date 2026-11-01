@@ -2,6 +2,8 @@
 
 #include <QCoreApplication>
 #include <QMetaObject>
+#include <QElapsedTimer>
+#include <QLoggingCategory>
 #include <QMutex>
 #include <QMutexLocker>
 #include <QPointer>
@@ -10,6 +12,8 @@
 
 namespace something::platform {
 namespace {
+
+Q_LOGGING_CATEGORY(lcUsageObservation, "something.usage.observation", QtInfoMsg)
 
 #if defined(Q_OS_WIN)
 QMutex g_observerMutex;
@@ -83,6 +87,7 @@ void NativeApplicationUsagePlatform::stop()
 {
     if (!m_started) return;
     m_started = false;
+    m_scanDispatchPending.store(false, std::memory_order_release);
     m_reconciliationTimer.stop();
     m_coalescedEventTimer.stop();
     if (m_powerFilterInstalled) {
@@ -137,9 +142,23 @@ void NativeApplicationUsagePlatform::scheduleScan()
 void NativeApplicationUsagePlatform::scan()
 {
     if (!m_started) return;
+    m_scanDispatchPending.store(false, std::memory_order_release);
+    QElapsedTimer elapsed;
+    elapsed.start();
     bool succeeded = false;
     QString diagnostic;
     const auto applications = snapshot(&succeeded, &diagnostic);
+    ++m_completedScanCount;
+    if (m_completedScanCount % 12 == 0) {
+        qCInfo(lcUsageObservation).nospace()
+            << "scan=" << m_completedScanCount
+            << " last_elapsed_ms=" << elapsed.elapsed()
+            << " native_callbacks=" << m_nativeCallbackCount.exchange(0)
+            << " queued_dispatches=" << m_queuedDispatchCount.exchange(0)
+            << " coalesced_callbacks=" << m_coalescedCallbackCount.exchange(0)
+            << " observations=" << applications.size()
+            << " succeeded=" << succeeded;
+    }
     emit observationsReady(applications, succeeded, diagnostic);
 }
 
@@ -160,9 +179,19 @@ void CALLBACK NativeApplicationUsagePlatform::eventCallback(
         observer = g_observer;
     }
     if (!observer) return;
-    QMetaObject::invokeMethod(observer.data(), [observer] {
+    observer->m_nativeCallbackCount.fetch_add(1, std::memory_order_relaxed);
+    if (observer->m_scanDispatchPending.exchange(true, std::memory_order_acq_rel)) {
+        observer->m_coalescedCallbackCount.fetch_add(1, std::memory_order_relaxed);
+        return;
+    }
+    const bool queued = QMetaObject::invokeMethod(observer.data(), [observer] {
         if (observer) observer->scheduleScan();
     }, Qt::QueuedConnection);
+    if (queued) {
+        observer->m_queuedDispatchCount.fetch_add(1, std::memory_order_relaxed);
+    } else {
+        observer->m_scanDispatchPending.store(false, std::memory_order_release);
+    }
 }
 #endif
 

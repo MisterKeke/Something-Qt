@@ -79,6 +79,8 @@ ApplicationWindow {
     property bool shuttingDown: false
     property var pendingSearchResult: null
     property string pendingSearchAction: ""
+    property var searchReturnFocusItem: null
+    property bool searchReturnToConsole: false
 
     onVisibleChanged: applicationUsageController.setPageVisible(
         visible && currentRoute === "usageStatistics")
@@ -110,13 +112,47 @@ ApplicationWindow {
     Dialogs.UniversalSearchDialog {
         id: universalSearchDialog
         controller: universalSearchController
-        onClosed: window.focusMainPage()
+        onClosed: window.restoreSearchFocus()
     }
 
     function openUniversalSearch() {
         if (shuttingDown || legacyDataImportController.importActive || setupLaunchResult.visible)
             return
+        if (universalSearchDialog.visible) {
+            window.raise()
+            window.requestActivate()
+            universalSearchDialog.forceActiveFocus()
+            return
+        }
+        searchReturnToConsole = consoleWindow.active
+        searchReturnFocusItem = searchReturnToConsole
+                ? consoleWindow.activeFocusItem : window.activeFocusItem
+        appController.requestFullWindow()
+        window.raise()
+        window.requestActivate()
         universalSearchDialog.open()
+        universalSearchDialog.forceActiveFocus()
+    }
+
+    function restoreSearchFocus() {
+        const target = searchReturnFocusItem
+        const returnToConsole = searchReturnToConsole
+        searchReturnFocusItem = null
+        searchReturnToConsole = false
+        if (returnToConsole && consoleWindow.visible) {
+            consoleWindow.raise()
+            consoleWindow.requestActivate()
+            Qt.callLater(function() {
+                if (target && target.visible !== false && consoleWindow.visible)
+                    target.forceActiveFocus()
+            })
+            return
+        }
+        focusMainPage()
+        Qt.callLater(function() {
+            if (target && target.visible !== false && window.visible)
+                target.forceActiveFocus()
+        })
     }
 
     function handleSearchResult(result, action) {
@@ -204,16 +240,15 @@ ApplicationWindow {
     function shortcutIsBlocked() {
         if (legacyDataImportController.importActive || setupLaunchResult.visible)
             return true
-        let item = window.activeFocusItem
+        let item = consoleWindow.active ? consoleWindow.activeFocusItem : window.activeFocusItem
         let remaining = 32
         let insideWindowContent = false
         while (item && remaining-- > 0) {
-            if (item === window.contentItem) insideWindowContent = true
+            if (item === window.contentItem || item === consoleWindow.contentItem)
+                insideWindowContent = true
             if (item.modal === true && item.visible !== false)
                 return true
-            if (item.inputMethodComposing !== undefined
-                    || item.maximumLength !== undefined
-                    || item.editable === true)
+            if (item.inputMethodComposing === true)
                 return true
             item = item.parent
         }
@@ -274,10 +309,10 @@ ApplicationWindow {
         Pages.AutomationRulesPage {
             controller: automationRulesController
             usageController: applicationUsageController
-            desktopApplicationsController: desktopApplicationsController
-            setupsController: setupsController
-            steamGamesController: steamGamesController
-            steamReleaseController: steamReleaseController
+            desktopApplicationChoicesController: desktopApplicationsController
+            setupChoicesController: setupsController
+            steamGameChoicesController: steamGamesController
+            steamReleaseChoicesController: steamReleaseController
             gameUpdatesController: steamGameUpdatesController
         }
     }
@@ -652,7 +687,7 @@ ApplicationWindow {
 
     Shortcut {
         sequence: "Ctrl+K"
-        context: Qt.WindowShortcut
+        context: Qt.ApplicationShortcut
         enabled: !window.shortcutIsBlocked() && !universalSearchDialog.visible
                  && !window.shuttingDown
         onActivated: window.openUniversalSearch()
@@ -684,6 +719,8 @@ ApplicationWindow {
         anchors.bottom: parent.bottom
         anchors.bottomMargin: 20
         z: 100
+        presentationEnabled: window.visible && window.active
+        presentationKey: backgroundController.notificationSequence
         message: backgroundController.notificationMessage.length > 0
                  ? backgroundController.notificationMessage
                  : taskController.notification.length > 0

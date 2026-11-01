@@ -129,8 +129,13 @@ bool DataImportRepository::targetIsEmpty(bool *empty, QString *blockingReason) c
         QStringLiteral("steam_release_follows"),
         QStringLiteral("steam_game_update_follows"),
         QStringLiteral("steam_game_update_news_items"),
+        QStringLiteral("usage_tracked_applications"), QStringLiteral("usage_sessions"),
+        QStringLiteral("usage_segments"), QStringLiteral("usage_excluded_applications"),
         QStringLiteral("task_automations"),
         QStringLiteral("task_automation_executions"),
+        QStringLiteral("automation_rules"), QStringLiteral("automation_executions"),
+        QStringLiteral("automation_action_results"),
+        QStringLiteral("automation_execution_claims"),
         QStringLiteral("data_imports")};
     for (const QString &table : tables) {
         qint64 count = 0;
@@ -163,8 +168,16 @@ bool DataImportRepository::targetIsEmpty(bool *empty, QString *blockingReason) c
                     {QStringLiteral("steam_release_follows"), QStringLiteral("followed releases")},
                     {QStringLiteral("steam_game_update_follows"), QStringLiteral("followed Game Updates games")},
                     {QStringLiteral("steam_game_update_news_items"), QStringLiteral("cached Game Updates articles")},
+                    {QStringLiteral("usage_tracked_applications"), QStringLiteral("tracked application identities")},
+                    {QStringLiteral("usage_sessions"), QStringLiteral("application usage sessions")},
+                    {QStringLiteral("usage_segments"), QStringLiteral("application usage history")},
+                    {QStringLiteral("usage_excluded_applications"), QStringLiteral("application privacy exclusions")},
                     {QStringLiteral("task_automations"), QStringLiteral("task automations")},
                     {QStringLiteral("task_automation_executions"), QStringLiteral("automation history")},
+                    {QStringLiteral("automation_rules"), QStringLiteral("global automation rules")},
+                    {QStringLiteral("automation_executions"), QStringLiteral("global automation history")},
+                    {QStringLiteral("automation_action_results"), QStringLiteral("global automation action history")},
+                    {QStringLiteral("automation_execution_claims"), QStringLiteral("automation event claims")},
                     {QStringLiteral("data_imports"), QStringLiteral("a completed import")}};
                 *blockingReason = QStringLiteral("This Qt profile already contains %1 (%2 records). Import needs a fresh Qt profile; existing records will not be overwritten.")
                     .arg(labels.value(table, QStringLiteral("saved favorite updates"))).arg(count);

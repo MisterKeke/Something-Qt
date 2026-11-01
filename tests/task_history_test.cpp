@@ -597,6 +597,7 @@ void TaskHistoryTest::versionEightDatabaseMigratesWithoutFabricatedHistory()
     QVERIFY(migration.exec(QStringLiteral("DROP TABLE usage_tracked_applications")));
     QVERIFY(migration.exec(QStringLiteral("DROP TABLE usage_tracking_settings")));
     QVERIFY(migration.exec(QStringLiteral("DROP TABLE usage_excluded_applications")));
+    QVERIFY(migration.exec(QStringLiteral("DROP TABLE automation_execution_claims")));
     QVERIFY(migration.exec(QStringLiteral("DROP TABLE automation_action_results")));
     QVERIFY(migration.exec(QStringLiteral("DROP TABLE automation_actions")));
     QVERIFY(migration.exec(QStringLiteral("DROP TABLE automation_conditions")));
@@ -613,7 +614,7 @@ void TaskHistoryTest::versionEightDatabaseMigratesWithoutFabricatedHistory()
     QString diagnostic;
     QVERIFY2(storage::SchemaMigrator::apply(fixture.database, &diagnostic),
              qPrintable(diagnostic));
-    QCOMPARE(storage::SchemaMigrator::latestVersion(), 22);
+    QCOMPARE(storage::SchemaMigrator::latestVersion(), 23);
 
     const auto preserved = repositories.tasks.get(legacyTask.value.id);
     QVERIFY(preserved.succeeded());

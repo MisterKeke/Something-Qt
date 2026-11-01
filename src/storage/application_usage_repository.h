@@ -73,6 +73,7 @@ public:
                               const QString &startUtc, const QString &endUtc,
                               const QString &search, const QString &sort,
                               QString *diagnostic = nullptr) const;
+    QVariantList applicationChoices(QString *diagnostic = nullptr) const;
     QVariantMap queryApplication(const QString &applicationId,
                                  const QString &firstLocalDay,
                                  const QString &lastLocalDay,

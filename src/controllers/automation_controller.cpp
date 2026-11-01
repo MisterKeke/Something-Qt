@@ -66,16 +66,19 @@ AutomationController::AutomationController(
     services::ApplicationUsageService *usage,
     platform::DesktopApplicationsPlatform *desktopPlatform,
     BackgroundController *background, QObject *parent,
-    std::function<bool(const QUrl &)> openUrl)
+    std::function<bool(const QUrl &)> openUrl, const domain::Clock *clock)
     : QObject(parent), m_graph(graph), m_mutations(mutations), m_usage(usage),
       m_desktopPlatform(desktopPlatform), m_background(background),
       m_openUrl(openUrl ? std::move(openUrl) : [](const QUrl &url) {
           return QDesktopServices::openUrl(url);
-      })
+      }), m_clock(clock)
 {
     Q_ASSERT(m_graph);
+    m_profileMaintenance = m_graph->isProfileMaintenance();
     connect(m_graph, &application::ApplicationServiceGraph::storageOperationFinished,
             this, &AutomationController::onStorageFinished);
+    connect(m_graph, &application::ApplicationServiceGraph::profileMaintenanceChanged,
+            this, &AutomationController::onProfileMaintenanceChanged);
     connect(m_graph, &application::ApplicationServiceGraph::expensiveValueJobFinished,
             this, &AutomationController::onValueFinished);
     connect(&m_graph->lifecycle(), &application::ApplicationLifecycle::stateChanged,
@@ -98,6 +101,7 @@ AutomationController::AutomationController(
         connect(m_usage, &services::ApplicationUsageService::applicationSessionEnded,
                 this, [this](const QString &, const QString &sessionId, const QString &, const QString &) {
             m_chainDepthBySession.remove(sessionId);
+            m_foregroundBySession.remove(sessionId);
         });
     }
     m_tickTimer.setInterval(15000);
@@ -111,7 +115,8 @@ AutomationController::AutomationController(
         checkOverdueTasks();
         checkScheduledRules();
     });
-    if (m_graph->lifecycle().state() == application::ApplicationLifecycle::State::Running)
+    if (m_graph->lifecycle().state() == application::ApplicationLifecycle::State::Running
+        && !m_profileMaintenance)
         reload();
 }
 
@@ -132,15 +137,24 @@ QVariantList AutomationController::rules() const
 void AutomationController::reload()
 {
     if (m_stopping) return;
+    if (m_rulesReloadPending) {
+        m_ruleReloadAgain = true;
+        return;
+    }
+    m_rulesReloadPending = true;
     const bool recover = !m_recoveryStarted;
+    const QString historyCutoff = QDateTime::currentDateTimeUtc().addDays(-365)
+        .toString(Qt::ISODateWithMs);
     m_recoveryStarted = true;
-    submitStorage([recover](storage::StorageRepositories &repositories,
+    submitStorage([recover, historyCutoff](storage::StorageRepositories &repositories,
                      const std::function<bool()> &cancelled) {
         if (cancelled()) return storage::StorageReply{{}, {}, domain::AppError::cancelled()};
         if (recover) {
             const auto recovered = repositories.automations.cancelUnfinished(utcNow());
             if (!recovered.succeeded()) return storage::StorageReply{{}, {}, recovered.error};
         }
+        const auto pruned = repositories.automations.pruneHistory(historyCutoff);
+        if (!pruned.succeeded()) return storage::StorageReply{{}, {}, pruned.error};
         const auto rows = repositories.automations.rules();
         if (!rows.succeeded()) return storage::StorageReply{{}, {}, rows.error};
         QVariantList ruleMaps;
@@ -161,6 +175,24 @@ void AutomationController::reload()
         if (error.isError() || error.isCancelled()) {
             if (recover) m_recoveryStarted = false;
             m_errorMessage = QStringLiteral("Automation rules could not be loaded.");
+            if (m_stopping) {
+                m_rulesReloadPending = false;
+                m_waitingForRules.clear();
+                m_waitingForRulesIds.clear();
+            } else if (m_ruleReloadAgain) {
+                m_ruleReloadAgain = false;
+                m_rulesReloadPending = false;
+                reload();
+            } else if (!m_ruleReloadRetryScheduled) {
+                m_ruleReloadRetryScheduled = true;
+                QTimer::singleShot(1000, this, [this] {
+                    m_ruleReloadRetryScheduled = false;
+                    if (!m_stopping && m_rulesReloadPending) {
+                        m_rulesReloadPending = false;
+                        reload();
+                    }
+                });
+            }
             emit stateChanged();
             return;
         }
@@ -176,12 +208,28 @@ void AutomationController::reload()
                 it.value().toString(), Qt::ISODateWithMs).toUTC());
         m_paused = values.value(QStringLiteral("paused")).toBool();
         m_ready = true;
+        if (m_stopping) {
+            m_rulesReloadPending = false;
+            m_waitingForRules.clear();
+            m_waitingForRulesIds.clear();
+            emit stateChanged();
+            return;
+        }
         if (recover) {
             m_firstScheduleScan = true;
             m_lastScheduleMinute.clear();
         }
         m_errorMessage.clear();
+        if (m_ruleReloadAgain && !m_stopping) {
+            m_ruleReloadAgain = false;
+            m_rulesReloadPending = false;
+            reload();
+            emit stateChanged();
+            return;
+        }
+        m_rulesReloadPending = false;
         if (!m_tickTimer.isActive()) m_tickTimer.start();
+        drainWaitingForRules();
         emit stateChanged();
     }, QStringLiteral("load automation rules"));
 }
@@ -300,6 +348,34 @@ void AutomationController::setPaused(bool paused)
     }, QStringLiteral("save automation pause state"));
 }
 
+void AutomationController::prepareShutdown()
+{
+    if (m_shutdownPreparing) return;
+    m_shutdownPreparing = true;
+    m_stopping = true;
+    m_tickTimer.stop();
+    m_admissionQueue.clear();
+    m_pendingClaimKeys.clear();
+    m_waitingForRules.clear();
+    m_waitingForRulesIds.clear();
+    const QStringList executionIds = m_running.keys();
+    for (const QString &executionId : executionIds)
+        finishExecution(executionId, QStringLiteral("canceled"),
+                        QStringLiteral("Application is shutting down."));
+    maybeFinishShutdownPreparation();
+}
+
+void AutomationController::maybeFinishShutdownPreparation()
+{
+    if (!m_shutdownPreparing || m_shutdownPreparationReported
+        || m_claimsPending > 0 || m_shutdownStatusWrites > 0) return;
+    m_shutdownPreparationReported = true;
+    emit shutdownPreparationFinished(!m_shutdownPersistenceFailed,
+        m_shutdownPersistenceFailed
+            ? QStringLiteral("One or more automation execution statuses could not be saved.")
+            : QString());
+}
+
 void AutomationController::loadHistory(const QString &ruleId, const QString &status,
     const QString &triggerType, int offset, const QString &startDate, const QString &endDate)
 {
@@ -390,7 +466,12 @@ void AutomationController::onApplicationSessionStarted(const QString &applicatio
 void AutomationController::onApplicationStateChanged(const QString &applicationId,
     const QString &sessionId, const QString &state, const QString &timestampUtc)
 {
-    if (!state.startsWith(QStringLiteral("Foreground"), Qt::CaseInsensitive)) return;
+    if (state.compare(QStringLiteral("Unknown"), Qt::CaseInsensitive) == 0) return;
+    const bool entersForeground = state.startsWith(QStringLiteral("Foreground"),
+                                                    Qt::CaseInsensitive);
+    const bool wasForeground = m_foregroundBySession.value(sessionId, false);
+    m_foregroundBySession.insert(sessionId, entersForeground);
+    if (!domain::AutomationRules::isForegroundEntry(wasForeground, state)) return;
     domain::AutomationEvent event;
     event.id = QStringLiteral("usage:foreground:") + sessionId + QLatin1Char(':') + timestampUtc;
     event.type = QStringLiteral("application.foreground_entered");
@@ -484,9 +565,10 @@ void AutomationController::onSteamNewsRefreshCommitted(
 }
 
 bool AutomationController::submitStorage(storage::StorageCommand command,
-    std::function<void(const QVariantMap &, domain::AppError)> completed, QString purpose)
+    std::function<void(const QVariantMap &, domain::AppError)> completed, QString purpose,
+    bool allowDuringShutdown)
 {
-    if (m_stopping) return false;
+    if (m_stopping && !allowDuringShutdown) return false;
     const auto operation = m_graph->beginOperation(std::move(purpose));
     if (!operation.isValid()) {
         if (completed) completed({}, domain::AppError(domain::ErrorCategory::Busy));
@@ -539,52 +621,110 @@ void AutomationController::onValueFinished(quint64 operationId,
 
 void AutomationController::receiveEvent(domain::AutomationEvent event)
 {
-    if (!m_ready || m_stopping
-        || domain::AutomationRules::validateEvent(event).isError()) return;
+    if (m_stopping || domain::AutomationRules::validateEvent(event).isError()) return;
+    if (m_paused) return;
+    if (!m_ready || m_rulesReloadPending || m_profileMaintenance) {
+        queueUntilRulesReady(std::move(event));
+        return;
+    }
+    QVector<domain::AutomationRule> matchingRules;
     for (const auto &rule : m_rules) {
         if (!domain::AutomationRules::triggerMatches(rule, event)
             || !domain::AutomationRules::conditionsMatch(rule, event)) continue;
-        int cooldown = rule.cooldownSeconds;
-        if (rule.triggerType == QStringLiteral("application.foreground_entered"))
-            cooldown = qMax(cooldown, 5);
-        const QDateTime last = m_lastAttemptedByRule.value(rule.id);
-        if (cooldown > 0 && last.isValid()
-            && last.secsTo(QDateTime::currentDateTimeUtc()) < cooldown) {
-            markBlocked(rule, event, QStringLiteral("Rule cooldown is active."));
-            continue;
+        if (rule.enabled) matchingRules.push_back(rule);
+    }
+    std::sort(matchingRules.begin(), matchingRules.end(), [](const auto &left, const auto &right) {
+        return left.id < right.id;
+    });
+    for (const auto &rule : matchingRules) enqueueAdmission(rule, event);
+    pumpAdmissionQueue();
+}
+
+void AutomationController::queueUntilRulesReady(domain::AutomationEvent event)
+{
+    if (m_waitingForRulesIds.contains(event.id)) return;
+    constexpr qsizetype maximumWaitingEvents = 256;
+    if (m_waitingForRules.size() >= maximumWaitingEvents) {
+        const QString message = QStringLiteral(
+            "Automation rules are loading or profile maintenance is active; the waiting event limit was reached.");
+        if (m_errorMessage != message) {
+            m_errorMessage = message;
+            emit stateChanged();
         }
-        if (event.chainDepth >= 5) {
-            markBlocked(rule, event, QStringLiteral("Automation chain depth limit reached."));
-            continue;
-        }
-        if (m_running.size() + m_claimsPending >= 100) {
-            markBlocked(rule, event, QStringLiteral("Maximum pending automation executions reached."));
-            continue;
-        }
-        if (m_paused) continue;
-        const QDateTime now = QDateTime::currentDateTimeUtc();
-        while (!m_executionRateWindow.isEmpty()
-               && m_executionRateWindow.head().secsTo(now) >= 60)
-            m_executionRateWindow.dequeue();
-        if (m_executionRateWindow.size() >= 20) {
-            markBlocked(rule, event, QStringLiteral("Automation rate limit reached."));
-            continue;
-        }
-        m_executionRateWindow.enqueue(now);
-        m_lastAttemptedByRule.insert(rule.id, now);
-        auto current = m_rules.find(rule.id);
-        if (current != m_rules.end())
-            current->lastExecutionRequestedAtUtc = now.toString(Qt::ISODateWithMs);
-        claimExecution(rule, event);
+        return;
+    }
+    m_waitingForRulesIds.insert(event.id);
+    m_waitingForRules.enqueue(std::move(event));
+}
+
+void AutomationController::drainWaitingForRules()
+{
+    if (m_rulesReloadPending || !m_ready || m_stopping || m_profileMaintenance) return;
+    while (!m_waitingForRules.isEmpty()) {
+        domain::AutomationEvent event = m_waitingForRules.dequeue();
+        m_waitingForRulesIds.remove(event.id);
+        receiveEvent(std::move(event));
     }
 }
 
-void AutomationController::claimExecution(const domain::AutomationRule &rule,
+void AutomationController::onProfileMaintenanceChanged(bool active)
+{
+    if (m_profileMaintenance == active) return;
+    m_profileMaintenance = active;
+    if (active) {
+        m_tickTimer.stop();
+        while (!m_admissionQueue.isEmpty()) {
+            AdmissionCandidate candidate = m_admissionQueue.dequeue();
+            m_pendingClaimKeys.remove(candidate.key);
+            queueUntilRulesReady(candidate.event);
+        }
+        return;
+    }
+
+    if (m_stopping) return;
+    reload();
+    while (!m_maintenanceClaims.isEmpty()) {
+        const DeferredMaintenanceClaim claim = m_maintenanceClaims.dequeue();
+        finishClaimAsSkipped(claim.executionId, claim.candidate.rule,
+            claim.candidate.event, QStringLiteral("canceled"),
+            QStringLiteral("Profile maintenance began before the action could start."));
+    }
+}
+
+void AutomationController::enqueueAdmission(const domain::AutomationRule &rule,
     const domain::AutomationEvent &event)
+{
+    QString key = rule.id;
+    key.append(QChar(0x1f));
+    key.append(event.id);
+    if (m_pendingClaimKeys.contains(key)) return;
+    constexpr int maximumQueuedClaims = 256;
+    if (m_admissionQueue.size() + m_claimsPending >= maximumQueuedClaims) {
+        m_errorMessage = QStringLiteral("Automation admission is busy; some new events were not queued.");
+        emit stateChanged();
+        return;
+    }
+    m_pendingClaimKeys.insert(key);
+    m_admissionQueue.enqueue({key, rule, event});
+}
+
+void AutomationController::pumpAdmissionQueue()
+{
+    if (m_stopping || m_profileMaintenance) return;
+    constexpr int maximumClaimsInFlight = 32;
+    while (m_claimsPending < maximumClaimsInFlight && !m_admissionQueue.isEmpty()) {
+        AdmissionCandidate candidate = m_admissionQueue.dequeue();
+        claimExecution(std::move(candidate));
+    }
+}
+
+void AutomationController::claimExecution(AdmissionCandidate candidate)
 {
     ++m_claimsPending;
     const QString executionId = QUuid::createUuid().toString(QUuid::WithoutBraces);
     const QString requestedAt = utcNow();
+    const domain::AutomationRule rule = candidate.rule;
+    const domain::AutomationEvent event = candidate.event;
     submitStorage([executionId, rule, event, requestedAt](storage::StorageRepositories &repositories,
                     const std::function<bool()> &cancelled) {
         if (cancelled()) return storage::StorageReply{{}, {}, domain::AppError::cancelled()};
@@ -594,21 +734,102 @@ void AutomationController::claimExecution(const domain::AutomationRule &rule,
         storage::StorageReply reply;
         reply.values.insert(QStringLiteral("inserted"), inserted.value);
         return reply;
-    }, [this, executionId, rule, event](const QVariantMap &values, domain::AppError error) {
+    }, [this, candidate = std::move(candidate), executionId, rule, event]
+       (const QVariantMap &values, domain::AppError error) {
         m_claimsPending = qMax(0, m_claimsPending - 1);
-        if (error.isError() || error.isCancelled() || !values.value(QStringLiteral("inserted")).toBool())
+        if (error.isError() && error.category() == domain::ErrorCategory::Busy && !m_stopping) {
+            if (m_profileMaintenance) {
+                m_pendingClaimKeys.remove(candidate.key);
+                queueUntilRulesReady(candidate.event);
+                maybeFinishShutdownPreparation();
+                return;
+            }
+            m_admissionQueue.prepend(candidate);
+            if (!m_admissionRetryScheduled) {
+                m_admissionRetryScheduled = true;
+                QTimer::singleShot(250, this, [this] {
+                    m_admissionRetryScheduled = false;
+                    pumpAdmissionQueue();
+                });
+            }
             return;
+        }
+        m_pendingClaimKeys.remove(candidate.key);
+        if (error.isError() || error.isCancelled() || !values.value(QStringLiteral("inserted")).toBool()) {
+            maybeFinishShutdownPreparation();
+            pumpAdmissionQueue();
+            return;
+        }
+        if (m_stopping) {
+            const QString finishedAt = utcNow();
+            ++m_shutdownStatusWrites;
+            submitStorage([executionId, finishedAt](storage::StorageRepositories &repositories,
+                            const std::function<bool()> &cancelled) {
+                if (cancelled()) return storage::StorageReply{{}, {}, domain::AppError::cancelled()};
+                const auto result = repositories.automations.updateExecution(executionId,
+                    QStringLiteral("canceled"), {}, finishedAt,
+                    QStringLiteral("Application shut down before the action started."));
+                if (!result.succeeded()) return storage::StorageReply{{}, {}, result.error};
+                return storage::StorageReply{};
+            }, [this](const QVariantMap &, domain::AppError saveError) {
+                --m_shutdownStatusWrites;
+                if (saveError.isError()) m_shutdownPersistenceFailed = true;
+                maybeFinishShutdownPreparation();
+            }, QStringLiteral("cancel unstarted automation on shutdown"), true);
+            maybeFinishShutdownPreparation();
+            return;
+        }
+        if (m_profileMaintenance) {
+            m_maintenanceClaims.enqueue({executionId, candidate});
+            maybeFinishShutdownPreparation();
+            return;
+        }
+        const auto current = m_rules.constFind(rule.id);
+        if (current == m_rules.cend() || !current->enabled || current->revision != rule.revision) {
+            finishClaimAsSkipped(executionId, rule, event, QStringLiteral("canceled"),
+                QStringLiteral("Rule changed or was disabled before the action started."));
+            pumpAdmissionQueue();
+            return;
+        }
+        if (m_paused) {
+            finishClaimAsSkipped(executionId, rule, event, QStringLiteral("skipped"),
+                                 QStringLiteral("Automations are paused."));
+            pumpAdmissionQueue();
+            return;
+        }
+        int cooldown = rule.cooldownSeconds;
+        if (rule.triggerType == QStringLiteral("application.foreground_entered"))
+            cooldown = qMax(cooldown, 5);
+        const QDateTime now = QDateTime::currentDateTimeUtc();
+        const QDateTime last = m_lastAttemptedByRule.value(rule.id);
+        QString blockedReason;
+        if (cooldown > 0 && last.isValid() && last.secsTo(now) < cooldown)
+            blockedReason = QStringLiteral("Rule cooldown is active.");
+        else if (event.chainDepth >= 5)
+            blockedReason = QStringLiteral("Automation chain depth limit reached.");
+        else if (m_running.size() + m_claimsPending >= 100)
+            blockedReason = QStringLiteral("Maximum pending automation executions reached.");
+        while (!m_executionRateWindow.isEmpty()
+               && m_executionRateWindow.head().secsTo(now) >= 60)
+            m_executionRateWindow.dequeue();
+        if (blockedReason.isEmpty() && m_executionRateWindow.size() >= 20)
+            blockedReason = QStringLiteral("Automation rate limit reached.");
+        if (!blockedReason.isEmpty()) {
+            finishClaimAsSkipped(executionId, rule, event, QStringLiteral("skipped"), blockedReason);
+            pumpAdmissionQueue();
+            return;
+        }
+
+        m_executionRateWindow.enqueue(now);
+        m_lastAttemptedByRule.insert(rule.id, now);
+        auto currentRule = m_rules.find(rule.id);
+        if (currentRule != m_rules.end())
+            currentRule->lastExecutionRequestedAtUtc = now.toString(Qt::ISODateWithMs);
         RunningExecution running;
         running.rule = rule;
         running.event = event;
         running.executionId = executionId;
         m_running.insert(executionId, std::move(running));
-        const auto current = m_rules.constFind(rule.id);
-        if (current == m_rules.cend() || !current->enabled || current->revision != rule.revision) {
-            finishExecution(executionId, QStringLiteral("canceled"),
-                            QStringLiteral("Rule changed or was disabled before the action started."));
-            return;
-        }
         const QString startedAt = utcNow();
         submitStorage([executionId, startedAt](storage::StorageRepositories &repositories,
                         const std::function<bool()> &cancelled) {
@@ -634,7 +855,41 @@ void AutomationController::claimExecution(const domain::AutomationRule &rule,
                 runNextAction(executionId);
             }
         }, QStringLiteral("start automation execution"));
+        pumpAdmissionQueue();
     }, QStringLiteral("claim automation execution"));
+}
+
+void AutomationController::finishClaimAsSkipped(const QString &executionId,
+    const domain::AutomationRule &rule, const domain::AutomationEvent &event,
+    const QString &status, const QString &reason)
+{
+    const QString finishedAt = utcNow();
+    submitStorage([executionId, status, reason, finishedAt]
+        (storage::StorageRepositories &repositories, const std::function<bool()> &cancelled) {
+        if (cancelled()) return storage::StorageReply{{}, {}, domain::AppError::cancelled()};
+        const auto updated = repositories.automations.updateExecution(
+            executionId, status, {}, finishedAt, reason);
+        if (!updated.succeeded()) return storage::StorageReply{{}, {}, updated.error};
+        return storage::StorageReply{};
+    }, [this, rule, event, status, reason, finishedAt]
+       (const QVariantMap &, domain::AppError error) {
+        const QString resultStatus = error.isError() ? QStringLiteral("failed") : status;
+        const QString resultError = error.isError()
+            ? QStringLiteral("The admission decision could not be saved.") : reason;
+        auto current = m_rules.find(rule.id);
+        if (current != m_rules.end()) {
+            current->lastExecutionAtUtc = finishedAt;
+            current->lastExecutionStatus = resultStatus;
+            current->lastExecutionError = resultError;
+        }
+        if (error.isError()) {
+            m_errorMessage = resultError;
+            m_notification = QStringLiteral("Automation admission history could not be saved.");
+        }
+        emit executionChanged(rule.sourceTaskId, resultStatus, resultError, finishedAt);
+        emit stateChanged();
+    }, QStringLiteral("record automation admission decision"));
+    Q_UNUSED(event);
 }
 
 void AutomationController::runNextAction(const QString &executionId)
@@ -694,9 +949,14 @@ void AutomationController::executeCurrentAction(const QString &executionId)
             action.message, it->event, &valid);
         if (!valid) { complete(QStringLiteral("failed"), QStringLiteral("Notification contains a placeholder unavailable for this event.")); return; }
         const QString title = safeTriggerTitle(it->event.type);
+        const quint64 previousSequence = m_background ? m_background->notificationSequence() : 0;
         const bool shown = m_background && m_background->showAutomationNotification(title, message);
+        const bool deferred = shown && m_background
+            && m_background->notificationSequence() != previousSequence;
         complete(shown ? QStringLiteral("succeeded") : QStringLiteral("failed"),
-                 shown ? QString() : QStringLiteral("Notification could not be displayed."));
+                 !shown ? QStringLiteral("Notification could not be displayed.")
+                     : deferred ? QStringLiteral("Queued for in-app delivery. Message: ")
+                         + message.left(900) : QString());
         return;
     }
     if (action.type == QStringLiteral("open_url")) {
@@ -848,6 +1108,8 @@ void AutomationController::finishExecution(const QString &executionId,
         rule->lastExecutionStatus = status;
         rule->lastExecutionError = errorMessage;
     }
+    const bool trackShutdownWrite = m_shutdownPreparing;
+    if (trackShutdownWrite) ++m_shutdownStatusWrites;
     submitStorage([executionId, status, errorMessage, finishedAt]
         (storage::StorageRepositories &repositories, const std::function<bool()> &cancelled) {
         if (cancelled()) return storage::StorageReply{{}, {}, domain::AppError::cancelled()};
@@ -855,8 +1117,13 @@ void AutomationController::finishExecution(const QString &executionId,
             executionId, status, {}, finishedAt, errorMessage);
         if (!saved.succeeded()) return storage::StorageReply{{}, {}, saved.error};
         return storage::StorageReply{};
-    }, [this, ruleId, taskId, eventId, status, errorMessage, finishedAt]
+    }, [this, ruleId, taskId, eventId, status, errorMessage, finishedAt,
+        trackShutdownWrite]
        (const QVariantMap &, domain::AppError error) {
+        if (trackShutdownWrite) {
+            --m_shutdownStatusWrites;
+            if (error.isError()) m_shutdownPersistenceFailed = true;
+        }
         const QString visibleError = error.isError()
             ? QStringLiteral("Execution finished, but its result could not be saved.") : errorMessage;
         const QString visibleStatus = error.isError() ? QStringLiteral("failed") : status;
@@ -874,51 +1141,8 @@ void AutomationController::finishExecution(const QString &executionId,
         }
         emit stateChanged();
         Q_UNUSED(eventId);
-    }, QStringLiteral("finish automation execution"));
-}
-
-void AutomationController::markBlocked(const domain::AutomationRule &rule,
-    const domain::AutomationEvent &event, QString reason)
-{
-    const QString executionId = QUuid::createUuid().toString(QUuid::WithoutBraces);
-    const QString requestedAt = utcNow();
-    submitStorage([executionId, rule, event, reason, requestedAt](storage::StorageRepositories &repositories,
-                    const std::function<bool()> &cancelled) {
-        if (cancelled()) return storage::StorageReply{{}, {}, domain::AppError::cancelled()};
-        const auto inserted = repositories.automations.insertExecution(executionId, rule.id,
-            rule.name, event, requestedAt);
-        if (!inserted.succeeded()) return storage::StorageReply{{}, {}, inserted.error};
-        if (!inserted.value) {
-            storage::StorageReply duplicate;
-            duplicate.values.insert(QStringLiteral("inserted"), false);
-            return duplicate;
-        }
-        const QString finished = utcNow();
-        const auto updated = repositories.automations.updateExecution(executionId,
-            QStringLiteral("skipped"), {}, finished, reason);
-        if (!updated.succeeded()) return storage::StorageReply{{}, {}, updated.error};
-        storage::StorageReply reply;
-        reply.values.insert(QStringLiteral("inserted"), true);
-        return reply;
-    }, [this, rule, reason, requestedAt](const QVariantMap &values, domain::AppError error) {
-        if (error.isError()) {
-            m_errorMessage = QStringLiteral("A blocked automation could not be recorded.");
-            m_notification = QStringLiteral("Automation history could not be saved.");
-            emit stateChanged();
-            return;
-        }
-        if (!values.value(QStringLiteral("inserted")).toBool()) return;
-        auto current = m_rules.find(rule.id);
-        const QString timestamp = requestedAt;
-        if (current != m_rules.end()) {
-            current->lastExecutionRequestedAtUtc = timestamp;
-            current->lastExecutionAtUtc = timestamp;
-            current->lastExecutionStatus = QStringLiteral("skipped");
-            current->lastExecutionError = reason;
-        }
-        emit executionChanged(rule.sourceTaskId, QStringLiteral("skipped"), reason, timestamp);
-        emit stateChanged();
-    }, QStringLiteral("record blocked automation"));
+        maybeFinishShutdownPreparation();
+    }, QStringLiteral("finish automation execution"), trackShutdownWrite);
 }
 
 void AutomationController::scheduleTick()
@@ -975,7 +1199,9 @@ void AutomationController::checkOverdueTasks()
 void AutomationController::checkScheduledRules()
 {
     if (!m_ready || m_stopping || m_paused) return;
-    const QDateTime localNow = QDateTime::currentDateTime();
+    QDateTime utcNow = m_clock ? m_clock->nowUtc().toUTC() : QDateTime::currentDateTimeUtc();
+    const QTimeZone timeZone = m_clock ? m_clock->localTimeZone() : QTimeZone::systemTimeZone();
+    const QDateTime localNow = timeZone.isValid() ? utcNow.toTimeZone(timeZone) : utcNow.toLocalTime();
     const QString minute = localNow.toString(QStringLiteral("yyyy-MM-dd HH:mm"));
     if (m_firstScheduleScan) {
         m_firstScheduleScan = false;
@@ -986,9 +1212,8 @@ void AutomationController::checkScheduledRules()
     m_lastScheduleMinute = minute;
     for (const auto &rule : m_rules) {
         if (!rule.enabled || rule.triggerType != QStringLiteral("schedule.time_reached")) continue;
-        const QTime configured = QTime::fromString(
-            rule.triggerConfig.value(QStringLiteral("time")).toString(), QStringLiteral("HH:mm"));
-        if (!configured.isValid() || configured != localNow.time().addSecs(-localNow.time().second())) continue;
+        if (!domain::AutomationRules::scheduledTimeMatchesMinute(
+                rule.triggerConfig.value(QStringLiteral("time")).toString(), localNow)) continue;
         const QString date = rule.triggerConfig.value(QStringLiteral("date")).toString();
         if (!date.isEmpty() && date != localNow.date().toString(Qt::ISODate)) continue;
         const QVariantList weekdays = rule.triggerConfig.value(QStringLiteral("weekdays")).toList();

@@ -7,7 +7,40 @@ import Something.App as ThemeModule
 Item {
     id: root
     property var controller
+    property string pendingSearchWindowId: ""
+    property string revealedSearchWindowId: ""
+    property string searchTargetMessage: ""
     implicitHeight: 570
+
+    function openSearchResult(result, action) {
+        if (!result || action !== "open") return
+        const windowId = String(result.targetId || (result.payload || ({})).windowId || "")
+        if (windowId.length === 0) return
+        pendingSearchWindowId = windowId
+        searchTargetMessage = ""
+        controller.reload()
+    }
+
+    function resolvePendingSearchWindow() {
+        if (pendingSearchWindowId.length === 0 || controller.loading) return
+        const windowId = pendingSearchWindowId
+        pendingSearchWindowId = ""
+        const row = controller.windows.rowForId(windowId)
+        if (row < 0) {
+            searchTargetMessage = controller.errorMessage.length > 0
+                ? controller.errorMessage : qsTr("This window is no longer available.")
+            return
+        }
+        revealedSearchWindowId = windowId
+        searchTargetMessage = ""
+        windowList.currentIndex = row
+        Qt.callLater(function() { windowList.positionViewAtIndex(row, ListView.Contain) })
+    }
+
+    Connections {
+        target: root.controller
+        function onStateChanged() { root.resolvePendingSearchWindow() }
+    }
 
     Component.onCompleted: controller.setPageVisible(visible)
     onVisibleChanged: if (controller) controller.setPageVisible(visible)
@@ -36,6 +69,15 @@ Item {
                 enabled: !root.controller.loading
                 onClicked: root.controller.reload()
             }
+        }
+
+        Label {
+            Layout.fillWidth: true
+            visible: root.searchTargetMessage.length > 0
+            text: root.searchTargetMessage
+            color: ThemeModule.Theme.error
+            wrapMode: Text.Wrap
+            Accessible.role: Accessible.AlertMessage
         }
 
         Shared.StatePanel {
@@ -85,6 +127,10 @@ Item {
 
                 width: windowList.width
                 implicitHeight: row.implicitHeight + 26
+                fillColor: root.revealedSearchWindowId === windowId
+                           ? ThemeModule.Theme.raisedSurface : ThemeModule.Theme.panelSurface
+                border.color: root.revealedSearchWindowId === windowId
+                              ? ThemeModule.Theme.accentCyan : ThemeModule.Theme.borderColor
                 RowLayout {
                     id: row
                     anchors.fill: parent

@@ -5,6 +5,7 @@
 #include "../application/application_lifecycle.h"
 
 #include <QThread>
+#include <QDebug>
 
 namespace something::controllers {
 
@@ -25,6 +26,16 @@ ApplicationController::ApplicationController(
             this, &ApplicationController::capabilitiesChanged);
     connect(m_graph, &something::application::ApplicationServiceGraph::shutdownComplete,
             this, &ApplicationController::onGraphShutdownComplete);
+    m_shutdownPreparationTimer.setSingleShot(true);
+    m_shutdownPreparationTimer.setInterval(8000);
+    connect(&m_shutdownPreparationTimer, &QTimer::timeout, this, [this] {
+        if (m_shutdownPreparationFinished) return;
+        m_shutdownErrorMessage = tr("Timed out while saving final application state.");
+        qWarning().noquote() << "Shutdown preparation timed out;" << m_shutdownErrorMessage;
+        emit stateChanged();
+        m_shutdownPreparationsRemaining = 0;
+        beginGraphShutdown();
+    });
 }
 
 QString ApplicationController::lifecycleState() const
@@ -54,11 +65,41 @@ void ApplicationController::requestShutdown()
         return;
     }
     m_shutdownRequested = true;
+    m_shutdownPreparationsRemaining = 2;
     emit shutdownRequestedChanged(true);
     if (m_graph->isShutdownComplete()) {
         emit shutdownFinished();
         return;
     }
+    m_shutdownPreparationTimer.start();
+    emit shutdownPreparationRequested();
+}
+
+void ApplicationController::reportShutdownPreparationResult(
+    bool success, const QString &diagnostic)
+{
+    if (!m_shutdownRequested || m_shutdownPreparationFinished
+        || m_shutdownPreparationsRemaining <= 0) return;
+    if (!success) {
+        m_shutdownErrorMessage = diagnostic.trimmed().isEmpty()
+            ? tr("A final application state could not be saved.") : diagnostic.trimmed();
+        qWarning().noquote() << "Shutdown preparation failed:" << m_shutdownErrorMessage;
+        emit stateChanged();
+    }
+    --m_shutdownPreparationsRemaining;
+    if (m_shutdownPreparationsRemaining == 0) beginGraphShutdown();
+}
+
+void ApplicationController::beginGraphShutdown()
+{
+    if (m_shutdownPreparationFinished) return;
+    m_shutdownPreparationFinished = true;
+    m_shutdownPreparationTimer.stop();
+    if (m_graph->isShutdownComplete()) {
+        emit shutdownFinished();
+        return;
+    }
+    m_graph->stopAcceptingOperations();
     m_graph->shutdown();
 }
 

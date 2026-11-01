@@ -84,6 +84,7 @@ public:
         const QString &triggerType, const QString &startUtc, const QString &endExclusiveUtc,
         int limit, int offset) const;
     RepositoryResult<int> cancelUnfinished(QString finishedAtUtc);
+    RepositoryResult<int> pruneHistory(QString finishedBeforeUtc);
 
 private:
     RepositoryResult<AutomationRule> loadRule(const QString &ruleId) const;

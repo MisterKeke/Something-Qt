@@ -4,6 +4,7 @@
 #include <QJsonObject>
 #include <QDateTime>
 #include <QSqlError>
+#include <QSqlDriver>
 #include <QSqlQuery>
 #include <QSet>
 #include <QThread>
@@ -238,19 +239,50 @@ RepositoryResult<bool> AutomationRepository::insertExecution(
         || !requested.isValid() || requested.timeSpec() != Qt::UTC
         || domain::AutomationRules::validateEvent(event).isError())
         return failure<bool>(domain::ErrorCategory::Validation);
+    if (!m_database.transaction())
+        return failure<bool>(domain::ErrorCategory::Storage);
+    QSqlQuery claim(m_database);
+    claim.prepare(QStringLiteral(
+        "INSERT INTO automation_execution_claims(rule_id,event_id,claimed_at_utc) "
+        "VALUES(?,?,?) ON CONFLICT(rule_id,event_id) DO NOTHING"));
+    claim.addBindValue(ruleId);
+    claim.addBindValue(event.id);
+    claim.addBindValue(requestedAtUtc);
+    if (!claim.exec()) {
+        const auto result = failure<bool>(claim);
+        m_database.rollback();
+        return result;
+    }
+    if (claim.numRowsAffected() != 1) {
+        if (!m_database.commit()) {
+            m_database.rollback();
+            return failure<bool>(domain::ErrorCategory::Storage);
+        }
+        RepositoryResult<bool> duplicate;
+        duplicate.value = false;
+        return duplicate;
+    }
+
     QSqlQuery query(m_database);
     query.prepare(QStringLiteral(
         "INSERT INTO automation_executions(execution_id,rule_id,rule_name_snapshot,event_id,"
         "trigger_type,source_module,requested_at_utc,event_occurred_at_utc,status) "
-        "VALUES(?,?,?,?,?,?,?,?,'pending') "
-        "ON CONFLICT(rule_id,event_id) DO NOTHING"));
+        "VALUES(?,?,?,?,?,?,?,?,'pending')"));
     query.addBindValue(executionId); query.addBindValue(ruleId); query.addBindValue(ruleName);
     query.addBindValue(event.id); query.addBindValue(event.type); query.addBindValue(event.sourceModule);
     query.addBindValue(requestedAtUtc);
     query.addBindValue(event.occurredAtUtc.toString(Qt::ISODateWithMs));
-    if (!query.exec()) return failure<bool>(query);
+    if (!query.exec()) {
+        const auto result = failure<bool>(query);
+        m_database.rollback();
+        return result;
+    }
+    if (!m_database.commit()) {
+        m_database.rollback();
+        return failure<bool>(domain::ErrorCategory::Storage);
+    }
     RepositoryResult<bool> result;
-    result.value = query.numRowsAffected() == 1;
+    result.value = true;
     return result;
 }
 
@@ -305,7 +337,10 @@ RepositoryResult<QVariantList> AutomationRepository::history(
         "SELECT execution_id,COALESCE(rule_id,''),rule_name_snapshot,event_id,trigger_type,source_module,"
         "requested_at_utc,event_occurred_at_utc,started_at_utc,finished_at_utc,status,error_message,"
         "(SELECT COUNT(*) FROM automation_action_results a WHERE a.execution_id=e.execution_id AND a.status='succeeded'),"
-        "(SELECT COUNT(*) FROM automation_action_results a WHERE a.execution_id=e.execution_id) "
+        "(SELECT COUNT(*) FROM automation_action_results a WHERE a.execution_id=e.execution_id),"
+        "COALESCE((SELECT group_concat(action_type||': '||status||' — '||error_message, char(10)) "
+        "FROM automation_action_results a WHERE a.execution_id=e.execution_id "
+        "AND error_message<>''), '') "
         "FROM automation_executions e WHERE (?='' OR rule_id=?) AND (?='' OR status=?) "
         "AND (?='' OR trigger_type=?) AND (?='' OR requested_at_utc>=?) "
         "AND (?='' OR requested_at_utc<?) "
@@ -326,7 +361,8 @@ RepositoryResult<QVariantList> AutomationRepository::history(
             {QStringLiteral("eventOccurredAtUtc"), query.value(7)},
             {QStringLiteral("startedAtUtc"), query.value(8)}, {QStringLiteral("finishedAtUtc"), query.value(9)},
             {QStringLiteral("status"), query.value(10)}, {QStringLiteral("errorMessage"), query.value(11)},
-            {QStringLiteral("actionsCompleted"), query.value(12)}, {QStringLiteral("actionsAttempted"), query.value(13)}});
+            {QStringLiteral("actionsCompleted"), query.value(12)}, {QStringLiteral("actionsAttempted"), query.value(13)},
+            {QStringLiteral("actionDetails"), query.value(14)}});
     }
     RepositoryResult<QVariantList> result; result.value = std::move(rows); return result;
 }
@@ -341,6 +377,23 @@ RepositoryResult<int> AutomationRepository::cancelUnfinished(QString finishedAtU
     query.addBindValue(finishedAtUtc);
     if (!query.exec()) return failure<int>(query);
     RepositoryResult<int> result; result.value = query.numRowsAffected(); return result;
+}
+
+RepositoryResult<int> AutomationRepository::pruneHistory(QString finishedBeforeUtc)
+{
+    Q_ASSERT(QThread::currentThread() == m_database.driver()->thread());
+    const QDateTime cutoff = QDateTime::fromString(finishedBeforeUtc, Qt::ISODateWithMs);
+    if (!cutoff.isValid() || cutoff.timeSpec() != Qt::UTC)
+        return failure<int>(domain::ErrorCategory::Validation);
+    QSqlQuery query(m_database);
+    query.prepare(QStringLiteral(
+        "DELETE FROM automation_executions WHERE finished_at_utc IS NOT NULL "
+        "AND finished_at_utc < ?"));
+    query.addBindValue(finishedBeforeUtc);
+    if (!query.exec()) return failure<int>(query);
+    RepositoryResult<int> result;
+    result.value = query.numRowsAffected();
+    return result;
 }
 
 } // namespace something::storage

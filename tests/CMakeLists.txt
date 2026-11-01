@@ -659,6 +659,44 @@ target_link_libraries(SomethingQtApplicationUsageTests PRIVATE
 add_test(NAME SomethingQtApplicationUsageTests COMMAND SomethingQtApplicationUsageTests
     -o "${CMAKE_CURRENT_BINARY_DIR}/application-usage-results.txt,txt")
 
+add_executable(SomethingQtAutomationUsageControllerIntegrationTests
+    automation_usage_controller_integration_test.cpp
+    ../src/platform/application_usage_platform.h
+    ../src/application/application_lifecycle.cpp
+    ../src/application/application_service_graph.cpp
+    ../src/application/capability_registry.cpp
+    ../src/application/operation_coordinator.cpp
+    ../src/controllers/automation_controller.cpp
+    ../src/controllers/background_controller.cpp
+    ../src/domain/app_error.cpp
+    ../src/domain/desktop_application_rules.cpp
+    ../src/domain/task_date_rules.cpp
+    ../src/domain/task_history.cpp
+    ../src/domain/task_rules.cpp
+    ../src/domain/task_scheduling.cpp
+    ../src/platform/profile_instance_lock.cpp
+    ../src/providers/network_worker.cpp
+    ../src/providers/provider_policy.cpp
+    ../src/providers/provider_response_cache.cpp
+    ../src/services/application_mutation_workflow.cpp
+    ../src/services/application_usage_service.cpp
+    ../src/services/bounded_worker_pool.cpp
+    ../src/services/desktop_applications_service.cpp
+    ../src/services/preferences_service.cpp
+    ../src/services/setups_service.cpp
+    ../src/services/task_service.cpp
+    ../src/storage/schema_migrator.cpp
+    ../src/storage/storage_worker.cpp
+)
+target_include_directories(SomethingQtAutomationUsageControllerIntegrationTests PRIVATE ../src)
+target_link_libraries(SomethingQtAutomationUsageControllerIntegrationTests PRIVATE
+    Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Network Qt6::Quick Qt6::Sql Qt6::Test
+    SomethingQtTestRepositories)
+add_test(NAME SomethingQtAutomationUsageControllerIntegrationTests
+    COMMAND SomethingQtAutomationUsageControllerIntegrationTests
+        -o "${CMAKE_CURRENT_BINARY_DIR}/automation-usage-controller-results.txt,txt")
+set_tests_properties(SomethingQtAutomationUsageControllerIntegrationTests PROPERTIES TIMEOUT 60)
+
 add_executable(SomethingQtUniversalSearchDomainTests
     universal_search_test.cpp
     ../src/domain/universal_search.cpp

@@ -190,7 +190,7 @@ int main(int argc, char *argv[])
     something::controllers::SteamGameUpdatesController steamGameUpdatesController(&services);
     something::controllers::AutomationController automationController(
         &services, &mutationWorkflow, &applicationUsageService,
-        &desktopApplicationsPlatform, &backgroundController);
+        &desktopApplicationsPlatform, &backgroundController, nullptr, {}, &clock);
     commandService.setSnapshotProvider(QStringLiteral("settings"), [&settingsController, &wallpaperController,
                                                                      &steamGamesController] {
         QVariantMap fields;
@@ -416,12 +416,23 @@ int main(int argc, char *argv[])
                      &something::controllers::ApplicationController::requestShutdown);
     QObject::connect(&controller,
                      &something::controllers::ApplicationController::shutdownRequestedChanged,
-                     &backgroundController, [&backgroundController, &applicationUsageService](bool requested) {
-        if (requested) {
-            applicationUsageService.prepareShutdown();
-        }
+                     &backgroundController, [&backgroundController](bool requested) {
         backgroundController.setShutdownRequested(requested);
     });
+    QObject::connect(&controller,
+                     &something::controllers::ApplicationController::shutdownPreparationRequested,
+                     &controller, [&automationController, &applicationUsageService] {
+        automationController.prepareShutdown();
+        applicationUsageService.prepareShutdown();
+    });
+    QObject::connect(&applicationUsageService,
+                     &something::services::ApplicationUsageService::shutdownFlushFinished,
+                     &controller,
+                     &something::controllers::ApplicationController::reportShutdownPreparationResult);
+    QObject::connect(&automationController,
+                     &something::controllers::AutomationController::shutdownPreparationFinished,
+                     &controller,
+                     &something::controllers::ApplicationController::reportShutdownPreparationResult);
     QObject::connect(&backgroundController,
                      &something::controllers::BackgroundController::toggleUsageTrackingRequested,
                      &applicationUsageService, [&applicationUsageService] {

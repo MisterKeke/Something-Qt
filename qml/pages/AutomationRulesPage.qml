@@ -9,10 +9,10 @@ Item {
     id: root
     required property var controller
     required property var usageController
-    required property var desktopApplicationsController
-    required property var setupsController
-    required property var steamGamesController
-    required property var steamReleaseController
+    required property var desktopApplicationChoicesController
+    required property var setupChoicesController
+    required property var steamGameChoicesController
+    required property var steamReleaseChoicesController
     required property var gameUpdatesController
     implicitHeight: 820
 
@@ -35,6 +35,7 @@ Item {
     property int draftCooldown: 0
     property string deleteRuleId: ""
     property bool usageChoicesRequested: false
+    property string searchTargetMessage: ""
 
     readonly property var triggerChoices: [
         { value: "task.completed", label: qsTr("Task completed") },
@@ -261,7 +262,11 @@ Item {
     function openSearchResult(result, action) {
         const id = String(result && result.targetId || "")
         const rule = (controller.rules || []).find(function(item) { return String(item.id) === id })
-        if (!rule) return
+        searchTargetMessage = ""
+        if (!rule) {
+            searchTargetMessage = qsTr("This automation rule is no longer available. Refresh the rules and search again.")
+            return
+        }
         if (String(action || "") === "edit" && Number(rule.sourceTaskId || 0) === 0)
             openEditor(rule)
         else
@@ -271,8 +276,8 @@ Item {
     Component.onCompleted: {
         controller.loadHistory()
         loadUsageChoices()
-        desktopApplicationsController.loadAllApplications()
-        setupsController.reload()
+        desktopApplicationChoicesController.loadAllApplications()
+        setupChoicesController.reload()
     }
 
     Connections {
@@ -351,6 +356,16 @@ Item {
                     width: parent.width
                     visible: root.controller.errorMessage.length > 0
                     text: root.controller.errorMessage
+                    color: ThemeModule.Theme.error
+                    font.family: ThemeModule.Theme.fontFamily
+                    font.pixelSize: 13
+                    wrapMode: Text.Wrap
+                    Accessible.role: Accessible.AlertMessage
+                }
+                Label {
+                    width: parent.width
+                    visible: root.searchTargetMessage.length > 0
+                    text: root.searchTargetMessage
                     color: ThemeModule.Theme.error
                     font.family: ThemeModule.Theme.fontFamily
                     font.pixelSize: 13
@@ -596,7 +611,7 @@ Item {
                             id: applicationChoice
                             Layout.fillWidth: true
                             accessibleLabel: qsTr("Choose a discovered application")
-                            model: root.usageController.applications
+                            model: root.usageController.applicationChoices
                             textRole: "name"
                             valueRole: "applicationId"
                             currentIndex: root.draftConfig.applicationId
@@ -616,7 +631,7 @@ Item {
                             model: root.draftTrigger === "steam.game_news_available"
                                   ? root.gameUpdatesController.games
                                   : root.draftTrigger === "steam.release_date_changed"
-                                    ? root.steamReleaseController.releases : root.steamGamesController.games
+                                    ? root.steamReleaseChoicesController.releases : root.steamGameChoicesController.games
                             textRole: root.draftTrigger === "steam.release_date_changed" ? "title" : "name"
                             valueRole: root.draftTrigger === "steam.release_date_changed"
                                        || root.draftTrigger === "steam.game_news_available"
@@ -783,7 +798,7 @@ Item {
                                     Layout.fillWidth: true
                                     visible: root.actionDrafts[index].type === "launch_application"
                                     accessibleLabel: qsTr("Saved application target")
-                                    model: root.desktopApplicationsController.applications
+                                    model: root.desktopApplicationChoicesController.applications
                                     textRole: "displayName"
                                     valueRole: "id"
                                     currentIndex: Math.max(0, indexOfValue(Number(root.actionDrafts[index].targetId || 0)))
@@ -793,7 +808,7 @@ Item {
                                     Layout.fillWidth: true
                                     visible: root.actionDrafts[index].type === "launch_setup"
                                     accessibleLabel: qsTr("Setup target")
-                                    model: root.setupsController.setups
+                                    model: root.setupChoicesController.setups
                                     textRole: "name"
                                     valueRole: "id"
                                     currentIndex: Math.max(0, indexOfValue(Number(root.actionDrafts[index].targetId || 0)))
@@ -996,6 +1011,16 @@ Item {
                                     color: ThemeModule.Theme.error
                                     font.family: ThemeModule.Theme.fontFamily
                                     font.pixelSize: 12
+                                    wrapMode: Text.Wrap
+                                }
+                                Label {
+                                    Layout.fillWidth: true
+                                    visible: String(modelData.actionDetails || "").length > 0
+                                    text: modelData.actionDetails || ""
+                                    color: ThemeModule.Theme.textSecondary
+                                    font.family: ThemeModule.Theme.fontFamily
+                                    font.pixelSize: 12
+                                    textFormat: Text.PlainText
                                     wrapMode: Text.Wrap
                                 }
                             }

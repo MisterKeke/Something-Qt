@@ -75,6 +75,10 @@ Dialog {
                         root.selectedIndex = Math.max(0, root.selectedIndex - 1)
                     event.accepted = true
                 } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
+                    if (searchField.inputMethodComposing) {
+                        event.accepted = false
+                        return
+                    }
                     if (root.controller.results.count > 0)
                         root.controller.activateResult(root.selectedIndex, "")
                     event.accepted = true
@@ -246,6 +250,17 @@ Dialog {
             font.family: ThemeModule.Theme.fontFamily
             font.pixelSize: ThemeModule.Theme.metadataFontSize
             horizontalAlignment: Text.AlignRight
+        }
+    }
+
+    Connections {
+        target: root.controller.results
+        function onCountChanged() {
+            if (root.controller.results.count <= 0)
+                root.selectedIndex = 0
+            else
+                root.selectedIndex = Math.max(0, Math.min(root.selectedIndex,
+                                                          root.controller.results.count - 1))
         }
     }
 }

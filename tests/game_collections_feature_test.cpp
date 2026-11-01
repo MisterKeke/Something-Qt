@@ -179,6 +179,7 @@ void GameCollectionsFeatureTest::migrationSeedsTheCatalogWithoutChangingExisting
         QVERIFY(legacy.exec(QStringLiteral("DROP TABLE usage_tracked_applications")));
         QVERIFY(legacy.exec(QStringLiteral("DROP TABLE usage_tracking_settings")));
         QVERIFY(legacy.exec(QStringLiteral("DROP TABLE usage_excluded_applications")));
+        QVERIFY(legacy.exec(QStringLiteral("DROP TABLE automation_execution_claims")));
         QVERIFY(legacy.exec(QStringLiteral("DROP TABLE automation_action_results")));
         QVERIFY(legacy.exec(QStringLiteral("DROP TABLE automation_actions")));
         QVERIFY(legacy.exec(QStringLiteral("DROP TABLE automation_conditions")));
@@ -195,7 +196,7 @@ void GameCollectionsFeatureTest::migrationSeedsTheCatalogWithoutChangingExisting
 
     QString diagnostic;
     QVERIFY2(storage::SchemaMigrator::apply(database, &diagnostic), qPrintable(diagnostic));
-    QCOMPARE(storage::SchemaMigrator::latestVersion(), 22);
+    QCOMPARE(storage::SchemaMigrator::latestVersion(), 23);
     {
         storage::StorageRepositories repositories(database);
         const auto price = repositories.steam.get(priceRowId);

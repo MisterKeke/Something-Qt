@@ -22,6 +22,7 @@ class ApplicationUsageController final : public QObject {
     Q_PROPERTY(QString errorMessage READ errorMessage NOTIFY stateChanged)
     Q_PROPERTY(QVariantList exclusions READ exclusions NOTIFY stateChanged)
     Q_PROPERTY(QVariantList applications READ applications NOTIFY stateChanged)
+    Q_PROPERTY(QVariantList applicationChoices READ applicationChoices NOTIFY stateChanged)
     Q_PROPERTY(QVariantMap overview READ overview NOTIFY stateChanged)
     Q_PROPERTY(QVariantMap detail READ detail NOTIFY stateChanged)
     Q_PROPERTY(QString selectedApplicationId READ selectedApplicationId NOTIFY stateChanged)
@@ -46,6 +47,7 @@ public:
     QString errorMessage() const { return m_errorMessage; }
     QVariantList exclusions() const;
     QVariantList applications() const;
+    QVariantList applicationChoices() const { return m_applicationChoices; }
     QVariantMap overview() const { return m_overview; }
     QVariantMap detail() const { return m_detail; }
     QString selectedApplicationId() const { return m_selectedApplicationId; }
@@ -99,6 +101,7 @@ private:
     QHash<quint64, Request> m_requests;
     QVariantMap m_overview;
     QVariantMap m_detail;
+    QVariantList m_applicationChoices;
     QString m_selectedApplicationId;
     QString m_rangePreset{QStringLiteral("today")};
     QString m_searchText;

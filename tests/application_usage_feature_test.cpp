@@ -30,12 +30,13 @@ void ApplicationUsageFeatureTest::migrationCreatesUsageSchemaWithoutReplacingExi
     database.setDatabaseName(QStringLiteral(":memory:"));
     QVERIFY(database.open());
     QVERIFY(storage::SchemaMigrator::apply(database));
-    QCOMPARE(storage::SchemaMigrator::latestVersion(), 22);
+    QCOMPARE(storage::SchemaMigrator::latestVersion(), 23);
 
     QSqlQuery fixture(database);
     QVERIFY(fixture.exec(QStringLiteral(
         "INSERT INTO tasks(title) VALUES('kept during usage migration')")));
     QVERIFY(fixture.exec(QStringLiteral("DROP TABLE automation_action_results")));
+    QVERIFY(fixture.exec(QStringLiteral("DROP TABLE automation_execution_claims")));
     QVERIFY(fixture.exec(QStringLiteral("DROP TABLE automation_actions")));
     QVERIFY(fixture.exec(QStringLiteral("DROP TABLE automation_conditions")));
     QVERIFY(fixture.exec(QStringLiteral("DROP TABLE automation_executions")));

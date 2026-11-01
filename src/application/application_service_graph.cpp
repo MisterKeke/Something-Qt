@@ -212,13 +212,16 @@ bool ApplicationServiceGraph::enterProfileMaintenance()
     Q_ASSERT(QThread::currentThread() == thread());
     if (m_profileMaintenance || m_lifecycle.state() != ApplicationLifecycle::State::Running) return false;
     m_profileMaintenance = true;
+    emit profileMaintenanceChanged(true);
     return true;
 }
 
 void ApplicationServiceGraph::leaveProfileMaintenance()
 {
     Q_ASSERT(QThread::currentThread() == thread());
+    if (!m_profileMaintenance) return;
     m_profileMaintenance = false;
+    emit profileMaintenanceChanged(false);
 }
 
 OperationContext ApplicationServiceGraph::beginProfileMaintenanceOperation(QString purpose)
@@ -468,6 +471,12 @@ void ApplicationServiceGraph::shutdown()
     }
 
     maybeAdvanceShutdown();
+}
+
+void ApplicationServiceGraph::stopAcceptingOperations()
+{
+    Q_ASSERT(QThread::currentThread() == thread());
+    m_operations.stopAccepting();
 }
 
 void ApplicationServiceGraph::onStorageOpened(something::domain::AppError error)

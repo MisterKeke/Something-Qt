@@ -6036,27 +6036,63 @@ bool collectSearchCandidates(QSqlDatabase &database, const QString &baseSql,
     sql += orderByTitle(query, &bindings);
     bindings.push_back(perSourceLimit);
 
-    QSqlQuery statement(database);
-    statement.setForwardOnly(true);
-    statement.prepare(sql);
-    for (const QVariant &binding : bindings) statement.addBindValue(binding);
-    if (!statement.exec()) {
-        *error = domain::AppError(queryFailure(statement));
-        return false;
-    }
-    while (statement.next()) {
-        if (cancelled && cancelled()) {
-            *error = domain::AppError::cancelled();
+    QVector<SearchCandidate> sourceMatches;
+    const auto collectRows = [&](const QString &statementSql,
+                                 const QVariantList &statementBindings) -> bool {
+        QSqlQuery statement(database);
+        statement.setForwardOnly(true);
+        statement.prepare(statementSql);
+        for (const QVariant &binding : statementBindings) statement.addBindValue(binding);
+        if (!statement.exec()) {
+            *error = domain::AppError(queryFailure(statement));
             return false;
         }
-        SearchCandidate item = make(statement);
-        const int itemScore = domain::UniversalSearch::score(
-            query, item.titleFields, item.categoryFields, item.descriptionFields);
-        if (itemScore <= 0) continue;
-        item.result.insert(QStringLiteral("score"), itemScore);
-        candidates->push_back(std::move(item));
+        while (statement.next()) {
+            if (cancelled && cancelled()) {
+                *error = domain::AppError::cancelled();
+                return false;
+            }
+            SearchCandidate item = make(statement);
+            const int itemScore = domain::UniversalSearch::score(
+                query, item.titleFields, item.categoryFields, item.descriptionFields);
+            if (itemScore <= 0) continue;
+            const QString id = item.result.value(QStringLiteral("id")).toString();
+            if (std::any_of(sourceMatches.cbegin(), sourceMatches.cend(),
+                    [&id](const SearchCandidate &candidate) {
+                        return candidate.result.value(QStringLiteral("id")).toString() == id;
+                    })) continue;
+            item.result.insert(QStringLiteral("score"), itemScore);
+            sourceMatches.push_back(std::move(item));
+            std::sort(sourceMatches.begin(), sourceMatches.end(),
+                [](const SearchCandidate &left, const SearchCandidate &right) {
+                    return domain::UniversalSearch::compare(left.result, right.result);
+                });
+            if (sourceMatches.size() > perSourceLimit)
+                sourceMatches.resize(perSourceLimit);
+        }
+        statement.finish();
+        return true;
+    };
+
+    if (!collectRows(sql, bindings)) return false;
+
+    // SQLite's built-in LIKE/NOCASE only folds ASCII. Scan the relatively small
+    // subset of rows containing non-ASCII text as a second candidate source,
+    // then apply Qt's Unicode-aware scorer before retaining the best results.
+    // This also handles mixed casing and canonical forms that whole-string
+    // lower/upper variants cannot enumerate.
+    QStringList unicodeClauses;
+    for (const QString &field : searchFields)
+        unicodeClauses.push_back(field + QStringLiteral(" GLOB '*[^ -~]*'"));
+    if (!unicodeClauses.isEmpty()) {
+        const QString unicodeSql = baseSql + QStringLiteral(" WHERE (")
+            + unicodeClauses.join(QStringLiteral(" OR "))
+            + QStringLiteral(") ORDER BY target_sort");
+        if (!collectRows(unicodeSql, {})) return false;
     }
-    statement.finish();
+
+    for (SearchCandidate &item : sourceMatches)
+        candidates->push_back(std::move(item));
     return true;
 }
 

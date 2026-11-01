@@ -16,6 +16,8 @@
 namespace something::services {
 namespace {
 
+constexpr qsizetype maximumPendingCheckpointRecords = 10000;
+
 Q_LOGGING_CATEGORY(lcUsage, "something.applicationUsage", QtWarningMsg)
 
 QString utcString(const QDateTime &value)
@@ -61,8 +63,11 @@ ApplicationUsageService::ApplicationUsageService(
     connect(&m_checkpointTimer, &QTimer::timeout, this,
             [this] { checkpoint(); });
     if (m_graph) {
+        m_profileMaintenance = m_graph->isProfileMaintenance();
         connect(m_graph, &application::ApplicationServiceGraph::storageOperationFinished,
                 this, &ApplicationUsageService::onStorageFinished);
+        connect(m_graph, &application::ApplicationServiceGraph::profileMaintenanceChanged,
+                this, &ApplicationUsageService::onProfileMaintenanceChanged);
         connect(&m_graph->lifecycle(), &application::ApplicationLifecycle::stateChanged,
                 this, [this](application::ApplicationLifecycle::State state) {
             if (state == application::ApplicationLifecycle::State::Running)
@@ -70,7 +75,8 @@ ApplicationUsageService::ApplicationUsageService(
             else if (state == application::ApplicationLifecycle::State::Failed)
                 setTrackingActive(false);
         });
-        if (m_graph->lifecycle().state() == application::ApplicationLifecycle::State::Running)
+        if (m_graph->lifecycle().state() == application::ApplicationLifecycle::State::Running
+            && !m_profileMaintenance)
             loadConfiguration();
     }
     if (m_platform) {
@@ -95,11 +101,12 @@ QString ApplicationUsageService::trackingStatus() const
         return m_configurationDiagnostic.isEmpty()
             ? tr("Waiting for local storage.") : m_configurationDiagnostic;
     if (!m_enabled) return tr("Tracking is paused.");
-    if (!m_trackingActive) return tr("Tracking is not active.");
+    if (!m_storageDiagnostic.isEmpty()) return m_storageDiagnostic;
+    if (!m_configurationDiagnostic.isEmpty()) return m_configurationDiagnostic;
     if (m_systemSuspended) return tr("Tracking is paused while Windows is suspended.");
     if (m_systemLocked) return tr("Tracking is paused while the Windows session is locked.");
-    if (!m_storageDiagnostic.isEmpty()) return m_storageDiagnostic;
     if (!m_observationDiagnostic.isEmpty()) return m_observationDiagnostic;
+    if (!m_trackingActive) return tr("Tracking is not active.");
     if (m_omittedGapCount > 0)
         return tr("%1 long observation gaps (%2 seconds) were omitted from tracked totals.")
             .arg(m_omittedGapCount).arg(m_omittedGapDurationMs / 1000);
@@ -185,8 +192,43 @@ void ApplicationUsageService::loadConfiguration()
         });
 }
 
+void ApplicationUsageService::onProfileMaintenanceChanged(bool active)
+{
+    if (m_profileMaintenance == active) return;
+    m_profileMaintenance = active;
+    if (active) {
+        m_checkpointTimer.stop();
+        const QStringList activeIds = m_active.keys();
+        const qint64 nowMono = m_monotonic.elapsed();
+        const QDateTime nowUtc = QDateTime::currentDateTimeUtc();
+        for (const QString &id : activeIds)
+            finishSession(id, QStringLiteral("profile-maintenance"), nowMono, nowUtc);
+        setTrackingActive(false);
+        emit liveApplicationsChanged();
+        return;
+    }
+
+    if (!m_graph || m_graph->lifecycle().state()
+            != application::ApplicationLifecycle::State::Running) return;
+    if (m_configurationDiagnostic == tr("Usage settings cannot change during profile maintenance.")
+        || m_configurationDiagnostic == tr("Usage history cannot change during profile maintenance."))
+        m_configurationDiagnostic.clear();
+    if (!m_configurationLoaded) {
+        loadConfiguration();
+        return;
+    }
+    checkpoint();
+    if (m_enabled && supported() && !m_storageBackpressurePaused) setTrackingActive(true);
+    emit stateChanged();
+}
+
 void ApplicationUsageService::setTrackingEnabled(bool enabled)
 {
+    if (m_profileMaintenance) {
+        m_configurationDiagnostic = tr("Usage settings cannot change during profile maintenance.");
+        emit stateChanged();
+        return;
+    }
     if (!m_configurationLoaded || m_enabled == enabled) return;
     m_enabled = enabled;
     if (enabled) {
@@ -217,6 +259,11 @@ void ApplicationUsageService::setTrackingEnabled(bool enabled)
 
 void ApplicationUsageService::setRetentionDays(int days)
 {
+    if (m_profileMaintenance) {
+        m_configurationDiagnostic = tr("Usage settings cannot change during profile maintenance.");
+        emit stateChanged();
+        return;
+    }
     if (!m_configurationLoaded || days < 0 || days > 3650 || m_retentionDays == days) return;
     m_retentionDays = days;
     submitStorage({PendingOperation::Kind::SetRetention, {}},
@@ -234,56 +281,54 @@ void ApplicationUsageService::addApplicationExclusion(const QString &application
                                                        const QString &canonicalPath,
                                                        const QString &executableName)
 {
+    if (m_profileMaintenance) {
+        m_configurationDiagnostic = tr("Usage settings cannot change during profile maintenance.");
+        emit stateChanged();
+        return;
+    }
     if (!m_configurationLoaded || applicationId.trimmed().isEmpty()) return;
+    const QString path = canonicalPath.trimmed();
+    const QString name = executableName.trimmed();
+    if (path.isEmpty() && name.isEmpty()) {
+        m_configurationDiagnostic = tr("This application has no stable path or executable name, so its exclusion cannot be saved.");
+        emit stateChanged();
+        return;
+    }
+    const bool matchByName = path.isEmpty();
+    const QString stableId = matchByName
+        ? QStringLiteral("filename:%1").arg(name.toCaseFolded()) : applicationId;
     storage::ApplicationUsageExclusion exclusion{
-        applicationId, canonicalPath, executableName, false,
+        stableId, path, name, matchByName,
         utcString(QDateTime::currentDateTimeUtc())};
-    const auto existing = std::find_if(m_exclusions.begin(), m_exclusions.end(),
-        [&applicationId](const auto &item) { return item.applicationId == applicationId; });
-    if (existing == m_exclusions.end()) m_exclusions.push_back(exclusion);
-    else *existing = exclusion;
-    const auto active = m_active.value(applicationId);
-    if (!active.sessionId.isEmpty())
-        finishSession(applicationId, QStringLiteral("excluded"), m_monotonic.elapsed(),
-                      QDateTime::currentDateTimeUtc());
     persistExclusion(exclusion);
-    checkpoint();
-    emit stateChanged();
-    emit liveApplicationsChanged();
 }
 
 void ApplicationUsageService::addFilenameExclusion(const QString &executableName)
 {
+    if (m_profileMaintenance) {
+        m_configurationDiagnostic = tr("Usage settings cannot change during profile maintenance.");
+        emit stateChanged();
+        return;
+    }
+    if (!m_configurationLoaded) return;
     const QString name = executableName.trimmed();
     if (name.isEmpty()) return;
     const QString id = QStringLiteral("filename:%1").arg(name.toCaseFolded());
     storage::ApplicationUsageExclusion exclusion{
         id, {}, name, true, utcString(QDateTime::currentDateTimeUtc())};
-    const auto existing = std::find_if(m_exclusions.begin(), m_exclusions.end(),
-        [&id](const auto &item) { return item.applicationId == id; });
-    if (existing == m_exclusions.end()) m_exclusions.push_back(exclusion);
-    else *existing = exclusion;
-    const QStringList activeIds = m_active.keys();
-    for (const QString &activeId : activeIds) {
-        const auto it = m_active.constFind(activeId);
-        if (it != m_active.cend() && isExcluded(it->application))
-            finishSession(activeId, QStringLiteral("excluded"), m_monotonic.elapsed(),
-                          QDateTime::currentDateTimeUtc());
-    }
     persistExclusion(exclusion);
-    checkpoint();
-    emit stateChanged();
-    emit liveApplicationsChanged();
 }
 
 void ApplicationUsageService::removeExclusion(const QString &applicationId)
 {
-    const auto oldSize = m_exclusions.size();
-    m_exclusions.erase(std::remove_if(m_exclusions.begin(), m_exclusions.end(),
-        [&applicationId](const auto &item) { return item.applicationId == applicationId; }),
-        m_exclusions.end());
-    if (oldSize == m_exclusions.size()) return;
-    submitStorage({PendingOperation::Kind::RemoveExclusion, applicationId},
+    if (m_profileMaintenance) {
+        m_configurationDiagnostic = tr("Usage settings cannot change during profile maintenance.");
+        emit stateChanged();
+        return;
+    }
+    if (std::none_of(m_exclusions.cbegin(), m_exclusions.cend(),
+            [&applicationId](const auto &item) { return item.applicationId == applicationId; })) return;
+    const bool accepted = submitStorage({PendingOperation::Kind::RemoveExclusion, applicationId},
         [applicationId](storage::StorageRepositories &repositories,
                         const std::function<bool()> &cancelled) {
             storage::StorageReply reply;
@@ -292,11 +337,19 @@ void ApplicationUsageService::removeExclusion(const QString &applicationId)
                 reply.error = domain::AppError(domain::ErrorCategory::Storage);
             return reply;
         });
+    if (!accepted) {
+        m_storageDiagnostic = tr("The application exclusion could not be queued for removal.");
+    }
     emit stateChanged();
 }
 
 void ApplicationUsageService::deleteHistory(const QString &applicationId)
 {
+    if (m_profileMaintenance) {
+        m_configurationDiagnostic = tr("Usage history cannot change during profile maintenance.");
+        emit stateChanged();
+        return;
+    }
     if (!m_configurationLoaded) return;
     if (applicationId.isEmpty()) {
         const QStringList activeIds = m_active.keys();
@@ -328,8 +381,8 @@ void ApplicationUsageService::submitDeleteHistory(const QString &applicationId)
 
 void ApplicationUsageService::prepareShutdown()
 {
-    if (!m_trackingActive && m_active.isEmpty() && m_pendingApplications.isEmpty()
-        && m_pendingSessions.isEmpty() && m_pendingSegments.isEmpty()) return;
+    if (m_shutdownPreparing) return;
+    m_shutdownPreparing = true;
     m_checkpointTimer.stop();
     if (m_platform) m_platform->stop();
     const QStringList activeIds = m_active.keys();
@@ -339,15 +392,23 @@ void ApplicationUsageService::prepareShutdown()
         finishSession(id, QStringLiteral("application-exit"), nowMono, nowUtc);
     setTrackingActive(false);
     m_checkpointRequested = false;
-    if (m_checkpointsInFlight > 0) submitCheckpointBatch(true);
-    else checkpoint();
+    submitCheckpointBatch(m_checkpointsInFlight > 0);
     emit liveApplicationsChanged();
+    if (m_checkpointsInFlight == 0) {
+        const bool hasPending = !m_pendingApplications.isEmpty() || !m_pendingSessions.isEmpty()
+            || !m_pendingSegments.isEmpty();
+        completeShutdownFlush(!hasPending && !m_shutdownCheckpointFailed,
+            hasPending || m_shutdownCheckpointFailed
+                ? tr("The final application usage checkpoint could not be confirmed.") : QString());
+    }
 }
 
 void ApplicationUsageService::persistExclusion(
     const storage::ApplicationUsageExclusion &exclusion)
 {
-    submitStorage({PendingOperation::Kind::AddExclusion, exclusion.applicationId},
+    PendingOperation operation{PendingOperation::Kind::AddExclusion, exclusion.applicationId};
+    operation.exclusion = exclusion;
+    const bool accepted = submitStorage(std::move(operation),
         [exclusion](storage::StorageRepositories &repositories,
                     const std::function<bool()> &cancelled) {
             storage::StorageReply reply;
@@ -356,6 +417,10 @@ void ApplicationUsageService::persistExclusion(
                 reply.error = domain::AppError(domain::ErrorCategory::Storage);
             return reply;
         });
+    if (!accepted) {
+        m_configurationDiagnostic = tr("The application exclusion could not be queued for saving.");
+        emit stateChanged();
+    }
 }
 
 void ApplicationUsageService::onStorageFinished(quint64 operationId,
@@ -371,20 +436,65 @@ void ApplicationUsageService::onStorageFinished(quint64 operationId,
         m_checkpointsInFlight = std::max(0, m_checkpointsInFlight - 1);
         if (error.isError()) {
             restoreCheckpoint(operation.checkpoint);
-            m_storageDiagnostic = tr("A usage checkpoint could not be saved. It will be retried.");
-            m_checkpointTimer.start();
+            m_storageDiagnostic = m_shutdownPreparing
+                ? tr("The final usage checkpoint could not be saved.")
+                : tr("A usage checkpoint could not be saved. It will be retried.");
+            if (m_shutdownPreparing) m_shutdownCheckpointFailed = true;
+            else m_checkpointTimer.start();
+            if (m_storageBackpressurePaused)
+                m_storageDiagnostic = tr("Usage storage is unavailable; tracking is paused while accepted history remains buffered.");
             qCWarning(lcUsage) << "checkpoint_failed" << operation.applicationId;
         } else {
             m_storageDiagnostic.clear();
             emit statisticsChanged();
+            if (m_storageBackpressurePaused && !m_shutdownPreparing
+                && pendingCheckpointRecordCount() == 0) {
+                m_storageBackpressurePaused = false;
+                if (m_enabled && m_configurationLoaded && supported()) setTrackingActive(true);
+            }
         }
-        if (m_checkpointRequested && m_checkpointsInFlight == 0) {
+        if (m_shutdownPreparing && m_checkpointsInFlight == 0) {
+            const bool hasPending = !m_pendingApplications.isEmpty() || !m_pendingSessions.isEmpty()
+                || !m_pendingSegments.isEmpty();
+            completeShutdownFlush(!hasPending && !m_shutdownCheckpointFailed,
+                hasPending || m_shutdownCheckpointFailed
+                    ? tr("The final application usage checkpoint could not be confirmed.") : QString());
+        } else if (m_checkpointRequested && m_checkpointsInFlight == 0) {
             m_checkpointRequested = false;
             checkpoint();
         }
         // A failed checkpoint is retried by the timer. Trying again here can
         // recurse synchronously when the storage worker rejects a full queue.
         if (!error.isError()) processDeferredHistoryDeletes();
+        emit stateChanged();
+        return;
+    }
+
+    if (operation.kind == PendingOperation::Kind::AddExclusion) {
+        if (!error.isError()) {
+            m_storageDiagnostic.clear();
+            m_configurationDiagnostic.clear();
+            applyExclusion(operation.exclusion);
+            checkpoint();
+            emit liveApplicationsChanged();
+        } else {
+            m_storageDiagnostic = tr("The application exclusion could not be saved; tracking settings were left unchanged.");
+        }
+        emit stateChanged();
+        return;
+    }
+
+    if (operation.kind == PendingOperation::Kind::RemoveExclusion) {
+        if (!error.isError()) {
+            m_storageDiagnostic.clear();
+            m_configurationDiagnostic.clear();
+            m_exclusions.erase(std::remove_if(m_exclusions.begin(), m_exclusions.end(),
+                [&operation](const auto &item) {
+                    return item.applicationId == operation.applicationId;
+                }), m_exclusions.end());
+        } else {
+            m_storageDiagnostic = tr("The application exclusion could not be removed; the saved setting was left unchanged.");
+        }
         emit stateChanged();
         return;
     }
@@ -429,7 +539,7 @@ void ApplicationUsageService::onStorageFinished(quint64 operationId,
 
 void ApplicationUsageService::setTrackingActive(bool active)
 {
-    active = active && supported() && m_enabled && m_configurationLoaded;
+    active = active && supported() && m_enabled && m_configurationLoaded && !m_profileMaintenance;
     if (m_trackingActive == active) return;
     m_trackingActive = active;
     if (m_platform) {
@@ -739,7 +849,8 @@ void ApplicationUsageService::submitCheckpointBatch(bool allowParallel)
         m_checkpointsInFlight = std::max(0, m_checkpointsInFlight - 1);
         restoreCheckpoint(std::move(batch));
         m_storageDiagnostic = tr("A usage checkpoint could not be queued.");
-        m_checkpointTimer.start();
+        if (m_shutdownPreparing) m_shutdownCheckpointFailed = true;
+        else m_checkpointTimer.start();
         emit stateChanged();
     }
 }
@@ -796,6 +907,8 @@ void ApplicationUsageService::restoreCheckpoint(storage::ApplicationUsageCheckpo
     m_pendingApplications += checkpoint.applications;
     m_pendingSessions += checkpoint.sessions;
     m_pendingSegments = checkpoint.segments + m_pendingSegments;
+    if (pendingCheckpointRecordCount() >= maximumPendingCheckpointRecords)
+        pauseForStorageBackpressure();
 }
 
 void ApplicationUsageService::notifyLiveChanges()
@@ -814,6 +927,55 @@ void ApplicationUsageService::processDeferredHistoryDeletes()
     }
     const QString applicationId = m_deferredHistoryDeletes.takeFirst();
     submitDeleteHistory(applicationId);
+}
+
+void ApplicationUsageService::applyExclusion(
+    const storage::ApplicationUsageExclusion &exclusion)
+{
+    const auto existing = std::find_if(m_exclusions.begin(), m_exclusions.end(),
+        [&exclusion](const auto &item) { return item.applicationId == exclusion.applicationId; });
+    if (existing == m_exclusions.end()) m_exclusions.push_back(exclusion);
+    else *existing = exclusion;
+
+    const QStringList activeIds = m_active.keys();
+    const qint64 nowMono = m_monotonic.elapsed();
+    const QDateTime nowUtc = QDateTime::currentDateTimeUtc();
+    for (const QString &activeId : activeIds) {
+        const auto active = m_active.constFind(activeId);
+        if (active != m_active.cend() && isExcluded(active->application))
+            finishSession(activeId, QStringLiteral("excluded"), nowMono, nowUtc);
+    }
+}
+
+void ApplicationUsageService::completeShutdownFlush(bool success, QString diagnostic)
+{
+    if (!m_shutdownPreparing || m_shutdownFlushReported) return;
+    m_shutdownFlushReported = true;
+    emit shutdownFlushFinished(success, std::move(diagnostic));
+}
+
+qsizetype ApplicationUsageService::pendingCheckpointRecordCount() const noexcept
+{
+    return m_pendingApplications.size() + m_pendingSessions.size() + m_pendingSegments.size();
+}
+
+void ApplicationUsageService::pauseForStorageBackpressure()
+{
+    if (m_storageBackpressurePaused) return;
+    m_storageBackpressurePaused = true;
+    m_storageDiagnostic = tr("Usage storage is unavailable; tracking is paused while accepted history remains buffered.");
+    m_checkpointTimer.start();
+    if (m_platform) m_platform->stop();
+    m_trackingActive = false;
+    const QStringList activeIds = m_active.keys();
+    const qint64 nowMono = m_monotonic.elapsed();
+    const QDateTime nowUtc = QDateTime::currentDateTimeUtc();
+    for (const QString &id : activeIds)
+        finishSession(id, QStringLiteral("storage-backpressure"), nowMono, nowUtc);
+    qCWarning(lcUsage) << "tracking_paused_storage_backpressure"
+                       << "pending_records=" << pendingCheckpointRecordCount();
+    emit liveApplicationsChanged();
+    emit stateChanged();
 }
 
 } // namespace something::services

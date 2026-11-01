@@ -17,6 +17,7 @@ private slots:
     void cleanup();
     void searchesTasksApplicationsAndFavorites();
     void searchesAutomationRulesWithoutExecutingThem();
+    void searchesUnicodeCaseVariantsThroughSqlPrefilter();
     void boundsLargeResultSetsAndHonorsCancellation();
     void rejectsEmptyAndMalformedQueries();
 
@@ -136,6 +137,30 @@ void UniversalSearchRepositoryTest::searchesAutomationRulesWithoutExecutingThem(
     QCOMPARE(actions.size(), 2);
     QCOMPARE(actions.at(0).toMap().value(QStringLiteral("id")).toString(), QStringLiteral("open"));
     QCOMPARE(actions.at(1).toMap().value(QStringLiteral("id")).toString(), QStringLiteral("edit"));
+}
+
+void UniversalSearchRepositoryTest::searchesUnicodeCaseVariantsThroughSqlPrefilter()
+{
+    QSqlQuery insert(m_database);
+    QVERIFY(insert.exec(QStringLiteral(
+        "INSERT INTO tasks(title,description,priority,revision) "
+        "VALUES('МиР Ééclair','Unicode search fixture','medium',1)")));
+
+    storage::UniversalSearchRepository repository(m_database);
+    const auto cyrillic = repository.search(QStringLiteral("мир"));
+    QVERIFY(cyrillic.succeeded());
+    QCOMPARE(cyrillic.value.size(), 1);
+    QCOMPARE(cyrillic.value.first().toMap().value(QStringLiteral("title")).toString(),
+             QStringLiteral("МиР Ééclair"));
+
+    const auto accented = repository.search(QStringLiteral("ééclair"));
+    QVERIFY(accented.succeeded());
+    QCOMPARE(accented.value.size(), 1);
+
+    const auto canonicalEquivalent = repository.search(
+        QString::fromUtf8("Cafe\xcc\x81"));
+    QVERIFY(canonicalEquivalent.succeeded());
+    QCOMPARE(canonicalEquivalent.value.size(), 1);
 }
 
 void UniversalSearchRepositoryTest::boundsLargeResultSetsAndHonorsCancellation()

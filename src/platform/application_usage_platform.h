@@ -8,6 +8,8 @@
 #include <QVector>
 #include <QTimer>
 
+#include <atomic>
+
 #if defined(Q_OS_WIN)
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -76,6 +78,11 @@ private:
 #endif
     bool m_started{false};
     bool m_powerFilterInstalled{false};
+    std::atomic_bool m_scanDispatchPending{false};
+    std::atomic<quint64> m_nativeCallbackCount{0};
+    std::atomic<quint64> m_queuedDispatchCount{0};
+    std::atomic<quint64> m_coalescedCallbackCount{0};
+    quint64 m_completedScanCount{0};
 };
 
 } // namespace something::platform

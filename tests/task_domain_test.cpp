@@ -122,6 +122,16 @@ void TaskDomainTest::taskAutomationValidationAndUrlNormalization()
     automation.delayMs = 1000;
     QCOMPARE(normalizeTaskAutomation(automation).category(), ErrorCategory::Validation);
 
+    automation.actionType = QStringLiteral("show_notification");
+    automation.url.clear();
+    automation.delayMs = 0;
+    automation.notificationMessage = QStringLiteral("Finished: {task.title} at {task.completedAt}");
+    QVERIFY(!normalizeTaskAutomation(automation).isError());
+    automation.notificationMessage = QStringLiteral("Unexpected: {steam.gameName}");
+    QCOMPARE(normalizeTaskAutomation(automation).category(), ErrorCategory::Validation);
+    automation.notificationMessage = QStringLiteral("Unknown: {task.missingField}");
+    QCOMPARE(normalizeTaskAutomation(automation).category(), ErrorCategory::Validation);
+
     automation.configured = false;
     automation.actionType.clear();
     automation.delayMs = -1;

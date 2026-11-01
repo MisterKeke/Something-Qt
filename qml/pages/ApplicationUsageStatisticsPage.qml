@@ -219,6 +219,19 @@ Item {
             }
         }
 
+        Label {
+            Layout.fillWidth: true
+            visible: root.controller.searchText.length === 0
+                     && Number(root.controller.overview.applicationCount || 0)
+                        > Number(root.controller.overview.loadedRowCount || 0)
+            text: qsTr("Showing the first %1 of %2 applications.").arg(
+                      Number(root.controller.overview.loadedRowCount || 0),
+                      Number(root.controller.overview.applicationCount || 0))
+            color: ThemeModule.Theme.textSecondary
+            font.pixelSize: 12
+            wrapMode: Text.Wrap
+        }
+
         Shared.AppCard {
             Layout.fillWidth: true
             Layout.preferredHeight: statusRow.implicitHeight + padding * 2

@@ -15,6 +15,8 @@ Item {
     property url selectedIconFile: ""
     property bool removeExistingIcon: false
     property var selectedApplicationIds: []
+    property double pendingSearchSetupId: 0
+    property string searchTargetMessage: ""
     implicitHeight: setupsColumn.implicitHeight + 24
 
     function appForId(id) {
@@ -62,11 +64,29 @@ Item {
     }
 
     function openSearchResult(result, action) {
-        const setup = result && result.payload ? result.payload : ({})
-        if (action !== "open" || !setup.id) return
-        openEdit(setup.id, String(setup.name || result.title || ""),
-                 String(setup.description || ""), setup.applicationIds || [],
-                 String(setup.iconFilename || ""))
+        if (!result || action !== "open") return
+        const setupId = Number(result.targetId || (result.payload || ({})).id)
+        if (!Number.isFinite(setupId) || setupId <= 0) return
+        pendingSearchSetupId = setupId
+        searchTargetMessage = ""
+        controller.reload()
+    }
+
+    function resolvePendingSearchSetup() {
+        if (pendingSearchSetupId <= 0 || controller.loading) return
+        const setupId = pendingSearchSetupId
+        pendingSearchSetupId = 0
+        if (controller.errorMessage.length > 0) {
+            searchTargetMessage = controller.errorMessage
+            return
+        }
+        const setup = controller.setups.rowForId(setupId)
+        if (!setup || !setup.id) {
+            searchTargetMessage = qsTr("This setup is no longer available.")
+            return
+        }
+        openEdit(setup.id, String(setup.name || ""), String(setup.description || ""),
+                 setup.applicationIds || [], String(setup.iconFilename || ""))
     }
 
     function toggleApplication(id, checked) {
@@ -93,6 +113,7 @@ Item {
 
     Connections {
         target: root.controller
+        function onStateChanged() { root.resolvePendingSearchSetup() }
         function onMutationFinished(success) {
             if (success && editorDialog.visible) editorDialog.close()
         }
@@ -128,8 +149,9 @@ Item {
 
         Label {
             Layout.fillWidth: true
-            visible: root.controller.errorMessage.length > 0
-            text: root.controller.errorMessage
+            visible: root.searchTargetMessage.length > 0 || root.controller.errorMessage.length > 0
+            text: root.searchTargetMessage.length > 0
+                  ? root.searchTargetMessage : root.controller.errorMessage
             color: ThemeModule.Theme.error
             wrapMode: Text.Wrap
             Accessible.role: Accessible.AlertMessage

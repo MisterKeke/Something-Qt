@@ -92,7 +92,8 @@ bool makeSourceFixture(const QString &directory, int sourceVersion = 24,
         || !exec(writer.db, QStringLiteral("PRAGMA wal_autocheckpoint=0"))) return false;
     const QStringList changes{
         "DROP TABLE data_imports", "DROP TABLE steam_price_observations",
-        "DROP TABLE automation_action_results", "DROP TABLE automation_actions",
+        "DROP TABLE automation_action_results", "DROP TABLE automation_execution_claims",
+        "DROP TABLE automation_actions",
         "DROP TABLE automation_conditions", "DROP TABLE automation_executions",
         "DROP TABLE automation_rules",
         "DROP TABLE task_automation_executions", "DROP TABLE task_automations",

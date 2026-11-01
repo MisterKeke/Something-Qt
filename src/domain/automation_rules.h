@@ -67,6 +67,8 @@ AppError validateEvent(const AutomationEvent &event);
 AppError normalizeRule(AutomationRule &rule);
 bool triggerMatches(const AutomationRule &rule, const AutomationEvent &event);
 bool conditionsMatch(const AutomationRule &rule, const AutomationEvent &event);
+bool scheduledTimeMatchesMinute(const QString &configuredTime, const QDateTime &localNow);
+bool isForegroundEntry(bool wasForeground, const QString &state);
 QString conditionSummary(const AutomationRule &rule);
 QString actionSummary(const AutomationRule &rule);
 QString expandNotification(QString pattern, const AutomationEvent &event,

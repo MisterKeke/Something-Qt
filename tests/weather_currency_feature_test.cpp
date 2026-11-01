@@ -686,6 +686,7 @@ void WeatherCurrencyFeatureTest::weatherComparisonPersistenceRestoresOrderCacheA
         QVERIFY(downgrade.exec(QStringLiteral("DROP TABLE usage_tracked_applications")));
         QVERIFY(downgrade.exec(QStringLiteral("DROP TABLE usage_tracking_settings")));
         QVERIFY(downgrade.exec(QStringLiteral("DROP TABLE usage_excluded_applications")));
+        QVERIFY(downgrade.exec(QStringLiteral("DROP TABLE automation_execution_claims")));
         QVERIFY(downgrade.exec(QStringLiteral("DROP TABLE automation_action_results")));
         QVERIFY(downgrade.exec(QStringLiteral("DROP TABLE automation_actions")));
         QVERIFY(downgrade.exec(QStringLiteral("DROP TABLE automation_conditions")));

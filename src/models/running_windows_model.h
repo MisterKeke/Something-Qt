@@ -22,7 +22,7 @@ public:
     QHash<int, QByteArray> roleNames() const override;
     int count() const noexcept { return m_windows.size(); }
     void replace(QVector<platform::RunningWindow> windows);
-    int rowForId(const QString &id) const;
+    Q_INVOKABLE int rowForId(const QString &id) const;
     QString idAt(int row) const;
 
 signals:
