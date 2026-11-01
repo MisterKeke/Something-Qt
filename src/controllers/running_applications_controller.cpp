@@ -80,7 +80,7 @@ void RunningApplicationsController::onLifecycleChanged(application::ApplicationL
     if (m_ready != ready) m_ready = ready;
     if (!ready) cancelAll();
     updatePolling();
-    if (ready && m_applicationActive && (m_pageVisible || m_dashboardVisible)) reload();
+    if (ready && m_applicationActive && (m_pageVisible || m_dashboardVisible || m_searchVisible)) reload();
     emit stateChanged();
 }
 
@@ -91,7 +91,7 @@ void RunningApplicationsController::onApplicationStateChanged(Qt::ApplicationSta
     m_applicationActive = active;
     if (!active) cancelList();
     updatePolling();
-    if (active && (m_pageVisible || m_dashboardVisible) && m_ready) reload();
+    if (active && (m_pageVisible || m_dashboardVisible || m_searchVisible) && m_ready) reload();
     emit stateChanged();
 }
 
@@ -99,7 +99,7 @@ void RunningApplicationsController::setPageVisible(bool visible)
 {
     if (m_pageVisible == visible) return;
     m_pageVisible = visible;
-    if (!visible && !m_dashboardVisible) cancelList();
+    if (!visible && !m_dashboardVisible && !m_searchVisible) cancelList();
     else m_notification.clear();
     updatePolling();
     if (visible && m_ready && m_applicationActive) reload();
@@ -110,7 +110,16 @@ void RunningApplicationsController::setDashboardVisible(bool visible)
 {
     if (m_dashboardVisible == visible) return;
     m_dashboardVisible = visible;
-    if (!visible && !m_pageVisible) cancelList();
+    if (!visible && !m_pageVisible && !m_searchVisible) cancelList();
+    else if (visible && m_ready && m_applicationActive) reload();
+    emit stateChanged();
+}
+
+void RunningApplicationsController::setSearchVisible(bool visible)
+{
+    if (m_searchVisible == visible) return;
+    m_searchVisible = visible;
+    if (!visible && !m_pageVisible && !m_dashboardVisible) cancelList();
     else if (visible && m_ready && m_applicationActive) reload();
     emit stateChanged();
 }
@@ -124,7 +133,7 @@ void RunningApplicationsController::updatePolling()
 
 void RunningApplicationsController::reload()
 {
-    if (!m_ready || (!m_pageVisible && !m_dashboardVisible)
+    if (!m_ready || (!m_pageVisible && !m_dashboardVisible && !m_searchVisible)
         || !m_applicationActive || !supported()) {
         if (!supported()) m_errorMessage = QStringLiteral("Running-window control is available on Windows.");
         emit stateChanged();

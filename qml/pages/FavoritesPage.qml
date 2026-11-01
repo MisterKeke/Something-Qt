@@ -52,6 +52,21 @@ Item {
         deleteCategoryDialog.open()
     }
 
+    function openSearchResult(result, action) {
+        if (!result) return
+        const payload = result.payload || ({})
+        const source = String(payload.source || providerSource)
+        if (result.type === "favoriteCategory") {
+            favoritesController.setSource(source)
+            categoryDialog.open()
+            return
+        }
+        if (action === "open" && payload.sourceId) {
+            favoritesController.setSource(source)
+            favoritesController.loadChannel(source, String(payload.sourceId), false)
+        }
+    }
+
     onProviderSourceChanged: {
         favoritesController.setSource(providerSource)
         reloadReference()

@@ -37,6 +37,7 @@ public:
 
     Q_INVOKABLE void setPageVisible(bool visible);
     Q_INVOKABLE void setDashboardVisible(bool visible);
+    Q_INVOKABLE void setSearchVisible(bool visible);
     Q_INVOKABLE void reload();
     Q_INVOKABLE void activateWindow(const QString &windowId);
     Q_INVOKABLE void clearMessages();
@@ -70,6 +71,7 @@ private:
     bool m_ready{false};
     bool m_pageVisible{false};
     bool m_dashboardVisible{false};
+    bool m_searchVisible{false};
     bool m_applicationActive{false};
     bool m_hasSnapshot{false};
     bool m_loading{false};

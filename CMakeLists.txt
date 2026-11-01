@@ -88,6 +88,7 @@ qt_add_executable(SomethingQt WIN32
     src/controllers/scheduling_controller.cpp
     src/controllers/settings_controller.cpp
     src/controllers/tasks_controller.cpp
+    src/controllers/universal_search_controller.cpp
     src/controllers/task_history_controller.cpp
     src/controllers/terminal_controller.cpp
     src/controllers/wallpaper_controller.cpp
@@ -99,6 +100,7 @@ qt_add_executable(SomethingQt WIN32
     src/domain/task_history.cpp
     src/domain/task_rules.cpp
     src/domain/task_scheduling.cpp
+    src/domain/universal_search.cpp
     src/domain/scheduling_engine.cpp
     src/domain/steam_game.cpp
     src/domain/steam_game_catalog.cpp
@@ -145,6 +147,7 @@ qt_add_executable(SomethingQt WIN32
     src/services/currency_service.cpp
     src/services/favorites_service.cpp
     src/services/task_service.cpp
+    src/services/universal_search_service.cpp
     src/services/task_history_service.cpp
     src/services/application_command_service.cpp
     src/services/application_mutation_workflow.cpp
@@ -159,6 +162,7 @@ qt_add_executable(SomethingQt WIN32
     src/storage/schema_migrator.cpp
     src/storage/storage_worker.cpp
     src/models/tasks_model.cpp
+    src/models/universal_search_model.cpp
     src/models/scheduling_preview_model.cpp
     src/models/task_history_model.cpp
     src/models/terminal_output_model.cpp
@@ -207,6 +211,7 @@ qt_add_qml_module(SomethingQt
         qml/dialogs/ConfirmationDialog.qml
         qml/dialogs/TaskEditorDialog.qml
         qml/dialogs/TaskHistoryDialog.qml
+        qml/dialogs/UniversalSearchDialog.qml
         qml/dialogs/SteamPriceHistoryDialog.qml
         qml/components/TaskSummaryCard.qml
         qml/components/TaskHistoryEventCard.qml

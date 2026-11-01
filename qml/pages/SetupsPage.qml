@@ -61,6 +61,14 @@ Item {
         editorDialog.open()
     }
 
+    function openSearchResult(result, action) {
+        const setup = result && result.payload ? result.payload : ({})
+        if (action !== "open" || !setup.id) return
+        openEdit(setup.id, String(setup.name || result.title || ""),
+                 String(setup.description || ""), setup.applicationIds || [],
+                 String(setup.iconFilename || ""))
+    }
+
     function toggleApplication(id, checked) {
         const next = selectedApplicationIds.slice(0)
         const current = next.indexOf(Number(id))

@@ -15,6 +15,17 @@ Item {
     property var schedulingSettingsDraft: ({})
     property bool schedulingSettingsDirty: false
     property string schedulingSettingsStatus: ""
+    function openSearchResult(result, action) {
+        const task = result && result.payload ? result.payload : ({})
+        activeView = "tasks"
+        if (action === "markComplete" || action === "markIncomplete") {
+            controller.toggleTaskFromView(Number(task.taskId || result.targetId),
+                Number(task.revision), action === "markComplete")
+            return
+        }
+        if (task.id || task.taskId)
+            editor.openForTask(task)
+    }
     readonly property var schedulingWeekdays: [
         { label: qsTr("Mon"), accessibleLabel: qsTr("Monday"), value: 1 },
         { label: qsTr("Tue"), accessibleLabel: qsTr("Tuesday"), value: 2 },

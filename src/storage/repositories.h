@@ -6,6 +6,7 @@
 
 #include <QDate>
 #include <QSqlDatabase>
+#include <QVariantList>
 
 #include <functional>
 
@@ -375,6 +376,17 @@ private:
     QSqlDatabase &m_database;
 };
 
+class UniversalSearchRepository final {
+public:
+    explicit UniversalSearchRepository(QSqlDatabase &database);
+    RepositoryResult<QVariantList> search(
+        const QString &query,
+        const std::function<bool()> &cancellationRequested = {}) const;
+
+private:
+    QSqlDatabase &m_database;
+};
+
 // Constructed only by StorageWorker after migration. It is never passed across
 // threads; callers submit value-only commands to the worker.
 class StorageRepositories final {
@@ -399,6 +411,7 @@ public:
     SteamGameUpdatesRepository gameUpdates;
     DataImportRepository dataImport;
     ApplicationUsageRepository applicationUsage;
+    UniversalSearchRepository universalSearch;
 };
 
 } // namespace something::storage
