@@ -38,8 +38,17 @@ ApplicationWindow {
 
     onVisibleChanged: if (visible) focusInput()
     onClosing: {
-        if (backgroundController.handleWindowClose(consoleWindow))
+        if (backgroundController.handleWindowClose(consoleWindow)) {
             close.accepted = false
+            return
+        }
+        // With no usable tray, do not leave the Console-first app running with
+        // every window closed. Allow a still-visible Main window to remain open.
+        Qt.callLater(function() {
+            if (!backgroundController.hasVisibleWindow && !backgroundController.inTrayMode
+                    && lifecycleController && !lifecycleController.shutdownRequested)
+                lifecycleController.requestShutdown()
+        })
     }
 
     function focusInput() {

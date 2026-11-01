@@ -86,6 +86,12 @@ Item {
         })
     }
 
+    function globalRuleCount() {
+        return (controller.rules || []).filter(function(rule) {
+            return Number(rule.sourceTaskId || 0) === 0
+        }).length
+    }
+
     function setConfig(key, value) {
         const next = Object.assign({}, draftConfig)
         next[key] = value
@@ -397,6 +403,32 @@ Item {
                             onActivated: root.triggerFilter = currentValue
                         }
                     }
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        visible: root.controller.ready && root.globalRuleCount() === 0
+                        spacing: 6
+                        Label {
+                            Layout.fillWidth: true
+                            text: qsTr("No automation rules yet")
+                            color: ThemeModule.Theme.textPrimary
+                            font.family: ThemeModule.Theme.fontFamily
+                            font.pixelSize: 15
+                            font.weight: Font.DemiBold
+                        }
+                        Label {
+                            Layout.fillWidth: true
+                            text: qsTr("Create a rule to launch applications, show notifications, or perform other actions when selected events occur.")
+                            color: ThemeModule.Theme.textSecondary
+                            font.family: ThemeModule.Theme.fontFamily
+                            font.pixelSize: 13
+                            wrapMode: Text.Wrap
+                        }
+                        Shared.AppButton {
+                            text: qsTr("Create rule")
+                            enabled: root.controller.ready
+                            onClicked: root.openNewRule()
+                        }
+                    }
                     Repeater {
                         model: root.matchingRules()
                         delegate: Shared.AppCard {
@@ -505,8 +537,10 @@ Item {
                     }
                     Label {
                         Layout.fillWidth: true
-                        visible: root.matchingRules().length === 0
-                        text: root.controller.ready ? qsTr("No matching automation rules.")
+                        visible: !root.controller.ready
+                                 || ((root.controller.rules || []).length > 0
+                                     && root.matchingRules().length === 0)
+                        text: root.controller.ready ? qsTr("No rules match these filters.")
                                                      : qsTr("Loading automation rules…")
                         color: ThemeModule.Theme.textSecondary
                         font.family: ThemeModule.Theme.fontFamily
@@ -551,7 +585,7 @@ Item {
                     }
 
                     Label {
-                        text: qsTr("When")
+                        text: qsTr("WHEN · Choose the event that starts this rule")
                         color: ThemeModule.Theme.accentCyan
                         font.family: ThemeModule.Theme.fontFamily
                         font.pixelSize: 14
@@ -711,7 +745,7 @@ Item {
 
                     RowLayout {
                         Layout.fillWidth: true
-                        Label { text: qsTr("If · all conditions must match"); color: ThemeModule.Theme.accentCyan; font.weight: Font.DemiBold }
+                        Label { text: qsTr("IF · Optional conditions; every added condition must match"); color: ThemeModule.Theme.accentCyan; font.weight: Font.DemiBold }
                         Item { Layout.fillWidth: true }
                         Shared.AppButton {
                             text: qsTr("Add condition")
@@ -755,7 +789,7 @@ Item {
 
                     RowLayout {
                         Layout.fillWidth: true
-                        Label { text: qsTr("Then · actions run sequentially and stop after a failure"); color: ThemeModule.Theme.accentCyan; font.weight: Font.DemiBold }
+                        Label { text: qsTr("THEN · Actions run in order; a failure stops the remaining actions"); color: ThemeModule.Theme.accentCyan; font.weight: Font.DemiBold }
                         Item { Layout.fillWidth: true }
                         Shared.AppButton {
                             text: qsTr("Add action")

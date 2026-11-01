@@ -44,7 +44,7 @@ public:
     bool supported() const noexcept;
     int retentionDays() const noexcept;
     QString trackingStatus() const;
-    QString errorMessage() const { return m_errorMessage; }
+    QString errorMessage() const;
     QVariantList exclusions() const;
     QVariantList applications() const;
     QVariantList applicationChoices() const { return m_applicationChoices; }
@@ -93,6 +93,7 @@ private:
     void applyLiveStates();
     void updateDateRange();
     void updateLoading();
+    bool requestIsCurrent(const Request &request) const noexcept;
 
     something::application::ApplicationServiceGraph *m_graph{nullptr};
     something::services::ApplicationUsageService *m_service{nullptr};
@@ -112,8 +113,11 @@ private:
     QString m_lastLocalDay;
     QString m_startUtc;
     QString m_endUtc;
-    QString m_errorMessage;
-    quint64 m_generation{0};
+    QString m_overviewErrorMessage;
+    QString m_detailErrorMessage;
+    quint64 m_overviewGeneration{0};
+    quint64 m_detailGeneration{0};
+    quint64 m_choicesGeneration{0};
     bool m_pageVisible{false};
     bool m_loading{false};
 };

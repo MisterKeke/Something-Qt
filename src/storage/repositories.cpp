@@ -1190,7 +1190,8 @@ RepositoryResult<TaskAutomation> TaskAutomationRepository::saveForTask(
     query.addBindValue(input.actionType);
     query.addBindValue(input.targetId > 0 ? QVariant(input.targetId) : QVariant());
     query.addBindValue(input.url.isEmpty() ? QVariant() : QVariant(input.url));
-    query.addBindValue(input.notificationMessage);
+    query.addBindValue(input.notificationMessage.isEmpty()
+        ? QStringLiteral("") : input.notificationMessage);
     query.addBindValue(input.delayMs);
     if (!query.exec()) return failure<TaskAutomation>(queryFailure(query));
 
@@ -1294,7 +1295,7 @@ RepositoryResult<void> TaskAutomationRepository::updateExecution(
         "WHERE execution_id=?"));
     query.addBindValue(status);
     query.addBindValue(executedAtUtc.isEmpty() ? QVariant() : QVariant(executedAtUtc));
-    query.addBindValue(errorMessage);
+    query.addBindValue(errorMessage.isEmpty() ? QStringLiteral("") : errorMessage);
     query.addBindValue(executionId);
     if (!query.exec()) return failureVoid(queryFailure(query));
     if (query.numRowsAffected() != 1) return failureVoid(domain::ErrorCategory::NotFound);

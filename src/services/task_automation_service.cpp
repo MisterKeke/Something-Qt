@@ -561,7 +561,7 @@ storage::StorageCommand TaskAutomationService::completionLookup(
     return [taskId, completionEventId = std::move(completionEventId),
             executionId = std::move(executionId), requestedAtUtc = std::move(requestedAtUtc),
             taskSnapshot = std::move(taskSnapshot)](
-        storage::StorageRepositories &repositories, const std::function<bool()> &cancelled) {
+        storage::StorageRepositories &repositories, const std::function<bool()> &cancelled) mutable {
         if (cancelled()) return failure(domain::AppError::cancelled());
         const auto task = repositories.tasks.get(taskId);
         if (!task.succeeded()) return failure(task.error);

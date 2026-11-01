@@ -15,6 +15,11 @@ bool fail(QString *diagnostic, const QSqlQuery &query)
     return false;
 }
 
+QString nonNullText(const QString &value)
+{
+    return value.isEmpty() ? QStringLiteral("") : value;
+}
+
 QString overviewOrder(const QString &sort)
 {
     if (sort == QStringLiteral("foreground")) return QStringLiteral("foreground_ms DESC, total_ms DESC");
@@ -153,8 +158,8 @@ bool ApplicationUsageRepository::addExclusion(const ApplicationUsageExclusion &e
         "ON CONFLICT(application_id) DO UPDATE SET canonical_path=excluded.canonical_path, "
         "executable_name=excluded.executable_name, match_by_name=excluded.match_by_name"));
     query.addBindValue(exclusion.applicationId);
-    query.addBindValue(exclusion.canonicalPath);
-    query.addBindValue(exclusion.executableName);
+    query.addBindValue(nonNullText(exclusion.canonicalPath));
+    query.addBindValue(nonNullText(exclusion.executableName));
     query.addBindValue(exclusion.matchByName ? 1 : 0);
     query.addBindValue(exclusion.createdAtUtc);
     return query.exec() || fail(diagnostic, query);
@@ -190,9 +195,9 @@ bool ApplicationUsageRepository::recordCheckpoint(const ApplicationUsageCheckpoi
         "last_seen_utc=MAX(last_seen_utc, excluded.last_seen_utc), last_detection_status='eligible'"));
     for (const auto &record : checkpoint.applications) {
         app.bindValue(0, record.applicationId);
-        app.bindValue(1, record.executablePath);
-        app.bindValue(2, record.executableName);
-        app.bindValue(3, record.displayName);
+        app.bindValue(1, nonNullText(record.executablePath));
+        app.bindValue(2, nonNullText(record.executableName));
+        app.bindValue(3, nonNullText(record.displayName));
         app.bindValue(4, record.firstSeenUtc);
         app.bindValue(5, record.lastSeenUtc);
         if (!app.exec()) { fail(diagnostic, app); rollback(); return false; }
@@ -278,9 +283,10 @@ QVariantMap ApplicationUsageRepository::queryOverview(
         "HAVING total_ms>0 OR is_running");
     const auto bindOverviewFilters = [&](QSqlQuery &query, const QString &nameFilter) {
         bindDayRange(query, firstLocalDay, lastLocalDay);
-        query.addBindValue(nameFilter.trimmed());
-        query.addBindValue(nameFilter.trimmed());
-        query.addBindValue(nameFilter.trimmed());
+        const QString normalizedFilter = nonNullText(nameFilter.trimmed());
+        query.addBindValue(normalizedFilter);
+        query.addBindValue(normalizedFilter);
+        query.addBindValue(normalizedFilter);
     };
     QSqlQuery totalsQuery(m_database);
     totalsQuery.prepare(QStringLiteral(

@@ -3,6 +3,7 @@
 #include "services/preferences_service.h"
 
 #include <QSqlDatabase>
+#include <QSqlError>
 #include <QSqlQuery>
 #include <QDate>
 #include <QThread>
@@ -320,10 +321,16 @@ void StorageRepositoryTest::automationRulesPersistRevisionsExecutionAndRetainedH
     QVERIFY(retainedRow.value(QStringLiteral("ruleId")).toString().isEmpty());
     QCOMPARE(retainedRow.value(QStringLiteral("ruleName")).toString(), updated.value.name);
 
+    domain::AutomationRule claimRetentionRule = updated.value;
+    claimRetentionRule.id = QStringLiteral("claim-retention-rule");
+    claimRetentionRule.name = QStringLiteral("Claim retention rule");
+    const auto savedClaimRule = repositories.automations.saveRule(claimRetentionRule, 0);
+    QVERIFY(savedClaimRule.succeeded());
     domain::AutomationEvent oldEvent = event;
     oldEvent.id = QStringLiteral("old-event-that-is-pruned");
     const auto oldClaim = repositories.automations.insertExecution(
-        QStringLiteral("global-execution-old"), updated.value.id, updated.value.name,
+        QStringLiteral("global-execution-old"), savedClaimRule.value.id,
+        savedClaimRule.value.name,
         oldEvent, QStringLiteral("2020-01-01T00:00:00.000Z"));
     QVERIFY(oldClaim.succeeded());
     QVERIFY(oldClaim.value);
@@ -334,7 +341,8 @@ void StorageRepositoryTest::automationRulesPersistRevisionsExecutionAndRetainedH
     QVERIFY(pruned.succeeded());
     QCOMPARE(pruned.value, 1);
     const auto replay = repositories.automations.insertExecution(
-        QStringLiteral("global-execution-old-replay"), updated.value.id, updated.value.name,
+        QStringLiteral("global-execution-old-replay"), savedClaimRule.value.id,
+        savedClaimRule.value.name,
         oldEvent, QStringLiteral("2026-11-02T00:00:00.000Z"));
     QVERIFY(replay.succeeded());
     QVERIFY(!replay.value);
@@ -1056,7 +1064,13 @@ void StorageRepositoryTest::applicationCategoryMigrationPreservesExistingProfile
         QStringLiteral("usage_tracking_settings"),
         QStringLiteral("usage_excluded_applications"),
         QStringLiteral("task_automation_executions"),
-        QStringLiteral("task_automations")};
+        QStringLiteral("task_automations"),
+        QStringLiteral("automation_action_results"),
+        QStringLiteral("automation_actions"),
+        QStringLiteral("automation_conditions"),
+        QStringLiteral("automation_executions"),
+        QStringLiteral("automation_rules"),
+        QStringLiteral("automation_execution_claims")};
     for (const QString &table : newerTables)
         QVERIFY(fixture.exec(QStringLiteral("DROP TABLE ") + table));
     QVERIFY(fixture.exec(QStringLiteral("DELETE FROM schema_migrations WHERE version>=8")));

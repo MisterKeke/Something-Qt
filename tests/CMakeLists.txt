@@ -7,6 +7,9 @@ add_library(SomethingQtTestRepositories STATIC
     ../src/storage/automation_repository.cpp
     ../src/storage/application_usage_repository.cpp
     ../src/domain/automation_rules.cpp
+    ../src/domain/task_history.cpp
+    ../src/domain/task_rules.cpp
+    ../src/domain/task_scheduling.cpp
     ../src/domain/steam_game.cpp
     ../src/domain/steam_game_catalog.cpp
     ../src/domain/steam_release.cpp
@@ -236,6 +239,8 @@ add_executable(SomethingQtTaskModelTests
     ../src/models/tasks_model.cpp
 )
 target_include_directories(SomethingQtTaskModelTests PRIVATE ../src)
+target_compile_definitions(SomethingQtTaskModelTests PRIVATE
+    SOMETHING_QT_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 target_link_libraries(SomethingQtTaskModelTests PRIVATE Qt6::Core Qt6::Gui Qt6::Test)
 add_test(NAME SomethingQtTaskModelTests COMMAND SomethingQtTaskModelTests
     -o "${CMAKE_CURRENT_BINARY_DIR}/SomethingQtTaskModelTests-results.txt,txt")
@@ -662,11 +667,14 @@ add_test(NAME SomethingQtApplicationUsageTests COMMAND SomethingQtApplicationUsa
 add_executable(SomethingQtAutomationUsageControllerIntegrationTests
     automation_usage_controller_integration_test.cpp
     ../src/platform/application_usage_platform.h
+    ../src/platform/application_usage_platform.cpp
+    ../src/platform/desktop_applications_platform.cpp
     ../src/application/application_lifecycle.cpp
     ../src/application/application_service_graph.cpp
     ../src/application/capability_registry.cpp
     ../src/application/operation_coordinator.cpp
     ../src/controllers/automation_controller.cpp
+    ../src/controllers/application_usage_controller.cpp
     ../src/controllers/background_controller.cpp
     ../src/domain/app_error.cpp
     ../src/domain/desktop_application_rules.cpp
@@ -684,6 +692,7 @@ add_executable(SomethingQtAutomationUsageControllerIntegrationTests
     ../src/services/desktop_applications_service.cpp
     ../src/services/preferences_service.cpp
     ../src/services/setups_service.cpp
+    ../src/services/setup_icon_store.cpp
     ../src/services/task_service.cpp
     ../src/storage/schema_migrator.cpp
     ../src/storage/storage_worker.cpp
@@ -692,6 +701,10 @@ target_include_directories(SomethingQtAutomationUsageControllerIntegrationTests 
 target_link_libraries(SomethingQtAutomationUsageControllerIntegrationTests PRIVATE
     Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Network Qt6::Quick Qt6::Sql Qt6::Test
     SomethingQtTestRepositories)
+if(WIN32)
+    target_link_libraries(SomethingQtAutomationUsageControllerIntegrationTests PRIVATE
+        dwmapi shell32 user32 gdi32 ole32 uuid)
+endif()
 add_test(NAME SomethingQtAutomationUsageControllerIntegrationTests
     COMMAND SomethingQtAutomationUsageControllerIntegrationTests
         -o "${CMAKE_CURRENT_BINARY_DIR}/automation-usage-controller-results.txt,txt")

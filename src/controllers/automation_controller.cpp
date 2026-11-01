@@ -165,11 +165,14 @@ void AutomationController::reload()
             lastAttempted.insert(rule.id, rule.lastExecutionRequestedAtUtc);
         }
         const auto paused = repositories.preferences.get(QStringLiteral("automation.paused"));
-        if (!paused.succeeded()) return storage::StorageReply{{}, {}, paused.error};
+        if (!paused.succeeded()
+            && paused.error.category() != domain::ErrorCategory::NotFound)
+            return storage::StorageReply{{}, {}, paused.error};
         storage::StorageReply reply;
         reply.values.insert(QStringLiteral("rules"), ruleMaps);
         reply.values.insert(QStringLiteral("lastAttempted"), lastAttempted);
-        reply.values.insert(QStringLiteral("paused"), paused.value == QStringLiteral("1"));
+        reply.values.insert(QStringLiteral("paused"),
+            paused.succeeded() && paused.value == QStringLiteral("1"));
         return reply;
     }, [this, recover](const QVariantMap &values, domain::AppError error) {
         if (error.isError() || error.isCancelled()) {

@@ -18,6 +18,7 @@ class ApplicationUsageFeatureTest final : public QObject {
 private slots:
     void migrationCreatesUsageSchemaWithoutReplacingExistingData();
     void checkpointsAggregateAllFourStatesAndUnknownTime();
+    void eightMinutesOfBackgroundUsageAppearInOverview();
     void overviewTotalsIncludeApplicationsBeyondVisiblePage();
     void exclusionsConfigurationRecoveryAndHistoryDeletion();
 };
@@ -118,8 +119,11 @@ void ApplicationUsageFeatureTest::checkpointsAggregateAllFourStatesAndUnknownTim
     // Replaying a checkpoint is safe: segment identifiers prevent duplicate durations.
     QVERIFY(repositories.applicationUsage.recordCheckpoint(batch, 0));
 
+    QString overviewDiagnostic;
     const QVariantMap overview = repositories.applicationUsage.queryOverview(
-        QStringLiteral("2026-11-01"), QStringLiteral("2026-11-01"), {}, {}, {}, QStringLiteral("total"));
+        QStringLiteral("2026-11-01"), QStringLiteral("2026-11-01"), {}, {}, {},
+        QStringLiteral("total"), &overviewDiagnostic);
+    QVERIFY2(overview.contains(QStringLiteral("totalMs")), qPrintable(overviewDiagnostic));
     QCOMPARE(overview.value(QStringLiteral("totalMs")).toLongLong(), 150000);
     QCOMPARE(overview.value(QStringLiteral("foregroundMs")).toLongLong(), 60000);
     QCOMPARE(overview.value(QStringLiteral("fullscreenMs")).toLongLong(), 30000);
@@ -134,6 +138,50 @@ void ApplicationUsageFeatureTest::checkpointsAggregateAllFourStatesAndUnknownTim
     QCOMPARE(distribution.value(QStringLiteral("BackgroundVisible")).toLongLong(), 30000);
     QCOMPARE(distribution.value(QStringLiteral("Minimized")).toLongLong(), 30000);
     QCOMPARE(distribution.value(QStringLiteral("Unknown")).toLongLong(), 30000);
+
+    database.close();
+    database = QSqlDatabase();
+    QSqlDatabase::removeDatabase(connection);
+}
+
+void ApplicationUsageFeatureTest::eightMinutesOfBackgroundUsageAppearInOverview()
+{
+    const QString connection = QStringLiteral("usage-background-overview-%1")
+        .arg(QUuid::createUuid().toString(QUuid::WithoutBraces));
+    QSqlDatabase database = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), connection);
+    database.setDatabaseName(QStringLiteral(":memory:"));
+    QVERIFY(database.open());
+    QVERIFY(storage::SchemaMigrator::apply(database));
+    storage::StorageRepositories repositories(database);
+
+    const QString appId = QStringLiteral("path:c:/apps/background-only.exe");
+    const QString sessionId = QStringLiteral("background-only-session");
+    const QString day = QDate::currentDate().toString(Qt::ISODate);
+    storage::ApplicationUsageCheckpoint batch;
+    batch.applications.push_back({appId, QStringLiteral("C:/Apps/background-only.exe"),
+        QStringLiteral("background-only.exe"), QStringLiteral("Background App"),
+        QStringLiteral("2026-11-01T08:00:00.000Z"), QStringLiteral("2026-11-01T08:08:00.000Z")});
+    batch.sessions.push_back({sessionId, appId, QStringLiteral("2026-11-01T08:00:00.000Z"),
+        QStringLiteral("2026-11-01T08:08:00.000Z"), QStringLiteral("2026-11-01T08:08:00.000Z"),
+        QStringLiteral("closed"), 480000, false});
+    batch.segments.push_back({QStringLiteral("background-only-segment"), sessionId, appId,
+        QStringLiteral("BackgroundVisible"), QStringLiteral("2026-11-01T08:00:00.000Z"),
+        QStringLiteral("2026-11-01T08:08:00.000Z"), day, 11, 480000});
+    QVERIFY(repositories.applicationUsage.recordCheckpoint(batch, 0));
+
+    QString overviewDiagnostic;
+    const QVariantMap overview = repositories.applicationUsage.queryOverview(
+        day, day, {}, {}, {}, QStringLiteral("total"), &overviewDiagnostic);
+    QVERIFY2(overview.contains(QStringLiteral("totalMs")), qPrintable(overviewDiagnostic));
+    QCOMPARE(overview.value(QStringLiteral("totalMs")).toLongLong(), 480000);
+    QCOMPARE(overview.value(QStringLiteral("foregroundMs")).toLongLong(), 0);
+    QCOMPARE(overview.value(QStringLiteral("applicationCount")).toLongLong(), 1);
+    QCOMPARE(overview.value(QStringLiteral("mostUsed")).toMap()
+                 .value(QStringLiteral("name")).toString(), QStringLiteral("Background App"));
+    const QVariantList rows = overview.value(QStringLiteral("applications")).toList();
+    QCOMPARE(rows.size(), 1);
+    QCOMPARE(rows.constFirst().toMap().value(QStringLiteral("totalMs")).toLongLong(), 480000);
+    QCOMPARE(rows.constFirst().toMap().value(QStringLiteral("backgroundMs")).toLongLong(), 480000);
 
     database.close();
     database = QSqlDatabase();
@@ -162,7 +210,9 @@ void ApplicationUsageFeatureTest::exclusionsConfigurationRecoveryAndHistoryDelet
     storage::ApplicationUsageExclusion exclusion{
         QStringLiteral("filename:editor.exe"), {}, QStringLiteral("editor.exe"), true,
         QStringLiteral("2026-11-01T08:00:00.000Z")};
-    QVERIFY(repositories.applicationUsage.addExclusion(exclusion));
+    QString diagnostic;
+    QVERIFY2(repositories.applicationUsage.addExclusion(exclusion, &diagnostic),
+             qPrintable(diagnostic));
     QVERIFY(repositories.applicationUsage.loadConfiguration(&enabled, &retention, &exclusions));
     QVERIFY(!enabled);
     QCOMPARE(retention, 90);
@@ -178,7 +228,8 @@ void ApplicationUsageFeatureTest::exclusionsConfigurationRecoveryAndHistoryDelet
     batch.sessions.push_back({QStringLiteral("open-session"), appId,
         QStringLiteral("2026-11-01T08:00:00.000Z"), {},
         QStringLiteral("2026-11-01T08:00:15.000Z"), {}, 15000, true});
-    QVERIFY(repositories.applicationUsage.recordCheckpoint(batch, 0));
+    QVERIFY2(repositories.applicationUsage.recordCheckpoint(batch, 0, &diagnostic),
+             qPrintable(diagnostic));
     QVERIFY(repositories.applicationUsage.recoverInterruptedSessions(
         QStringLiteral("2026-11-01T09:00:00.000Z")));
     QSqlQuery recovered(database);
@@ -261,11 +312,15 @@ void ApplicationUsageFeatureTest::overviewTotalsIncludeApplicationsBeyondVisible
             QStringLiteral("2026-11-01T08:01:00.000Z"),
             QStringLiteral("2026-11-01"), 11, duration});
     }
-    QVERIFY(repositories.applicationUsage.recordCheckpoint(batch, 0));
+    QString diagnostic;
+    QVERIFY2(repositories.applicationUsage.recordCheckpoint(batch, 0, &diagnostic),
+             qPrintable(diagnostic));
 
+    QString overviewDiagnostic;
     const QVariantMap overview = repositories.applicationUsage.queryOverview(
         QStringLiteral("2026-11-01"), QStringLiteral("2026-11-01"), {}, {}, {},
-        QStringLiteral("name"));
+        QStringLiteral("name"), &overviewDiagnostic);
+    QVERIFY2(overview.contains(QStringLiteral("totalMs")), qPrintable(overviewDiagnostic));
     QCOMPARE(overview.value(QStringLiteral("applicationCount")).toLongLong(), 501);
     QCOMPARE(overview.value(QStringLiteral("applications")).toList().size(), 500);
     QCOMPARE(overview.value(QStringLiteral("totalMs")).toLongLong(), 502000);

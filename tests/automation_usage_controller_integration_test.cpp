@@ -1,8 +1,13 @@
 #include "application/application_service_graph.h"
 #include "controllers/automation_controller.h"
+#include "controllers/application_usage_controller.h"
+#include "platform/desktop_applications_platform.h"
 #include "services/application_usage_service.h"
 #include "storage/repositories.h"
 
+#include <QDate>
+#include <QMutex>
+#include <QMutexLocker>
 #include <QSignalSpy>
 #include <QStringList>
 #include <QTemporaryDir>
@@ -36,6 +41,43 @@ public:
     }
 
     bool active{false};
+};
+
+class FakeDesktopApplicationsPlatform final : public platform::DesktopApplicationsPlatform {
+public:
+    bool supported() const noexcept override { return true; }
+    domain::AppError resolveExecutable(const QString &selectedPath,
+                                       QString *canonicalPath) const override
+    {
+        if (!canonicalPath || selectedPath.isEmpty())
+            return domain::AppError(domain::ErrorCategory::Validation);
+        *canonicalPath = selectedPath;
+        return {};
+    }
+    QImage extractExecutableIcon(const QString &canonicalPath,
+        const application::CancellationToken &cancellation) const override
+    {
+        Q_UNUSED(canonicalPath);
+        Q_UNUSED(cancellation);
+        return {};
+    }
+    domain::AppError launchExecutable(const QString &canonicalPath,
+        const application::CancellationToken &cancellation) const override
+    {
+        if (cancellation.isCancellationRequested()) return domain::AppError::cancelled();
+        QMutexLocker lock(&m_mutex);
+        m_launchedPaths.push_back(canonicalPath);
+        return {};
+    }
+    QStringList launchedPaths() const
+    {
+        QMutexLocker lock(&m_mutex);
+        return m_launchedPaths;
+    }
+
+private:
+    mutable QMutex m_mutex;
+    mutable QStringList m_launchedPaths;
 };
 
 domain::AutomationRule urlRule(QString id, QString trigger, QString url,
@@ -103,8 +145,10 @@ private slots:
     void scheduledStartupAndMissedSlotsAreNotReplayed();
     void productionSchedulerClaimsAndExecutesOneAction();
     void taskCompletionWaitsForTheLatestRuleReload();
+    void globalTaskRuleCanLaunchAFakeSavedApplication();
     void foregroundTransitionsRunOnlyOnEntry();
     void usageShutdownFlushPersistsTheActiveSession();
+    void usageStatisticsRequestsKeepOverviewAndDetailIndependent();
 };
 
 void AutomationUsageControllerIntegrationTest::scheduledStartupAndMissedSlotsAreNotReplayed()
@@ -240,6 +284,100 @@ void AutomationUsageControllerIntegrationTest::taskCompletionWaitsForTheLatestRu
     QTRY_VERIFY_WITH_TIMEOUT(graph.isShutdownComplete(), 5000);
 }
 
+void AutomationUsageControllerIntegrationTest::globalTaskRuleCanLaunchAFakeSavedApplication()
+{
+    QTemporaryDir temporary;
+    QVERIFY(temporary.isValid());
+    application::ApplicationServiceGraph graph(QStringLiteral("global-task-rule-integration"),
+                                               temporary.path());
+    graph.start();
+    QTRY_VERIFY_WITH_TIMEOUT(
+        graph.lifecycle().state() == application::ApplicationLifecycle::State::Running, 5000);
+
+    QVariantMap applicationValues;
+    QVERIFY(waitForStorage(graph,
+        [](storage::StorageRepositories &repositories,
+           const std::function<bool()> &cancelled) {
+            if (cancelled()) return storage::StorageReply{{}, {}, domain::AppError::cancelled()};
+            const auto saved = repositories.applications.add(
+                QStringLiteral("Discord test target"), QStringLiteral("C:/Fake/Discord.exe"));
+            if (!saved.succeeded()) return storage::StorageReply{{}, {}, saved.error};
+            storage::StorageReply reply;
+            reply.values.insert(QStringLiteral("applicationId"), saved.value.id);
+            return reply;
+        }, &applicationValues));
+    const qint64 applicationId = applicationValues.value(QStringLiteral("applicationId")).toLongLong();
+    QVERIFY(applicationId > 0);
+
+    FakeDesktopApplicationsPlatform desktopPlatform;
+    controllers::AutomationController controller(&graph, nullptr, nullptr, &desktopPlatform, nullptr);
+    QTRY_VERIFY_WITH_TIMEOUT(controller.ready(), 5000);
+    QSignalSpy saved(&controller, &controllers::AutomationController::ruleSaved);
+    QSignalSpy execution(&controller, &controllers::AutomationController::executionChanged);
+    QVariantMap rule{
+        {QStringLiteral("name"), QStringLiteral("Finish work -> Open Discord")},
+        {QStringLiteral("description"), QStringLiteral("Open Discord after the selected task is completed.")},
+        {QStringLiteral("triggerType"), QStringLiteral("task.completed")},
+        {QStringLiteral("triggerConfig"), QVariantMap{{QStringLiteral("taskId"), 41}}},
+        {QStringLiteral("conditions"), QVariantList{}},
+        {QStringLiteral("actions"), QVariantList{QVariantMap{
+            {QStringLiteral("type"), QStringLiteral("launch_application")},
+            {QStringLiteral("targetId"), applicationId},
+            {QStringLiteral("delayMs"), 0},
+            {QStringLiteral("enabled"), true},
+            {QStringLiteral("order"), 0}}}}
+    };
+    controller.saveRule(rule);
+    QTRY_COMPARE_WITH_TIMEOUT(saved.count(), 1, 5000);
+    QCOMPARE(controller.rules().size(), 1);
+    QVariantMap savedRule = controller.rules().constFirst().toMap();
+    const QString ruleId = savedRule.value(QStringLiteral("id")).toString();
+    QVERIFY(!ruleId.isEmpty());
+    QCOMPARE(savedRule.value(QStringLiteral("name")).toString(),
+             QStringLiteral("Finish work -> Open Discord"));
+
+    savedRule.insert(QStringLiteral("description"),
+                     QStringLiteral("Updated from the rule editor."));
+    controller.saveRule(savedRule, savedRule.value(QStringLiteral("revision")).toLongLong());
+    QTRY_COMPARE_WITH_TIMEOUT(saved.count(), 2, 5000);
+    controller.setRuleEnabled(ruleId, false);
+    QTRY_VERIFY_WITH_TIMEOUT(!controller.rules().constFirst().toMap()
+                                  .value(QStringLiteral("enabled")).toBool(), 5000);
+
+    const QVariantMap task{
+        {QStringLiteral("id"), 41},
+        {QStringLiteral("title"), QStringLiteral("Finish work")},
+        {QStringLiteral("priority"), QStringLiteral("medium")},
+        {QStringLiteral("tags"), QStringList{}},
+        {QStringLiteral("dueDate"), QString()},
+        {QStringLiteral("completed"), true},
+        {QStringLiteral("completedAtUtc"), QStringLiteral("2026-11-01T09:00:00.000Z")}
+    };
+    controller.onTaskCompletionCommitted(QStringLiteral("41:revision:2"), task, false, true);
+    QTest::qWait(25);
+    QVERIFY(desktopPlatform.launchedPaths().isEmpty());
+
+    controller.setRuleEnabled(ruleId, true);
+    QTRY_VERIFY_WITH_TIMEOUT(controller.rules().constFirst().toMap()
+                                  .value(QStringLiteral("enabled")).toBool(), 5000);
+    controller.onTaskCompletionCommitted(QStringLiteral("41:revision:3"), task, false, true);
+    QTRY_COMPARE_WITH_TIMEOUT(execution.count(), 2, 5000);
+    QCOMPARE(execution.constLast().at(1).toString(), QStringLiteral("succeeded"));
+    QCOMPARE(desktopPlatform.launchedPaths(), QStringList{QStringLiteral("C:/Fake/Discord.exe")});
+
+    controller.loadHistory();
+    QTRY_VERIFY_WITH_TIMEOUT(!controller.history().isEmpty(), 5000);
+    QCOMPARE(controller.history().constFirst().toMap().value(QStringLiteral("status")).toString(),
+             QStringLiteral("succeeded"));
+
+    QSignalSpy prepared(&controller,
+        &controllers::AutomationController::shutdownPreparationFinished);
+    controller.prepareShutdown();
+    QTRY_COMPARE_WITH_TIMEOUT(prepared.count(), 1, 5000);
+    graph.shutdown();
+    QTRY_VERIFY_WITH_TIMEOUT(graph.isShutdownComplete(), 5000);
+}
+
 void AutomationUsageControllerIntegrationTest::usageShutdownFlushPersistsTheActiveSession()
 {
     QTemporaryDir temporary;
@@ -298,6 +436,89 @@ void AutomationUsageControllerIntegrationTest::usageShutdownFlushPersistsTheActi
     QCOMPARE(detail.value(QStringLiteral("sessionCount")).toInt(), 2);
     QVERIFY(detail.value(QStringLiteral("totalMs")).toLongLong() > 0);
 
+    graph.shutdown();
+    QTRY_VERIFY_WITH_TIMEOUT(graph.isShutdownComplete(), 5000);
+}
+
+void AutomationUsageControllerIntegrationTest::usageStatisticsRequestsKeepOverviewAndDetailIndependent()
+{
+    QTemporaryDir temporary;
+    QVERIFY(temporary.isValid());
+    application::ApplicationServiceGraph graph(QStringLiteral("usage-statistics-race"),
+                                               temporary.path());
+    graph.start();
+    QTRY_VERIFY_WITH_TIMEOUT(
+        graph.lifecycle().state() == application::ApplicationLifecycle::State::Running, 5000);
+
+    FakeUsagePlatform platform;
+    services::ApplicationUsageService usage(&graph, &platform);
+    QTRY_VERIFY_WITH_TIMEOUT(usage.ready() && usage.trackingActive(), 5000);
+    const QString localDay = QDate::currentDate().toString(Qt::ISODate);
+    const QString backgroundId = QStringLiteral("path:c:/apps/background-only.exe");
+    const QString foregroundId = QStringLiteral("path:c:/apps/foreground.exe");
+    storage::ApplicationUsageCheckpoint batch;
+    batch.applications.push_back({backgroundId, QStringLiteral("C:/Apps/background-only.exe"),
+        QStringLiteral("background-only.exe"), QStringLiteral("Eight minute app"),
+        QStringLiteral("2026-11-01T08:00:00.000Z"), QStringLiteral("2026-11-01T08:08:00.000Z")});
+    batch.sessions.push_back({QStringLiteral("background-session"), backgroundId,
+        QStringLiteral("2026-11-01T08:00:00.000Z"), QStringLiteral("2026-11-01T08:08:00.000Z"),
+        QStringLiteral("2026-11-01T08:08:00.000Z"), QStringLiteral("closed"), 480000, false});
+    batch.segments.push_back({QStringLiteral("background-segment"),
+        QStringLiteral("background-session"), backgroundId, QStringLiteral("BackgroundVisible"),
+        QStringLiteral("2026-11-01T08:00:00.000Z"), QStringLiteral("2026-11-01T08:08:00.000Z"),
+        localDay, 11, 480000});
+    batch.applications.push_back({foregroundId, QStringLiteral("C:/Apps/foreground.exe"),
+        QStringLiteral("foreground.exe"), QStringLiteral("Foreground app"),
+        QStringLiteral("2026-11-01T08:00:00.000Z"), QStringLiteral("2026-11-01T08:02:00.000Z")});
+    batch.sessions.push_back({QStringLiteral("foreground-session"), foregroundId,
+        QStringLiteral("2026-11-01T08:00:00.000Z"), QStringLiteral("2026-11-01T08:02:00.000Z"),
+        QStringLiteral("2026-11-01T08:02:00.000Z"), QStringLiteral("closed"), 120000, false});
+    batch.segments.push_back({QStringLiteral("foreground-segment"),
+        QStringLiteral("foreground-session"), foregroundId, QStringLiteral("ForegroundFullscreen"),
+        QStringLiteral("2026-11-01T08:00:00.000Z"), QStringLiteral("2026-11-01T08:02:00.000Z"),
+        localDay, 11, 120000});
+    QVERIFY(waitForStorage(graph,
+        [batch](storage::StorageRepositories &repositories,
+                const std::function<bool()> &cancelled) {
+            if (cancelled()) return storage::StorageReply{{}, {}, domain::AppError::cancelled()};
+            if (!repositories.applicationUsage.recordCheckpoint(batch, 0))
+                return storage::StorageReply{{}, {}, domain::AppError(domain::ErrorCategory::Storage)};
+            return storage::StorageReply{};
+        }, nullptr));
+
+    controllers::ApplicationUsageController controller(&graph, &usage);
+    controller.setPageVisible(true);
+    controller.loadApplicationChoices();
+    controller.selectApplication(backgroundId);
+    controller.selectApplication(foregroundId);
+    QTRY_VERIFY_WITH_TIMEOUT(!controller.loading(), 5000);
+    QTRY_COMPARE_WITH_TIMEOUT(graph.operations().activeCount(), 0, 5000);
+
+    QCOMPARE(controller.applicationChoices().size(), 2);
+    QCOMPARE(controller.overview().value(QStringLiteral("totalMs")).toLongLong(), 600000);
+    QCOMPARE(controller.overview().value(QStringLiteral("foregroundMs")).toLongLong(), 120000);
+    QCOMPARE(controller.overview().value(QStringLiteral("applicationCount")).toLongLong(), 2);
+    QCOMPARE(controller.overview().value(QStringLiteral("mostUsed")).toMap()
+                 .value(QStringLiteral("name")).toString(), QStringLiteral("Eight minute app"));
+    QCOMPARE(controller.detail().value(QStringLiteral("applicationId")).toString(), foregroundId);
+    QCOMPARE(controller.detail().value(QStringLiteral("totalMs")).toLongLong(), 120000);
+
+    controller.selectApplication(backgroundId);
+    controller.clearSelection();
+    QTRY_COMPARE_WITH_TIMEOUT(graph.operations().activeCount(), 0, 5000);
+    QVERIFY(controller.detail().isEmpty());
+    QCOMPARE(controller.overview().value(QStringLiteral("totalMs")).toLongLong(), 600000);
+
+    controller.selectApplication(backgroundId);
+    controller.refresh();
+    QTRY_VERIFY_WITH_TIMEOUT(!controller.loading(), 5000);
+    QTRY_COMPARE_WITH_TIMEOUT(graph.operations().activeCount(), 0, 5000);
+    QCOMPARE(controller.detail().value(QStringLiteral("totalMs")).toLongLong(), 480000);
+    QCOMPARE(controller.overview().value(QStringLiteral("totalMs")).toLongLong(), 600000);
+
+    QSignalSpy flushed(&usage, &services::ApplicationUsageService::shutdownFlushFinished);
+    usage.prepareShutdown();
+    QTRY_COMPARE_WITH_TIMEOUT(flushed.count(), 1, 5000);
     graph.shutdown();
     QTRY_VERIFY_WITH_TIMEOUT(graph.isShutdownComplete(), 5000);
 }

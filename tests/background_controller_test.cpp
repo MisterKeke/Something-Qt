@@ -19,6 +19,7 @@ private slots:
     void initTestCase();
     void init();
     void closeToTrayRequiresAnAvailableTrayAndNoExit();
+    void closeToTrayHidesAnAttachedWindowWhenAvailable();
     void initialPresentationHonorsArgumentAndPreference();
     void backgroundArgumentIsRecognized();
     void trayDisabledStartupFallsBackToVisiblePresentation();
@@ -58,6 +59,21 @@ void BackgroundControllerTest::closeToTrayRequiresAnAvailableTrayAndNoExit()
     QVERIFY(!BackgroundController::hideToTrayAllowed(true, true, false, false, false));
     QVERIFY(!BackgroundController::hideToTrayAllowed(true, true, true, true, false));
     QVERIFY(!BackgroundController::hideToTrayAllowed(true, true, true, false, true));
+}
+
+void BackgroundControllerTest::closeToTrayHidesAnAttachedWindowWhenAvailable()
+{
+    BackgroundController controller(false);
+    if (!controller.trayAvailable()) QSKIP("The test environment has no system tray.");
+    QWindow mainWindow;
+    QWindow consoleWindow;
+    controller.attachWindows(&mainWindow, &consoleWindow);
+    controller.setSystemTrayEnabled(true);
+    controller.setMinimizeToTrayOnClose(true);
+    mainWindow.show();
+    QTRY_VERIFY(mainWindow.isVisible());
+    QVERIFY(controller.handleWindowClose(&mainWindow));
+    QVERIFY(!mainWindow.isVisible());
 }
 
 void BackgroundControllerTest::initialPresentationHonorsArgumentAndPreference()
@@ -116,13 +132,13 @@ void BackgroundControllerTest::backgroundPreferencesPersistAcrossControllerInsta
     {
         BackgroundController controller(false);
         QVERIFY(controller.systemTrayEnabled());
-        QVERIFY(!controller.minimizeToTrayOnClose());
+        QVERIFY(controller.minimizeToTrayOnClose());
         QVERIFY(!controller.launchWithWindows());
         QVERIFY(!controller.startMinimizedToTray());
         QVERIFY(!controller.notifyOnFirstHide());
 
         controller.setSystemTrayEnabled(false);
-        controller.setMinimizeToTrayOnClose(true);
+        controller.setMinimizeToTrayOnClose(false);
         controller.setStartMinimizedToTray(true);
         controller.setNotifyOnFirstHide(true);
     }
@@ -130,7 +146,7 @@ void BackgroundControllerTest::backgroundPreferencesPersistAcrossControllerInsta
     {
         BackgroundController controller(false);
         QVERIFY(!controller.systemTrayEnabled());
-        QVERIFY(controller.minimizeToTrayOnClose());
+        QVERIFY(!controller.minimizeToTrayOnClose());
         QVERIFY(controller.startMinimizedToTray());
         QVERIFY(controller.notifyOnFirstHide());
         QVERIFY(!controller.launchWithWindows());

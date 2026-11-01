@@ -4,6 +4,7 @@
 #include <QDateTime>
 #include <QLocale>
 #include <QSet>
+#include <QStringList>
 #include <QTime>
 
 #include <algorithm>
@@ -69,6 +70,16 @@ QVariantList ApplicationUsageController::applications() const
     return m_overview.value(QStringLiteral("applications")).toList();
 }
 
+QString ApplicationUsageController::errorMessage() const
+{
+    QStringList messages;
+    if (!m_overviewErrorMessage.isEmpty())
+        messages.push_back(tr("Overview: %1").arg(m_overviewErrorMessage));
+    if (!m_detailErrorMessage.isEmpty())
+        messages.push_back(tr("Selected application: %1").arg(m_detailErrorMessage));
+    return messages.join(QLatin1Char('\n'));
+}
+
 void ApplicationUsageController::setPageVisible(bool visible)
 {
     if (m_pageVisible == visible) return;
@@ -85,12 +96,20 @@ void ApplicationUsageController::setPageVisible(bool visible)
 void ApplicationUsageController::refresh()
 {
     if (!ready() || !m_graph || !m_pageVisible) return;
+    const QString previousFirstDay = m_firstLocalDay;
+    const QString previousLastDay = m_lastLocalDay;
     updateDateRange();
-    const quint64 generation = ++m_generation;
-    m_errorMessage.clear();
+    if (previousFirstDay != m_firstLocalDay || previousLastDay != m_lastLocalDay) {
+        m_overview.clear();
+        m_detail.clear();
+    }
+    const quint64 overviewGeneration = ++m_overviewGeneration;
+    const quint64 detailGeneration = ++m_detailGeneration;
+    m_overviewErrorMessage.clear();
+    m_detailErrorMessage.clear();
     m_loading = true;
-    requestOverview(generation);
-    if (!m_selectedApplicationId.isEmpty()) requestDetail(generation);
+    requestOverview(overviewGeneration);
+    if (!m_selectedApplicationId.isEmpty()) requestDetail(detailGeneration);
     updateLoading();
     emit stateChanged();
 }
@@ -98,7 +117,7 @@ void ApplicationUsageController::refresh()
 void ApplicationUsageController::loadApplicationChoices()
 {
     if (!ready() || !m_graph) return;
-    const quint64 generation = ++m_generation;
+    const quint64 generation = ++m_choicesGeneration;
     const auto operation = m_graph->beginOperation(QStringLiteral("usage-automation-choices"));
     if (!operation.isValid()) return;
     m_requests.insert(operation.id.value, {Request::Kind::ApplicationChoices, generation});
@@ -171,11 +190,12 @@ void ApplicationUsageController::selectApplication(const QString &applicationId)
     if (m_selectedApplicationId == applicationId) return;
     m_selectedApplicationId = applicationId;
     m_detail.clear();
+    m_detailErrorMessage.clear();
+    const quint64 generation = ++m_detailGeneration;
     if (m_pageVisible && !applicationId.isEmpty()) {
-        const quint64 generation = ++m_generation;
         requestDetail(generation);
-        updateLoading();
     }
+    updateLoading();
     emit stateChanged();
 }
 
@@ -184,6 +204,9 @@ void ApplicationUsageController::clearSelection()
     if (m_selectedApplicationId.isEmpty()) return;
     m_selectedApplicationId.clear();
     m_detail.clear();
+    m_detailErrorMessage.clear();
+    ++m_detailGeneration;
+    updateLoading();
     emit stateChanged();
 }
 
@@ -294,20 +317,26 @@ void ApplicationUsageController::onStorageFinished(quint64 operationId,
     if (it == m_requests.end()) return;
     const Request request = it.value();
     m_requests.erase(it);
-    if (request.generation == m_generation) {
-        if (error.isError() && !error.isCancelled()) {
-            m_errorMessage = tr("Usage statistics could not be loaded from local storage.");
-        } else if (!error.isCancelled()) {
-            m_errorMessage.clear();
-            if (request.kind == Request::Kind::Overview) m_overview = std::move(values);
-            else if (request.kind == Request::Kind::ApplicationChoices) {
-                m_applicationChoices = values.value(QStringLiteral("applicationChoices")).toList();
-            } else m_detail = std::move(values);
-            applyLiveStates();
+    if (!requestIsCurrent(request)) return;
+    if (error.isError() && !error.isCancelled()) {
+        if (request.kind == Request::Kind::Overview)
+            m_overviewErrorMessage = tr("Usage statistics could not be loaded from local storage.");
+        else if (request.kind == Request::Kind::Detail)
+            m_detailErrorMessage = tr("Selected application details could not be loaded from local storage.");
+    } else if (!error.isCancelled()) {
+        if (request.kind == Request::Kind::Overview) {
+            m_overview = std::move(values);
+            m_overviewErrorMessage.clear();
+        } else if (request.kind == Request::Kind::ApplicationChoices) {
+            m_applicationChoices = values.value(QStringLiteral("applicationChoices")).toList();
+        } else {
+            m_detail = std::move(values);
+            m_detailErrorMessage.clear();
         }
-        updateLoading();
-        emit stateChanged();
+        if (request.kind != Request::Kind::ApplicationChoices) applyLiveStates();
     }
+    updateLoading();
+    emit stateChanged();
 }
 
 void ApplicationUsageController::applyLiveStates()
@@ -391,8 +420,25 @@ void ApplicationUsageController::updateLoading()
 {
     m_loading = false;
     for (auto it = m_requests.cbegin(); it != m_requests.cend(); ++it) {
-        if (it->generation == m_generation) { m_loading = true; break; }
+        if (it->kind != Request::Kind::ApplicationChoices && requestIsCurrent(it.value())) {
+            m_loading = true;
+            break;
+        }
     }
+}
+
+bool ApplicationUsageController::requestIsCurrent(const Request &request) const noexcept
+{
+    switch (request.kind) {
+    case Request::Kind::Overview:
+        return request.generation == m_overviewGeneration;
+    case Request::Kind::Detail:
+        return request.generation == m_detailGeneration
+            && !m_selectedApplicationId.isEmpty();
+    case Request::Kind::ApplicationChoices:
+        return request.generation == m_choicesGeneration;
+    }
+    return false;
 }
 
 } // namespace something::controllers

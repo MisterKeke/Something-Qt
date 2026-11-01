@@ -39,6 +39,11 @@ QVariantMap jsonMap(const QString &json)
     const QJsonDocument document = QJsonDocument::fromJson(json.toUtf8());
     return document.isObject() ? document.object().toVariantMap() : QVariantMap{};
 }
+
+QString nonNullText(const QString &value)
+{
+    return value.isEmpty() ? QStringLiteral("") : value;
+}
 }
 
 AutomationRepository::AutomationRepository(QSqlDatabase &database)
@@ -139,6 +144,9 @@ RepositoryResult<AutomationRule> AutomationRepository::saveRule(
     if (rule.id.isEmpty()) rule.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
     if (domain::AutomationRules::normalizeRule(rule).isError())
         return failure<AutomationRule>(domain::ErrorCategory::Validation);
+    rule.description = nonNullText(rule.description);
+    for (AutomationAction &action : rule.actions)
+        action.message = nonNullText(action.message);
     const QString timestamp = nowUtc();
     if (!m_database.transaction()) return failure<AutomationRule>(domain::ErrorCategory::Storage);
     auto rollback = [this] { m_database.rollback(); };
@@ -209,7 +217,8 @@ RepositoryResult<AutomationRule> AutomationRepository::saveRule(
         addAction.bindValue(2, action.order); addAction.bindValue(3, action.type);
         addAction.bindValue(4, action.targetId > 0 ? QVariant(action.targetId) : QVariant());
         addAction.bindValue(5, action.url.isEmpty() ? QVariant() : QVariant(action.url));
-        addAction.bindValue(6, action.message); addAction.bindValue(7, action.delayMs);
+        addAction.bindValue(6, nonNullText(action.message));
+        addAction.bindValue(7, action.delayMs);
         addAction.bindValue(8, action.enabled);
         if (!addAction.exec()) { rollback(); return failure<AutomationRule>(addAction); }
     }
@@ -300,7 +309,8 @@ RepositoryResult<void> AutomationRepository::updateExecution(
         "UPDATE automation_executions SET status=?,started_at_utc=COALESCE(NULLIF(?,''),started_at_utc),"
         "finished_at_utc=COALESCE(NULLIF(?,''),finished_at_utc),error_message=? WHERE execution_id=?"));
     query.addBindValue(status); query.addBindValue(startedAtUtc); query.addBindValue(finishedAtUtc);
-    query.addBindValue(errorMessage.left(1000)); query.addBindValue(executionId);
+    query.addBindValue(nonNullText(errorMessage.left(1000)));
+    query.addBindValue(executionId);
     if (!query.exec()) return failure<void>(query);
     return {};
 }
@@ -320,7 +330,7 @@ RepositoryResult<void> AutomationRepository::recordActionResult(
         "started_at_utc,finished_at_utc,status,error_message) VALUES(?,?,?,?,?,?,?,?)"));
     query.addBindValue(executionId); query.addBindValue(action.id); query.addBindValue(action.type);
     query.addBindValue(action.order); query.addBindValue(startedAtUtc); query.addBindValue(finishedAtUtc);
-    query.addBindValue(status); query.addBindValue(errorMessage.left(1000));
+    query.addBindValue(status); query.addBindValue(nonNullText(errorMessage.left(1000)));
     if (!query.exec()) return failure<void>(query);
     return {};
 }
@@ -345,11 +355,16 @@ RepositoryResult<QVariantList> AutomationRepository::history(
         "AND (?='' OR trigger_type=?) AND (?='' OR requested_at_utc>=?) "
         "AND (?='' OR requested_at_utc<?) "
         "ORDER BY requested_at_utc DESC,execution_id DESC LIMIT ? OFFSET ?"));
-    query.addBindValue(ruleId); query.addBindValue(ruleId);
-    query.addBindValue(status); query.addBindValue(status);
-    query.addBindValue(triggerType); query.addBindValue(triggerType);
-    query.addBindValue(startUtc); query.addBindValue(startUtc);
-    query.addBindValue(endExclusiveUtc); query.addBindValue(endExclusiveUtc);
+    const QString ruleFilter = nonNullText(ruleId);
+    const QString statusFilter = nonNullText(status);
+    const QString triggerFilter = nonNullText(triggerType);
+    const QString firstTimestamp = nonNullText(startUtc);
+    const QString endTimestamp = nonNullText(endExclusiveUtc);
+    query.addBindValue(ruleFilter); query.addBindValue(ruleFilter);
+    query.addBindValue(statusFilter); query.addBindValue(statusFilter);
+    query.addBindValue(triggerFilter); query.addBindValue(triggerFilter);
+    query.addBindValue(firstTimestamp); query.addBindValue(firstTimestamp);
+    query.addBindValue(endTimestamp); query.addBindValue(endTimestamp);
     query.addBindValue(limit); query.addBindValue(offset);
     if (!query.exec()) return failure<QVariantList>(query);
     QVariantList rows;

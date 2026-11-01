@@ -283,7 +283,9 @@ void BackgroundController::updateUsageActions()
 void BackgroundController::readSettings()
 {
     m_systemTrayEnabled = m_settings.value(kSystemTrayEnabledKey, true).toBool();
-    m_minimizeToTrayOnClose = m_settings.value(kMinimizeToTrayKey, false).toBool();
+    // Missing preference means a new profile uses the close-to-tray default.
+    // QSettings still preserves a previously saved explicit false value.
+    m_minimizeToTrayOnClose = m_settings.value(kMinimizeToTrayKey, true).toBool();
     m_launchWithWindows = m_settings.value(kLaunchWithWindowsKey, false).toBool();
     m_startMinimizedToTray = m_settings.value(kStartMinimizedKey, false).toBool();
     m_notifyOnFirstHide = m_settings.value(kNotifyOnFirstHideKey, false).toBool();

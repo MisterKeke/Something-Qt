@@ -57,6 +57,7 @@ void UniversalSearchDomainTest::readsAliasesFromTheRouteCatalog()
     bool foundApps = false;
     bool foundGames = false;
     bool foundSettings = false;
+    bool automationRulesIsInPrimaryNavigation = false;
     for (const QVariant &routeValue : something::application::RouteCatalog::routes()) {
         const QVariantMap route = routeValue.toMap();
         QStringList fields{route.value(QStringLiteral("title")).toString(),
@@ -71,9 +72,15 @@ void UniversalSearchDomainTest::readsAliasesFromTheRouteCatalog()
         if (route.value(QStringLiteral("id")).toString() == QStringLiteral("settings"))
             foundSettings = UniversalSearch::score(QStringLiteral("preferences"), fields) > 0;
     }
+    for (const QVariant &routeValue : something::application::RouteCatalog::navigationItems()) {
+        if (routeValue.toMap().value(QStringLiteral("id")).toString()
+            == QStringLiteral("automationRules"))
+            automationRulesIsInPrimaryNavigation = true;
+    }
     QVERIFY(foundApps);
     QVERIFY(foundGames);
     QVERIFY(foundSettings);
+    QVERIFY(automationRulesIsInPrimaryNavigation);
     QVERIFY(something::application::RouteCatalog::contains(QStringLiteral("tasks")));
     QVERIFY(!something::application::RouteCatalog::contains(QStringLiteral("deleted-route")));
 }

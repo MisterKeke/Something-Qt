@@ -252,6 +252,14 @@ Item {
                         checked: root.backgroundController.minimizeToTrayOnClose
                         onToggled: root.backgroundController.minimizeToTrayOnClose = checked
                     }
+                    Label {
+                        Layout.fillWidth: true
+                        text: qsTr("Closing to tray requires tray integration to be enabled and available. If the notification area is unavailable, the window uses its regular close behavior.")
+                        color: ThemeModule.Theme.textSecondary
+                        font.family: ThemeModule.Theme.fontFamily
+                        font.pixelSize: 12
+                        wrapMode: Text.Wrap
+                    }
                     Shared.AppCheckBox {
                         Layout.fillWidth: true
                         text: qsTr("Launch Something-Qt when Windows starts")

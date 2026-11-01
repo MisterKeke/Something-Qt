@@ -1153,6 +1153,7 @@ Item {
                 required property double revision
                 required property var tags
                 required property var subtasks
+                required property var automation
                 required property int subtaskCount
                 required property int completedSubtasks
                 required property bool overdue
