@@ -28,6 +28,7 @@ public:
         SubtaskCountRole,
         CompletedSubtasksRole,
         OverdueRole,
+        AutomationRole,
     };
     Q_ENUM(Role)
 

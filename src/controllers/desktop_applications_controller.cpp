@@ -153,7 +153,9 @@ void DesktopApplicationsController::onLifecycleChanged(application::ApplicationL
             services::DesktopAppIconStore::removeAbandonedStagingFiles(m_graph->profileDirectory());
             m_stagingCleanupDone = true;
         }
-        if (m_pageVisible) {
+        if (m_applicationTargetsRequested) {
+            loadApplicationTargets();
+        } else if (m_pageVisible) {
             if (m_applications.rowCount() == 0) reload();
             if (m_categories.count() == 0) loadCategories();
         }
@@ -223,6 +225,28 @@ void DesktopApplicationsController::loadAllApplications()
     m_applicationFilter = ApplicationFilter::All;
     m_filterCategoryId = 0;
     reload();
+}
+
+void DesktopApplicationsController::loadApplicationTargets()
+{
+    m_applicationTargetsRequested = true;
+    if (!m_ready) return;
+    m_applicationTargetsRequested = false;
+    m_applicationFilter = ApplicationFilter::All;
+    m_filterCategoryId = 0;
+    if (m_listOperation) {
+        const quint64 previous = m_listOperation;
+        m_listOperation = 0;
+        m_pending.remove(previous);
+        m_graph->cancelOperation({previous});
+    }
+    const auto operation = begin(Kind::List, QStringLiteral("load saved application targets"));
+    if (!operation.isValid()) return;
+    m_listOperation = operation.id.value;
+    m_loading = true;
+    m_errorMessage.clear();
+    emit stateChanged();
+    submitStorage(operation.id.value, services::DesktopApplicationsService::list());
 }
 
 void DesktopApplicationsController::loadCategories()

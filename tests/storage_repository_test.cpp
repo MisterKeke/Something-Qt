@@ -21,6 +21,7 @@ private slots:
     void failedMigrationLeavesNoPartialVersion();
     void migratorRejectsUntrackedAndUnknownHistories();
     void taskAggregateUpdateIsAtomicAndRevisionChecked();
+    void taskAutomationPersistsWithTaskAndDeduplicatesExecutionHistory();
     void scheduleBatchRejectsStaleTaskScheduleAndPreferenceRevisionsAtomically();
     void taskSearchFiltersPagesAndOmittedMetadata();
     void categoryDeleteMovesAssignmentsWithinOneSource();
@@ -56,7 +57,7 @@ void StorageRepositoryTest::migrationsAreTransactionalIndependentAndRepeatable()
     QString connectionName;
     QSqlDatabase database;
     QVERIFY(openTestDatabase(&database, &connectionName));
-    QCOMPARE(storage::SchemaMigrator::latestVersion(), 20);
+    QCOMPARE(storage::SchemaMigrator::latestVersion(), 21);
     QVERIFY(storage::SchemaMigrator::apply(database));
 
     QSqlQuery history(database);
@@ -77,6 +78,8 @@ void StorageRepositoryTest::migrationsAreTransactionalIndependentAndRepeatable()
                                     QStringLiteral("steam_game_update_follows"),
                                     QStringLiteral("steam_game_update_news_items"),
                                     QStringLiteral("task_history"),
+                                    QStringLiteral("task_automations"),
+                                    QStringLiteral("task_automation_executions"),
                                     QStringLiteral("task_schedules"),
                                     QStringLiteral("scheduling_preferences"),
                                     QStringLiteral("preferences")}) {
@@ -116,6 +119,104 @@ void StorageRepositoryTest::migrationsAreTransactionalIndependentAndRepeatable()
     }
 
     history.finish();
+    database.close();
+    database = QSqlDatabase();
+    QSqlDatabase::removeDatabase(connectionName);
+}
+
+void StorageRepositoryTest::taskAutomationPersistsWithTaskAndDeduplicatesExecutionHistory()
+{
+    QString connectionName;
+    QSqlDatabase database;
+    QVERIFY(openTestDatabase(&database, &connectionName));
+    storage::StorageRepositories repositories(database);
+
+    storage::TaskInput input;
+    input.title = QStringLiteral("Finish development work");
+    storage::TaskAutomationInput automation;
+    automation.enabled = true;
+    automation.actionType = QStringLiteral("show_notification");
+    automation.notificationMessage = QStringLiteral("Done: {task.title}");
+    automation.delayMs = 5000;
+    input.automation = automation;
+    const auto created = repositories.tasks.create(input);
+    QVERIFY(created.succeeded());
+    QVERIFY(created.value.automation.has_value());
+    QCOMPARE(created.value.automation->actionType, QStringLiteral("show_notification"));
+    QCOMPARE(created.value.automation->delayMs, 5000);
+    const qint64 automationId = created.value.automation->id;
+
+    const auto completed = repositories.tasks.setCompleted(
+        created.value.id, created.value.revision, true);
+    QVERIFY(completed.succeeded());
+    QVERIFY(completed.value.previousCompleted.has_value());
+    QVERIFY(!*completed.value.previousCompleted);
+
+    storage::TaskAutomationExecution execution;
+    execution.executionId = QStringLiteral("execution-1");
+    execution.automationId = automationId;
+    execution.taskId = created.value.id;
+    execution.completionEventId = QStringLiteral("task:%1:revision:%2")
+        .arg(created.value.id).arg(completed.value.revision);
+    execution.actionType = QStringLiteral("show_notification");
+    execution.targetReference = QStringLiteral("notification");
+    execution.requestedAtUtc = QStringLiteral("2026-11-01T12:00:00.000Z");
+    execution.configurationRevision = created.value.automation->revision;
+    const auto inserted = repositories.taskAutomations.insertExecution(execution);
+    QVERIFY(inserted.succeeded());
+    QVERIFY(inserted.value);
+    const auto duplicate = repositories.taskAutomations.insertExecution(execution);
+    QVERIFY(duplicate.succeeded());
+    QVERIFY(!duplicate.value);
+    QVERIFY(repositories.taskAutomations.updateExecution(execution.executionId,
+        QStringLiteral("succeeded"), QStringLiteral("2026-11-01T12:00:05.000Z"), {}).succeeded());
+
+    const auto loaded = repositories.tasks.get(created.value.id);
+    QVERIFY(loaded.succeeded());
+    QVERIFY(loaded.value.automation.has_value());
+    QCOMPARE(loaded.value.automation->latestExecutionStatus, QStringLiteral("succeeded"));
+    QCOMPARE(loaded.value.automation->latestExecutionAt,
+             QStringLiteral("2026-11-01T12:00:05.000Z"));
+
+    storage::TaskInput disableAutomation;
+    disableAutomation.title = loaded.value.title;
+    storage::TaskAutomationInput disabled;
+    disabled.enabled = false;
+    disabled.actionType = QStringLiteral("show_notification");
+    disabled.notificationMessage = QStringLiteral("Updated: {task.title}");
+    disabled.delayMs = 30000;
+    disableAutomation.automation = disabled;
+    const auto disabledTask = repositories.tasks.update(
+        created.value.id, loaded.value.revision, disableAutomation);
+    QVERIFY(disabledTask.succeeded());
+    QVERIFY(disabledTask.value.automation.has_value());
+    QVERIFY(!disabledTask.value.automation->enabled);
+    QCOMPARE(disabledTask.value.automation->revision,
+             created.value.automation->revision + 1);
+    QCOMPARE(disabledTask.value.automation->notificationMessage,
+             QStringLiteral("Updated: {task.title}"));
+
+    storage::TaskInput removeAutomation;
+    removeAutomation.title = disabledTask.value.title;
+    removeAutomation.automation = storage::TaskAutomationInput{};
+    removeAutomation.automation->configured = false;
+    const auto updated = repositories.tasks.update(
+        created.value.id, disabledTask.value.revision, removeAutomation);
+    QVERIFY(updated.succeeded());
+    QVERIFY(!updated.value.automation.has_value());
+    QSqlQuery history(database);
+    QVERIFY(history.exec(QStringLiteral(
+        "SELECT status,automation_id FROM task_automation_executions WHERE execution_id='execution-1'")));
+    QVERIFY(history.next());
+    QCOMPARE(history.value(0).toString(), QStringLiteral("succeeded"));
+    QVERIFY(history.value(1).isNull());
+    history.finish();
+
+    QVERIFY(repositories.tasks.remove(created.value.id, updated.value.revision).succeeded());
+    QVERIFY(history.exec(QStringLiteral("SELECT COUNT(*) FROM task_automation_executions")));
+    QVERIFY(history.next());
+    QCOMPARE(history.value(0).toInt(), 0);
+
     database.close();
     database = QSqlDatabase();
     QSqlDatabase::removeDatabase(connectionName);
@@ -752,7 +853,9 @@ void StorageRepositoryTest::applicationCategoryMigrationPreservesExistingProfile
         QStringLiteral("usage_segments"), QStringLiteral("usage_sessions"),
         QStringLiteral("usage_tracked_applications"),
         QStringLiteral("usage_tracking_settings"),
-        QStringLiteral("usage_excluded_applications")};
+        QStringLiteral("usage_excluded_applications"),
+        QStringLiteral("task_automation_executions"),
+        QStringLiteral("task_automations")};
     for (const QString &table : newerTables)
         QVERIFY(fixture.exec(QStringLiteral("DROP TABLE ") + table));
     QVERIFY(fixture.exec(QStringLiteral("DELETE FROM schema_migrations WHERE version>=8")));

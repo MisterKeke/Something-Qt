@@ -663,12 +663,16 @@ ApplicationWindow {
         anchors.bottom: parent.bottom
         anchors.bottomMargin: 20
         z: 100
-        message: taskController.notification.length > 0
+        message: backgroundController.notificationMessage.length > 0
+                 ? backgroundController.notificationMessage
+                 : taskController.notification.length > 0
                  ? taskController.notification
                  : setupsController.errorMessage.length > 0
                    ? setupsController.errorMessage : wallpaperController.notification
         onDismissed: {
-            if (taskController.notification.length > 0)
+            if (backgroundController.notificationMessage.length > 0)
+                backgroundController.clearNotificationMessage()
+            else if (taskController.notification.length > 0)
                 taskController.clearNotification()
             else if (setupsController.errorMessage.length > 0)
                 setupsController.clearMessages()

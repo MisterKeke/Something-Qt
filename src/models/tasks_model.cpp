@@ -14,8 +14,19 @@ bool sameTask(const something::domain::Task &left, const something::domain::Task
         || left.createdAt != right.createdAt || left.updatedAt != right.updatedAt
         || left.dueDate != right.dueDate || left.priority != right.priority
         || left.difficulty != right.difficulty || left.revision != right.revision
-        || left.tags != right.tags || left.subtasks.size() != right.subtasks.size()) {
+        || left.tags != right.tags || left.subtasks.size() != right.subtasks.size()
+        || left.automation.has_value() != right.automation.has_value()) {
         return false;
+    }
+    if (left.automation && right.automation) {
+        const auto &a = *left.automation;
+        const auto &b = *right.automation;
+        if (a.id != b.id || a.enabled != b.enabled || a.actionType != b.actionType
+            || a.targetId != b.targetId || a.url != b.url
+            || a.notificationMessage != b.notificationMessage || a.delayMs != b.delayMs
+            || a.revision != b.revision || a.latestExecutionStatus != b.latestExecutionStatus
+            || a.latestExecutionError != b.latestExecutionError
+            || a.latestExecutionAt != b.latestExecutionAt) return false;
     }
     for (int i = 0; i < left.subtasks.size(); ++i) {
         const auto &a = left.subtasks.at(i);
@@ -44,6 +55,7 @@ void notifyTaskChanged(something::models::TasksModel *model, int row)
         something::models::TasksModel::SubtaskCountRole,
         something::models::TasksModel::CompletedSubtasksRole,
         something::models::TasksModel::OverdueRole,
+        something::models::TasksModel::AutomationRole,
     });
 }
 
@@ -103,6 +115,26 @@ QVariant TasksModel::data(const QModelIndex &index, int role) const
         return !task.completed && !task.dueDate.isEmpty()
             && QDate::fromString(task.dueDate, Qt::ISODate).isValid()
             && QDate::fromString(task.dueDate, Qt::ISODate) < m_today;
+    case AutomationRole: {
+        if (!task.automation) return QVariantMap{};
+        const auto &automation = *task.automation;
+        return QVariantMap{
+            {QStringLiteral("id"), automation.id},
+            {QStringLiteral("taskId"), automation.taskId},
+            {QStringLiteral("configured"), true},
+            {QStringLiteral("enabled"), automation.enabled},
+            {QStringLiteral("triggerType"), automation.triggerType},
+            {QStringLiteral("actionType"), automation.actionType},
+            {QStringLiteral("targetId"), automation.targetId},
+            {QStringLiteral("url"), automation.url},
+            {QStringLiteral("notificationMessage"), automation.notificationMessage},
+            {QStringLiteral("delayMs"), automation.delayMs},
+            {QStringLiteral("revision"), automation.revision},
+            {QStringLiteral("latestExecutionStatus"), automation.latestExecutionStatus},
+            {QStringLiteral("latestExecutionError"), automation.latestExecutionError},
+            {QStringLiteral("latestExecutionAt"), automation.latestExecutionAt},
+        };
+    }
     default: return {};
     }
 }
@@ -118,6 +150,7 @@ QHash<int, QByteArray> TasksModel::roleNames() const
         {TagsRole, "tags"}, {SubtasksRole, "subtasks"},
         {SubtaskCountRole, "subtaskCount"},
         {CompletedSubtasksRole, "completedSubtasks"}, {OverdueRole, "overdue"},
+        {AutomationRole, "automation"},
     };
 }
 

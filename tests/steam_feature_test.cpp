@@ -229,7 +229,14 @@ void SteamFeatureTest::unsupportedPriceMigrationPreservesChildrenAndRollsBackFai
         QVERIFY(repositories.steam.remove(retiredId).succeeded());
     }
     QSqlQuery query(database);
-    QVERIFY(query.exec(QStringLiteral("DELETE FROM schema_migrations WHERE version=19")));
+    QVERIFY(query.exec(QStringLiteral("DROP TABLE task_automation_executions")));
+    QVERIFY(query.exec(QStringLiteral("DROP TABLE task_automations")));
+    QVERIFY(query.exec(QStringLiteral("DROP TABLE usage_segments")));
+    QVERIFY(query.exec(QStringLiteral("DROP TABLE usage_sessions")));
+    QVERIFY(query.exec(QStringLiteral("DROP TABLE usage_tracked_applications")));
+    QVERIFY(query.exec(QStringLiteral("DROP TABLE usage_tracking_settings")));
+    QVERIFY(query.exec(QStringLiteral("DROP TABLE usage_excluded_applications")));
+    QVERIFY(query.exec(QStringLiteral("DELETE FROM schema_migrations WHERE version>=19")));
     QVERIFY(query.exec(QStringLiteral(
         "CREATE TRIGGER reject_migration_artwork BEFORE INSERT ON steam_game_images "
         "BEGIN SELECT RAISE(ABORT,'fixture restore failure'); END")));
@@ -745,6 +752,8 @@ void SteamFeatureTest::releaseRadarMigrationPreservesExistingPriceProfiles()
         QVERIFY(legacy.exec(QStringLiteral("DROP TABLE usage_tracked_applications")));
         QVERIFY(legacy.exec(QStringLiteral("DROP TABLE usage_tracking_settings")));
         QVERIFY(legacy.exec(QStringLiteral("DROP TABLE usage_excluded_applications")));
+        QVERIFY(legacy.exec(QStringLiteral("DROP TABLE task_automation_executions")));
+        QVERIFY(legacy.exec(QStringLiteral("DROP TABLE task_automations")));
         QVERIFY(legacy.exec(QStringLiteral(
             "DELETE FROM preferences WHERE key='calendar.game_releases_visible'")));
         QVERIFY(legacy.exec(QStringLiteral("DELETE FROM schema_migrations WHERE version>=13")));
@@ -752,7 +761,7 @@ void SteamFeatureTest::releaseRadarMigrationPreservesExistingPriceProfiles()
 
     QString diagnostic;
     QVERIFY2(storage::SchemaMigrator::apply(database, &diagnostic), qPrintable(diagnostic));
-    QCOMPARE(storage::SchemaMigrator::latestVersion(), 20);
+    QCOMPARE(storage::SchemaMigrator::latestVersion(), 21);
     {
         storage::StorageRepositories repositories(database);
         const auto preserved = repositories.steam.get(priceGameId);
@@ -926,12 +935,14 @@ void SteamFeatureTest::steamPriceHistoryMigrationPreservesLegacyGamesWithoutFabr
     QVERIFY(legacy.exec(QStringLiteral("DROP TABLE usage_tracked_applications")));
     QVERIFY(legacy.exec(QStringLiteral("DROP TABLE usage_tracking_settings")));
     QVERIFY(legacy.exec(QStringLiteral("DROP TABLE usage_excluded_applications")));
+    QVERIFY(legacy.exec(QStringLiteral("DROP TABLE task_automation_executions")));
+    QVERIFY(legacy.exec(QStringLiteral("DROP TABLE task_automations")));
     QVERIFY(legacy.exec(QStringLiteral("DELETE FROM schema_migrations WHERE version>=12")));
     legacy.finish();
 
     QString diagnostic;
     QVERIFY2(storage::SchemaMigrator::apply(database, &diagnostic), qPrintable(diagnostic));
-    QCOMPARE(storage::SchemaMigrator::latestVersion(), 20);
+    QCOMPARE(storage::SchemaMigrator::latestVersion(), 21);
 
     {
         storage::StorageRepositories repositories(database);

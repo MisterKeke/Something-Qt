@@ -244,11 +244,12 @@ Item {
     }
 
     function taskRecord(taskId, title, description, completed, createdAt, updatedAt,
-                        dueDate, priority, difficulty, revision, tags, subtasks) {
+                        dueDate, priority, difficulty, revision, tags, subtasks, automation) {
         return { id: Number(taskId), title: title, description: description,
                  completed: completed, createdAt: createdAt, updatedAt: updatedAt,
                  dueDate: dueDate, priority: priority, difficulty: difficulty,
-                 revision: Number(revision), tags: tags, subtasks: subtasks }
+                 revision: Number(revision), tags: tags, subtasks: subtasks,
+                 automation: automation }
     }
 
     function hasActiveFilters() {
@@ -1217,7 +1218,7 @@ Item {
                             enabled: !taskController.mutationBusy
                             onClicked: editor.openForTask(root.taskRecord(
                                 taskId, title, description, completed, createdAt, updatedAt,
-                                dueDate, priority, difficulty, revision, tags, subtasks))
+                                dueDate, priority, difficulty, revision, tags, subtasks, automation))
                         }
                         Shared.AppButton {
                             text: qsTr("History")

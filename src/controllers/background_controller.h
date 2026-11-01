@@ -27,6 +27,7 @@ class BackgroundController final : public QObject {
     Q_PROPERTY(bool inTrayMode READ inTrayMode NOTIFY presentationChanged)
     Q_PROPERTY(bool shutdownRequested READ shutdownRequested NOTIFY presentationChanged)
     Q_PROPERTY(QString statusMessage READ statusMessage NOTIFY presentationChanged)
+    Q_PROPERTY(QString notificationMessage READ notificationMessage NOTIFY presentationChanged)
     Q_PROPERTY(bool usageTrackingEnabled READ usageTrackingEnabled NOTIFY presentationChanged)
     Q_PROPERTY(QString usageTrackingStatus READ usageTrackingStatus NOTIFY presentationChanged)
 
@@ -46,6 +47,7 @@ public:
     bool inTrayMode() const noexcept;
     bool shutdownRequested() const noexcept { return m_shutdownRequested; }
     QString statusMessage() const { return m_statusMessage; }
+    QString notificationMessage() const { return m_notificationMessage; }
     bool usageTrackingEnabled() const noexcept { return m_usageTrackingEnabled; }
     QString usageTrackingStatus() const { return m_usageTrackingStatus; }
 
@@ -58,6 +60,7 @@ public:
     void setStartMinimizedToTray(bool enabled);
     void setNotifyOnFirstHide(bool enabled);
     void setUsageTrackingState(bool enabled, QString status);
+    bool showAutomationNotification(QString title, QString message);
 
     Q_INVOKABLE bool handleWindowClose(QObject *window);
     Q_INVOKABLE void openMainWindow();
@@ -66,6 +69,7 @@ public:
     Q_INVOKABLE void exitCompletely();
     Q_INVOKABLE void beginSystemShutdown();
     Q_INVOKABLE void setShutdownRequested(bool requested);
+    Q_INVOKABLE void clearNotificationMessage();
 
     static bool hideToTrayAllowed(bool trayEnabled, bool minimizeToTray,
                                   bool trayAvailable, bool shutdownRequested,
@@ -108,6 +112,7 @@ private:
     QPointer<QWindow> m_consoleWindow;
     QTimer m_watchdog;
     QString m_statusMessage;
+    QString m_notificationMessage;
     QString m_usageTrackingStatus{QStringLiteral("Waiting for local storage")};
     bool m_systemTrayEnabled{true};
     bool m_minimizeToTrayOnClose{false};

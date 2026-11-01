@@ -61,6 +61,7 @@
 #include "services/file_explorer_service.h"
 #include "services/application_command_service.h"
 #include "services/application_usage_service.h"
+#include "services/task_automation_service.h"
 
 namespace {
 
@@ -181,6 +182,8 @@ int main(int argc, char *argv[])
     something::controllers::SettingsController settingsController(&services, &clock, &mutationWorkflow);
     something::controllers::SetupsController setupsController(
         &services, &desktopApplicationsPlatform, setupImages);
+    something::services::TaskAutomationService taskAutomationService(
+        &services, &mutationWorkflow, &desktopApplicationsPlatform, &backgroundController);
     something::controllers::FileExplorerController fileExplorerController(
         &services, &fileExplorerService, &fileExplorerShell);
     something::controllers::SteamGamesController steamGamesController(&services);
@@ -260,6 +263,11 @@ int main(int argc, char *argv[])
                      &dashboardController, &something::controllers::DashboardController::onTaskMutation);
     QObject::connect(&tasksController, &something::controllers::TasksController::taskMutationCommitted,
                      &schedulingController, &something::controllers::SchedulingController::onTaskMutationCommitted);
+    QObject::connect(&tasksController, &something::controllers::TasksController::taskMutationCommitted,
+                     &taskAutomationService, &something::services::TaskAutomationService::observeTaskMutation);
+    QObject::connect(&taskAutomationService, &something::services::TaskAutomationService::executionChanged,
+                     &tasksController, [&tasksController](qint64, const QString &,
+                         const QString &, const QString &) { tasksController.refresh(); });
     QObject::connect(&tasksController, &something::controllers::TasksController::taskMutationMayHaveCommitted,
                      &calendarController, &something::controllers::CalendarController::refreshSelectedDate);
     QObject::connect(&tasksController, &something::controllers::TasksController::taskMutationMayHaveCommitted,
@@ -298,6 +306,8 @@ int main(int argc, char *argv[])
                                              &legacyDataImportController);
     engine.rootContext()->setContextProperty(QStringLiteral("taskController"),
                                              &tasksController);
+    engine.rootContext()->setContextProperty(QStringLiteral("taskAutomationService"),
+                                             &taskAutomationService);
     engine.rootContext()->setContextProperty(QStringLiteral("schedulingController"),
                                              &schedulingController);
     engine.rootContext()->setContextProperty(QStringLiteral("taskHistoryController"),
@@ -389,8 +399,12 @@ int main(int argc, char *argv[])
                      &something::controllers::ApplicationController::requestShutdown);
     QObject::connect(&controller,
                      &something::controllers::ApplicationController::shutdownRequestedChanged,
-                     &backgroundController, [&backgroundController, &applicationUsageService](bool requested) {
-        if (requested) applicationUsageService.prepareShutdown();
+                     &backgroundController, [&backgroundController, &applicationUsageService,
+                         &taskAutomationService](bool requested) {
+        if (requested) {
+            applicationUsageService.prepareShutdown();
+            taskAutomationService.prepareShutdown();
+        }
         backgroundController.setShutdownRequested(requested);
     });
     QObject::connect(&backgroundController,

@@ -2,6 +2,7 @@
 
 #include <QDate>
 #include <QSet>
+#include <QUrl>
 
 #include <utility>
 
@@ -12,6 +13,51 @@ bool isValidIsoDate(const QString &value)
     if (value.isEmpty()) return true;
     const QDate date = QDate::fromString(value, Qt::ISODate);
     return date.isValid() && date.toString(Qt::ISODate) == value;
+}
+
+AppError normalizeTaskAutomation(TaskAutomationInput &automation)
+{
+    if (!automation.configured) return AppError::none();
+
+    automation.triggerType = automation.triggerType.trimmed().toLower();
+    automation.actionType = automation.actionType.trimmed().toLower();
+    automation.url = automation.url.trimmed();
+    automation.notificationMessage = automation.notificationMessage.trimmed();
+    if (automation.triggerType.isEmpty())
+        automation.triggerType = QStringLiteral("task_completed");
+    if (automation.notificationMessage.isEmpty())
+        automation.notificationMessage = QStringLiteral("Task completed: {task.title}");
+
+    if (automation.triggerType != QStringLiteral("task_completed")
+        || automation.delayMs < 0
+        || (automation.delayMs != 0 && automation.delayMs != 5000
+            && automation.delayMs != 30000)
+        || automation.notificationMessage.toUcs4().size() > 1000) {
+        return AppError(ErrorCategory::Validation);
+    }
+
+    if (automation.actionType == QStringLiteral("launch_application")
+        || automation.actionType == QStringLiteral("launch_setup")) {
+        if (automation.targetId <= 0 || !automation.url.isEmpty())
+            return AppError(ErrorCategory::Validation);
+    } else if (automation.actionType == QStringLiteral("open_url")) {
+        const QUrl parsed(automation.url, QUrl::StrictMode);
+        const QString scheme = parsed.scheme().toLower();
+        if (!parsed.isValid() || parsed.host().isEmpty()
+            || (!parsed.userName().isEmpty() || !parsed.password().isEmpty())
+            || (scheme != QStringLiteral("http") && scheme != QStringLiteral("https"))
+            || automation.targetId != 0) {
+            return AppError(ErrorCategory::Validation);
+        }
+        automation.url = parsed.toString(QUrl::FullyEncoded);
+    } else if (automation.actionType == QStringLiteral("show_notification")) {
+        if (automation.targetId != 0 || !automation.url.isEmpty())
+            return AppError(ErrorCategory::Validation);
+    } else {
+        return AppError(ErrorCategory::Validation);
+    }
+
+    return AppError::none();
 }
 
 AppError normalizeTaskInput(TaskInput &input)
@@ -70,6 +116,11 @@ AppError normalizeTaskInput(TaskInput &input)
             }
             if (subtask.id > 0) seenIds.insert(subtask.id);
         }
+    }
+
+    if (input.automation
+        && normalizeTaskAutomation(*input.automation).isError()) {
+        return AppError(ErrorCategory::Validation);
     }
 
     return AppError::none();

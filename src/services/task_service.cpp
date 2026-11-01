@@ -326,7 +326,7 @@ QVariantMap TaskService::toVariantMap(const storage::Task &task)
             {QStringLiteral("position"), subtask.position},
         });
     }
-    return {
+    QVariantMap result{
         {QStringLiteral("id"), task.id},
         {QStringLiteral("title"), task.title},
         {QStringLiteral("description"), task.description},
@@ -340,6 +340,32 @@ QVariantMap TaskService::toVariantMap(const storage::Task &task)
         {QStringLiteral("tags"), task.tags},
         {QStringLiteral("subtasks"), subtasks},
     };
+    if (task.automation) {
+        const auto &automation = *task.automation;
+        result.insert(QStringLiteral("automation"), QVariantMap{
+            {QStringLiteral("id"), automation.id},
+            {QStringLiteral("taskId"), automation.taskId},
+            {QStringLiteral("configured"), true},
+            {QStringLiteral("enabled"), automation.enabled},
+            {QStringLiteral("triggerType"), automation.triggerType},
+            {QStringLiteral("actionType"), automation.actionType},
+            {QStringLiteral("targetId"), automation.targetId},
+            {QStringLiteral("url"), automation.url},
+            {QStringLiteral("notificationMessage"), automation.notificationMessage},
+            {QStringLiteral("delayMs"), automation.delayMs},
+            {QStringLiteral("revision"), automation.revision},
+            {QStringLiteral("createdAt"), automation.createdAt},
+            {QStringLiteral("updatedAt"), automation.updatedAt},
+            {QStringLiteral("latestExecutionStatus"), automation.latestExecutionStatus},
+            {QStringLiteral("latestExecutionError"), automation.latestExecutionError},
+            {QStringLiteral("latestExecutionAt"), automation.latestExecutionAt},
+        });
+    } else {
+        result.insert(QStringLiteral("automation"), QVariantMap{});
+    }
+    if (task.previousCompleted)
+        result.insert(QStringLiteral("previousCompleted"), *task.previousCompleted);
+    return result;
 }
 
 storage::Task TaskService::fromVariantMap(const QVariantMap &map)
@@ -365,6 +391,28 @@ storage::Task TaskService::fromVariantMap(const QVariantMap &map)
                                  row.value(QStringLiteral("completed")).toBool(),
                                  row.value(QStringLiteral("position")).toInt()});
     }
+    const QVariantMap automationMap = map.value(QStringLiteral("automation")).toMap();
+    if (automationMap.value(QStringLiteral("configured")).toBool()) {
+        domain::TaskAutomation automation;
+        automation.id = automationMap.value(QStringLiteral("id")).toLongLong();
+        automation.taskId = automationMap.value(QStringLiteral("taskId")).toLongLong();
+        automation.enabled = automationMap.value(QStringLiteral("enabled")).toBool();
+        automation.triggerType = automationMap.value(QStringLiteral("triggerType")).toString();
+        automation.actionType = automationMap.value(QStringLiteral("actionType")).toString();
+        automation.targetId = automationMap.value(QStringLiteral("targetId")).toLongLong();
+        automation.url = automationMap.value(QStringLiteral("url")).toString();
+        automation.notificationMessage = automationMap.value(QStringLiteral("notificationMessage")).toString();
+        automation.delayMs = automationMap.value(QStringLiteral("delayMs")).toInt();
+        automation.revision = automationMap.value(QStringLiteral("revision")).toLongLong();
+        automation.createdAt = automationMap.value(QStringLiteral("createdAt")).toString();
+        automation.updatedAt = automationMap.value(QStringLiteral("updatedAt")).toString();
+        automation.latestExecutionStatus = automationMap.value(QStringLiteral("latestExecutionStatus")).toString();
+        automation.latestExecutionError = automationMap.value(QStringLiteral("latestExecutionError")).toString();
+        automation.latestExecutionAt = automationMap.value(QStringLiteral("latestExecutionAt")).toString();
+        task.automation = std::move(automation);
+    }
+    if (map.contains(QStringLiteral("previousCompleted")))
+        task.previousCompleted = map.value(QStringLiteral("previousCompleted")).toBool();
     return task;
 }
 

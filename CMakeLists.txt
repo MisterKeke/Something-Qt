@@ -147,6 +147,7 @@ qt_add_executable(SomethingQt WIN32
     src/services/currency_service.cpp
     src/services/favorites_service.cpp
     src/services/task_service.cpp
+    src/services/task_automation_service.cpp
     src/services/universal_search_service.cpp
     src/services/task_history_service.cpp
     src/services/application_command_service.cpp

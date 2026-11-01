@@ -742,6 +742,9 @@ RepositoryResult<Task> TaskRepository::load(qint64 id) const
         task.subtasks.push_back(Subtask{subtasks.value(0).toLongLong(), subtasks.value(1).toString(),
                                         subtasks.value(2).toBool(), subtasks.value(3).toInt()});
     }
+    const auto automation = TaskAutomationRepository(m_database).getForTask(id);
+    if (!automation.succeeded()) return failure<Task>(automation.error.category());
+    task.automation = automation.value;
     RepositoryResult<Task> result;
     result.value = std::move(task);
     return result;
@@ -903,6 +906,10 @@ RepositoryResult<Task> TaskRepository::create(const TaskInput &requested)
     domain::AppError error;
     if (input.tags && !replaceTags(id, *input.tags, &error)) return failure<Task>(error.category());
     if (input.subtasks && !replaceSubtasks(id, *input.subtasks, &error)) return failure<Task>(error.category());
+    if (input.automation && input.automation->configured) {
+        const auto savedAutomation = TaskAutomationRepository(m_database).saveForTask(id, *input.automation);
+        if (!savedAutomation.succeeded()) return failure<Task>(savedAutomation.error.category());
+    }
     const auto created = load(id);
     if (!created.succeeded()) return failure<Task>(created.error.category());
     if (!insertTaskHistory(m_database, id, domain::TaskHistoryEventType::TaskCreated,
@@ -944,6 +951,16 @@ RepositoryResult<Task> TaskRepository::update(qint64 id, qint64 expectedRevision
     domain::AppError error;
     if (input.tags && !replaceTags(id, *input.tags, &error)) return failure<Task>(error.category());
     if (input.subtasks && !replaceSubtasks(id, *input.subtasks, &error)) return failure<Task>(error.category());
+    if (input.automation) {
+        TaskAutomationRepository automations(m_database);
+        if (input.automation->configured) {
+            const auto savedAutomation = automations.saveForTask(id, *input.automation);
+            if (!savedAutomation.succeeded()) return failure<Task>(savedAutomation.error.category());
+        } else {
+            const auto removedAutomation = automations.removeForTask(id);
+            if (!removedAutomation.succeeded()) return failure<Task>(removedAutomation.error.category());
+        }
+    }
     const auto updated = load(id);
     if (!updated.succeeded()) return failure<Task>(updated.error.category());
     const auto changes = taskChanges(current.value, updated.value);
@@ -988,7 +1005,10 @@ RepositoryResult<Task> TaskRepository::setCompleted(qint64 id, qint64 expectedRe
         }
     }
     if (!transaction.commit()) return failure<Task>(domain::ErrorCategory::Storage);
-    return updated;
+    RepositoryResult<Task> result;
+    result.value = updated.value;
+    result.value.previousCompleted = current.value.completed;
+    return result;
 }
 
 RepositoryResult<Task> TaskRepository::setSubtaskCompleted(qint64 id, qint64 subtaskId,
@@ -1066,6 +1086,184 @@ RepositoryResult<void> TaskRepository::remove(qint64 id, qint64 expectedRevision
     }
     if (!transaction.commit()) return failureVoid(domain::ErrorCategory::Storage);
     return {};
+}
+
+TaskAutomationRepository::TaskAutomationRepository(QSqlDatabase &database)
+    : m_database(database)
+{
+}
+
+RepositoryResult<std::optional<TaskAutomation>> TaskAutomationRepository::getForTask(
+    qint64 taskId) const
+{
+    Q_ASSERT(QThread::currentThread() == m_database.driver()->thread());
+    if (taskId <= 0)
+        return failure<std::optional<TaskAutomation>>(domain::ErrorCategory::Validation);
+    QSqlQuery query(m_database);
+    query.prepare(QStringLiteral(
+        "SELECT a.id,a.task_id,a.enabled,a.trigger_type,a.action_type,a.target_id,a.url,"
+        "a.notification_message,a.delay_ms,a.revision,a.created_at,a.updated_at,"
+        "COALESCE((SELECT e.status FROM task_automation_executions e "
+        "WHERE e.task_id=a.task_id ORDER BY e.rowid DESC LIMIT 1),''),"
+        "COALESCE((SELECT e.error_message FROM task_automation_executions e "
+        "WHERE e.task_id=a.task_id ORDER BY e.rowid DESC LIMIT 1),''),"
+        "COALESCE((SELECT e.executed_at_utc FROM task_automation_executions e "
+        "WHERE e.task_id=a.task_id ORDER BY e.rowid DESC LIMIT 1),'') "
+        "FROM task_automations a WHERE a.task_id=?"));
+    query.addBindValue(taskId);
+    if (!query.exec())
+        return failure<std::optional<TaskAutomation>>(queryFailure(query));
+    RepositoryResult<std::optional<TaskAutomation>> result;
+    if (query.next()) {
+        TaskAutomation automation;
+        automation.id = query.value(0).toLongLong();
+        automation.taskId = query.value(1).toLongLong();
+        automation.enabled = query.value(2).toBool();
+        automation.triggerType = query.value(3).toString();
+        automation.actionType = query.value(4).toString();
+        automation.targetId = query.value(5).toLongLong();
+        automation.url = query.value(6).toString();
+        automation.notificationMessage = query.value(7).toString();
+        automation.delayMs = query.value(8).toInt();
+        automation.revision = query.value(9).toLongLong();
+        automation.createdAt = query.value(10).toString();
+        automation.updatedAt = query.value(11).toString();
+        automation.latestExecutionStatus = query.value(12).toString();
+        automation.latestExecutionError = query.value(13).toString();
+        automation.latestExecutionAt = query.value(14).toString();
+        result.value = std::move(automation);
+    }
+    return result;
+}
+
+RepositoryResult<TaskAutomation> TaskAutomationRepository::saveForTask(
+    qint64 taskId, const TaskAutomationInput &requested)
+{
+    Q_ASSERT(QThread::currentThread() == m_database.driver()->thread());
+    if (taskId <= 0) return failure<TaskAutomation>(domain::ErrorCategory::Validation);
+    TaskAutomationInput input = requested;
+    if (domain::normalizeTaskAutomation(input).isError() || !input.configured)
+        return failure<TaskAutomation>(domain::ErrorCategory::Validation);
+
+    const auto previous = getForTask(taskId);
+    if (!previous.succeeded()) return failure<TaskAutomation>(previous.error.category());
+    if (previous.value) {
+        const TaskAutomation &saved = *previous.value;
+        if (saved.enabled == input.enabled && saved.triggerType == input.triggerType
+            && saved.actionType == input.actionType && saved.targetId == input.targetId
+            && saved.url == input.url
+            && saved.notificationMessage == input.notificationMessage
+            && saved.delayMs == input.delayMs) {
+            RepositoryResult<TaskAutomation> unchanged;
+            unchanged.value = saved;
+            return unchanged;
+        }
+    }
+
+    QSqlQuery query(m_database);
+    query.prepare(QStringLiteral(
+        "INSERT INTO task_automations(task_id,enabled,trigger_type,action_type,target_id,url,"
+        "notification_message,delay_ms,revision) VALUES(?,?,?,?,?,?,?,?,1) "
+        "ON CONFLICT(task_id) DO UPDATE SET enabled=excluded.enabled,"
+        "trigger_type=excluded.trigger_type,action_type=excluded.action_type,"
+        "target_id=excluded.target_id,url=excluded.url,"
+        "notification_message=excluded.notification_message,delay_ms=excluded.delay_ms,"
+        "revision=task_automations.revision+1,updated_at=CURRENT_TIMESTAMP"));
+    query.addBindValue(taskId);
+    query.addBindValue(input.enabled);
+    query.addBindValue(input.triggerType);
+    query.addBindValue(input.actionType);
+    query.addBindValue(input.targetId > 0 ? QVariant(input.targetId) : QVariant());
+    query.addBindValue(input.url.isEmpty() ? QVariant() : QVariant(input.url));
+    query.addBindValue(input.notificationMessage);
+    query.addBindValue(input.delayMs);
+    if (!query.exec()) return failure<TaskAutomation>(queryFailure(query));
+    const auto saved = getForTask(taskId);
+    if (!saved.succeeded()) return failure<TaskAutomation>(saved.error.category());
+    if (!saved.value) return failure<TaskAutomation>(domain::ErrorCategory::Storage);
+    RepositoryResult<TaskAutomation> result;
+    result.value = *saved.value;
+    return result;
+}
+
+RepositoryResult<void> TaskAutomationRepository::removeForTask(qint64 taskId)
+{
+    Q_ASSERT(QThread::currentThread() == m_database.driver()->thread());
+    if (taskId <= 0) return failureVoid(domain::ErrorCategory::Validation);
+    QSqlQuery query(m_database);
+    query.prepare(QStringLiteral("DELETE FROM task_automations WHERE task_id=?"));
+    query.addBindValue(taskId);
+    if (!query.exec()) return failureVoid(queryFailure(query));
+    return {};
+}
+
+RepositoryResult<bool> TaskAutomationRepository::insertExecution(
+    const TaskAutomationExecution &execution)
+{
+    Q_ASSERT(QThread::currentThread() == m_database.driver()->thread());
+    static const QSet<QString> actions{
+        QStringLiteral("launch_application"), QStringLiteral("launch_setup"),
+        QStringLiteral("open_url"), QStringLiteral("show_notification")};
+    if (execution.executionId.isEmpty() || execution.automationId <= 0
+        || execution.taskId <= 0 || execution.completionEventId.isEmpty()
+        || execution.targetReference.isEmpty() || !actions.contains(execution.actionType)
+        || execution.configurationRevision <= 0)
+        return failure<bool>(domain::ErrorCategory::Validation);
+    QSqlQuery query(m_database);
+    query.prepare(QStringLiteral(
+        "INSERT INTO task_automation_executions(execution_id,automation_id,task_id,"
+        "completion_event_id,action_type,target_reference,requested_at_utc,status,error_message,"
+        "configuration_revision) VALUES(?,?,?,?,?,?,?,'pending','',?) "
+        "ON CONFLICT(completion_event_id) DO NOTHING"));
+    query.addBindValue(execution.executionId);
+    query.addBindValue(execution.automationId);
+    query.addBindValue(execution.taskId);
+    query.addBindValue(execution.completionEventId);
+    query.addBindValue(execution.actionType);
+    query.addBindValue(execution.targetReference);
+    query.addBindValue(execution.requestedAtUtc);
+    query.addBindValue(execution.configurationRevision);
+    if (!query.exec()) return failure<bool>(queryFailure(query));
+    RepositoryResult<bool> result;
+    result.value = query.numRowsAffected() == 1;
+    return result;
+}
+
+RepositoryResult<void> TaskAutomationRepository::updateExecution(
+    const QString &executionId, QString status, QString executedAtUtc, QString errorMessage)
+{
+    Q_ASSERT(QThread::currentThread() == m_database.driver()->thread());
+    static const QSet<QString> statuses{
+        QStringLiteral("pending"), QStringLiteral("running"), QStringLiteral("succeeded"),
+        QStringLiteral("failed"), QStringLiteral("canceled"), QStringLiteral("skipped")};
+    if (executionId.isEmpty() || !statuses.contains(status))
+        return failureVoid(domain::ErrorCategory::Validation);
+    QSqlQuery query(m_database);
+    query.prepare(QStringLiteral(
+        "UPDATE task_automation_executions SET status=?,executed_at_utc=?,error_message=? "
+        "WHERE execution_id=?"));
+    query.addBindValue(status);
+    query.addBindValue(executedAtUtc.isEmpty() ? QVariant() : QVariant(executedAtUtc));
+    query.addBindValue(errorMessage);
+    query.addBindValue(executionId);
+    if (!query.exec()) return failureVoid(queryFailure(query));
+    if (query.numRowsAffected() != 1) return failureVoid(domain::ErrorCategory::NotFound);
+    return {};
+}
+
+RepositoryResult<int> TaskAutomationRepository::cancelUnfinished(QString executedAtUtc)
+{
+    Q_ASSERT(QThread::currentThread() == m_database.driver()->thread());
+    QSqlQuery query(m_database);
+    query.prepare(QStringLiteral(
+        "UPDATE task_automation_executions SET status='canceled',executed_at_utc=?,"
+        "error_message='Application exited before the action result could be confirmed; the action was not resumed.' "
+        "WHERE status IN ('pending','running')"));
+    query.addBindValue(executedAtUtc);
+    if (!query.exec()) return failure<int>(queryFailure(query));
+    RepositoryResult<int> result;
+    result.value = query.numRowsAffected();
+    return result;
 }
 
 namespace {
@@ -6157,6 +6355,7 @@ RepositoryResult<QVariantList> UniversalSearchRepository::search(
 StorageRepositories::StorageRepositories(QSqlDatabase &database)
     : tasks(database)
     , taskHistory(database)
+    , taskAutomations(database)
     , scheduling(database)
     , currencies(database)
     , favorites(database)
