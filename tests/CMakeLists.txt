@@ -11,6 +11,7 @@ add_library(SomethingQtTestRepositories STATIC
     ../src/domain/steam_game_updates.cpp
     ../src/domain/steam_collections.cpp
     ../src/domain/weather_currency.cpp
+    ../src/domain/universal_search.cpp
 )
 target_link_libraries(SomethingQtTestRepositories PUBLIC Qt6::Core Qt6::Sql)
 
@@ -644,3 +645,27 @@ target_link_libraries(SomethingQtApplicationUsageTests PRIVATE
     Qt6::Core Qt6::Sql Qt6::Test SomethingQtTestRepositories)
 add_test(NAME SomethingQtApplicationUsageTests COMMAND SomethingQtApplicationUsageTests
     -o "${CMAKE_CURRENT_BINARY_DIR}/application-usage-results.txt,txt")
+
+add_executable(SomethingQtUniversalSearchDomainTests
+    universal_search_test.cpp
+    ../src/domain/universal_search.cpp
+    ../src/application/route_catalog.cpp
+)
+target_include_directories(SomethingQtUniversalSearchDomainTests PRIVATE ../src)
+target_link_libraries(SomethingQtUniversalSearchDomainTests PRIVATE Qt6::Core Qt6::Test)
+add_test(NAME SomethingQtUniversalSearchDomainTests COMMAND SomethingQtUniversalSearchDomainTests
+    -o "${CMAKE_CURRENT_BINARY_DIR}/universal-search-domain-results.txt,txt")
+
+add_executable(SomethingQtUniversalSearchRepositoryTests
+    universal_search_repository_test.cpp
+    ../src/domain/app_error.cpp
+    ../src/domain/task_history.cpp
+    ../src/domain/task_rules.cpp
+    ../src/domain/task_scheduling.cpp
+    ../src/storage/schema_migrator.cpp
+)
+target_include_directories(SomethingQtUniversalSearchRepositoryTests PRIVATE ../src)
+target_link_libraries(SomethingQtUniversalSearchRepositoryTests PRIVATE
+    Qt6::Core Qt6::Sql Qt6::Test SomethingQtTestRepositories)
+add_test(NAME SomethingQtUniversalSearchRepositoryTests COMMAND SomethingQtUniversalSearchRepositoryTests
+    -o "${CMAKE_CURRENT_BINARY_DIR}/universal-search-repository-results.txt,txt")

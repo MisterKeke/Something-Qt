@@ -24,6 +24,19 @@ Item {
     property bool categoryDeletePending: false
     property bool deleteWasSelected: false
 
+    function openSearchResult(result, action) {
+        const app = result && result.payload ? result.payload : ({})
+        if (action === "category" && Number(app.categoryId) > 0) {
+            selectCategory(Number(app.categoryId))
+            return
+        }
+        if (!app.id || action !== "open") return
+        selectedId = Number(app.id)
+        selectedName = String(app.displayName || result.title || "")
+        selectedHasCustomIcon = String(app.iconFilename || "").length > 0
+        editDialog.open()
+    }
+
     function rebuildCategoryOptions() {
         const options = [{ id: 0, label: qsTr("Uncategorized") }]
         for (let i = 0; i < controller.categories.count; ++i) {

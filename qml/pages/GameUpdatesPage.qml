@@ -20,6 +20,13 @@ Item {
         controller.addGame(addUrlField.text)
     }
 
+    function openSearchResult(result, action) {
+        if (!result || result.type !== "steamGameUpdates") return
+        const payload = result.payload || ({})
+        const appId = Number(payload.appId || result.targetId)
+        if (action === "open") controller.setSelectedAppId(appId)
+    }
+
     function formattedTimestamp(value) {
         if (!value || String(value).length === 0)
             return qsTr("Not checked yet")

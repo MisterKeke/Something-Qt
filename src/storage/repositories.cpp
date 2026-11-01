@@ -5,9 +5,11 @@
 #include "../domain/steam_collections.h"
 #include "../domain/task_rules.h"
 #include "../domain/task_history.h"
+#include "../domain/universal_search.h"
 
 #include <QDate>
 #include <QDateTime>
+#include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonObject>
 #include <QPair>
@@ -17,6 +19,7 @@
 #include <QSqlError>
 #include <QSqlDriver>
 #include <QSqlQuery>
+#include <QSqlRecord>
 #include <QThread>
 #include <QVariant>
 #include <QUrl>
@@ -24,6 +27,9 @@
 #include <algorithm>
 #include <cmath>
 #include <optional>
+#include <functional>
+#include <initializer_list>
+#include <utility>
 
 namespace something::storage {
 namespace {
@@ -5646,6 +5652,508 @@ RepositoryResult<void> SteamGameUpdatesRepository::remove(quint32 appId)
                                        : failureVoid(domain::ErrorCategory::NotFound);
 }
 
+namespace {
+
+struct SearchCandidate final {
+    QVariantMap result;
+    QStringList titleFields;
+    QStringList categoryFields;
+    QStringList descriptionFields;
+};
+
+QVariant queryValue(const QSqlQuery &query, const QString &name)
+{
+    const QSqlRecord record = query.record();
+    const int index = record.indexOf(name);
+    return index >= 0 ? record.value(index) : QVariant{};
+}
+
+QString escapedSearchText(QString text)
+{
+    text.replace(QLatin1Char('\\'), QStringLiteral("\\\\"));
+    text.replace(QLatin1Char('%'), QStringLiteral("\\%"));
+    text.replace(QLatin1Char('_'), QStringLiteral("\\_"));
+    return text;
+}
+
+QStringList searchVariants(const QString &text)
+{
+    QStringList values;
+    const QString nfc = text.normalized(QString::NormalizationForm_C);
+    const QString nfd = text.normalized(QString::NormalizationForm_D);
+    for (const QString &form : {nfc, nfd}) {
+        for (const QString &variant : {form, form.toLower(), form.toUpper(), form.toCaseFolded()}) {
+            if (!variant.isEmpty() && !values.contains(variant)) values.push_back(variant);
+        }
+    }
+    return values;
+}
+
+QVariantList actions(std::initializer_list<QPair<QString, QString>> values)
+{
+    QVariantList result;
+    for (const auto &[id, label] : values)
+        result.push_back(QVariantMap{{QStringLiteral("id"), id},
+                                     {QStringLiteral("label"), label}});
+    return result;
+}
+
+SearchCandidate candidate(QString id, QString type, QString group, QString title,
+                          QString subtitle, QString source, QString routeId,
+                          QVariant targetId, QVariant secondaryId, QString icon,
+                          QVariantList resultActions, QVariantMap payload,
+                          QStringList titleFields, QStringList categoryFields = {},
+                          QStringList descriptionFields = {})
+{
+    SearchCandidate result;
+    result.result = {{QStringLiteral("id"), std::move(id)},
+                     {QStringLiteral("type"), std::move(type)},
+                     {QStringLiteral("group"), std::move(group)},
+                     {QStringLiteral("title"), std::move(title)},
+                     {QStringLiteral("subtitle"), std::move(subtitle)},
+                     {QStringLiteral("source"), std::move(source)},
+                     {QStringLiteral("routeId"), std::move(routeId)},
+                     {QStringLiteral("targetId"), std::move(targetId)},
+                     {QStringLiteral("secondaryId"), std::move(secondaryId)},
+                     {QStringLiteral("icon"), std::move(icon)},
+                     {QStringLiteral("actions"), std::move(resultActions)},
+                     {QStringLiteral("payload"), std::move(payload)}};
+    result.titleFields = std::move(titleFields);
+    result.categoryFields = std::move(categoryFields);
+    result.descriptionFields = std::move(descriptionFields);
+    return result;
+}
+
+QString whereForTokens(const QStringList &fields, const QStringList &tokens,
+                       QVariantList *bindings)
+{
+    QStringList tokenClauses;
+    for (const QString &token : tokens) {
+        QStringList fieldClauses;
+        const QStringList variants = searchVariants(token);
+        for (const QString &field : fields) {
+            for (const QString &variant : variants) {
+                fieldClauses.push_back(field + QStringLiteral(" LIKE ? ESCAPE '\\' COLLATE NOCASE"));
+                bindings->push_back(QStringLiteral("%") + escapedSearchText(variant)
+                                    + QStringLiteral("%"));
+            }
+        }
+        if (fieldClauses.isEmpty()) return QStringLiteral("0");
+        tokenClauses.push_back(QStringLiteral("(") + fieldClauses.join(QStringLiteral(" OR "))
+                               + QStringLiteral(")"));
+    }
+    return tokenClauses.join(QStringLiteral(" AND "));
+}
+
+QString orderByTitle(const QString &query, QVariantList *bindings)
+{
+    const QStringList variants = searchVariants(query);
+    QStringList exactPlaceholders;
+    QStringList prefixClauses;
+    for (const QString &variant : variants) {
+        exactPlaceholders.push_back(QStringLiteral("?"));
+        bindings->push_back(variant);
+    }
+    for (const QString &variant : variants) {
+        prefixClauses.push_back(QStringLiteral("title LIKE ? ESCAPE '\\' COLLATE NOCASE"));
+        bindings->push_back(escapedSearchText(variant) + QLatin1Char('%'));
+    }
+    bindings->push_back(escapedSearchText(query).prepend(QLatin1Char('%')).append(QLatin1Char('%')));
+    return QStringLiteral(" ORDER BY CASE WHEN title COLLATE NOCASE IN (%1) THEN 0 "
+                          "WHEN (%2) THEN 1 "
+                          "WHEN title LIKE ? ESCAPE '\\' COLLATE NOCASE THEN 2 ELSE 3 END, "
+                          "title COLLATE NOCASE,target_sort LIMIT ?")
+        .arg(exactPlaceholders.join(QLatin1Char(',')),
+             prefixClauses.isEmpty() ? QStringLiteral("0")
+                                     : prefixClauses.join(QStringLiteral(" OR ")));
+}
+
+bool collectSearchCandidates(QSqlDatabase &database, const QString &baseSql,
+                             const QStringList &searchFields, const QString &query,
+                             int perSourceLimit, const std::function<bool()> &cancelled,
+                             QVector<SearchCandidate> *candidates,
+                             const std::function<SearchCandidate(const QSqlQuery &)> &make,
+                             domain::AppError *error)
+{
+    if (cancelled && cancelled()) {
+        *error = domain::AppError::cancelled();
+        return false;
+    }
+    const QStringList queryTerms = domain::UniversalSearch::terms(query);
+    QVariantList bindings;
+    const QString where = whereForTokens(searchFields, queryTerms, &bindings);
+    QString sql = baseSql + QStringLiteral(" WHERE ") + where;
+    sql += orderByTitle(query, &bindings);
+    bindings.push_back(perSourceLimit);
+
+    QSqlQuery statement(database);
+    statement.setForwardOnly(true);
+    statement.prepare(sql);
+    for (const QVariant &binding : bindings) statement.addBindValue(binding);
+    if (!statement.exec()) {
+        *error = domain::AppError(queryFailure(statement));
+        return false;
+    }
+    while (statement.next()) {
+        if (cancelled && cancelled()) {
+            *error = domain::AppError::cancelled();
+            return false;
+        }
+        SearchCandidate item = make(statement);
+        const int itemScore = domain::UniversalSearch::score(
+            query, item.titleFields, item.categoryFields, item.descriptionFields);
+        if (itemScore <= 0) continue;
+        item.result.insert(QStringLiteral("score"), itemScore);
+        candidates->push_back(std::move(item));
+    }
+    statement.finish();
+    return true;
+}
+
+} // namespace
+
+UniversalSearchRepository::UniversalSearchRepository(QSqlDatabase &database)
+    : m_database(database)
+{
+}
+
+RepositoryResult<QVariantList> UniversalSearchRepository::search(
+    const QString &requestedQuery, const std::function<bool()> &cancellationRequested) const
+{
+    Q_ASSERT(QThread::currentThread() == m_database.driver()->thread());
+    const QString query = requestedQuery.normalized(QString::NormalizationForm_C).trimmed();
+    const QStringList terms = domain::UniversalSearch::terms(query);
+    if (query.isEmpty() || query.size() > domain::UniversalSearch::maximumQueryLength
+        || terms.isEmpty() || terms.size() > domain::UniversalSearch::maximumTerms)
+        return failure<QVariantList>(domain::ErrorCategory::Validation);
+
+    constexpr int perSourceLimit = 32;
+    QVector<SearchCandidate> found;
+    domain::AppError error;
+    auto collect = [&](const QString &sql, const QStringList &fields,
+                       const std::function<SearchCandidate(const QSqlQuery &)> &make) {
+        return collectSearchCandidates(m_database, sql, fields, query, perSourceLimit,
+                                       cancellationRequested, &found, make, &error);
+    };
+
+    if (!collect(QStringLiteral(
+            "SELECT t.id AS target_sort,t.title AS title,t.description,t.is_completed,"
+            "t.priority,t.due_date,t.difficulty,t.revision,"
+            "COALESCE((SELECT group_concat(g.name,' ') FROM task_tags x "
+            "JOIN tags g ON g.id=x.tag_id WHERE x.task_id=t.id),'') AS tag_names FROM tasks t"),
+            {QStringLiteral("t.title"), QStringLiteral("t.description"),
+             QStringLiteral("COALESCE((SELECT group_concat(g.name,' ') FROM task_tags x "
+                            "JOIN tags g ON g.id=x.tag_id WHERE x.task_id=t.id),'')")},
+            [](const QSqlQuery &row) {
+                const qint64 id = queryValue(row, QStringLiteral("target_sort")).toLongLong();
+                const QString title = queryValue(row, QStringLiteral("title")).toString();
+                const QString tagText = queryValue(row, QStringLiteral("tag_names")).toString();
+                QVariantMap payload{{QStringLiteral("id"), id}, {QStringLiteral("taskId"), id},
+                    {QStringLiteral("title"), title},
+                    {QStringLiteral("description"), queryValue(row, QStringLiteral("description"))},
+                    {QStringLiteral("completed"), queryValue(row, QStringLiteral("is_completed")).toBool()},
+                    {QStringLiteral("priority"), queryValue(row, QStringLiteral("priority"))},
+                    {QStringLiteral("dueDate"), queryValue(row, QStringLiteral("due_date"))},
+                    {QStringLiteral("difficulty"), queryValue(row, QStringLiteral("difficulty"))},
+                    {QStringLiteral("revision"), queryValue(row, QStringLiteral("revision")).toLongLong()}};
+                QString status = payload.value(QStringLiteral("completed")).toBool()
+                    ? QStringLiteral("Complete") : QStringLiteral("Incomplete");
+                QString priority = payload.value(QStringLiteral("priority")).toString();
+                if (!priority.isEmpty()) priority[0] = priority.at(0).toUpper();
+                status += QStringLiteral(" · ") + priority
+                    + QStringLiteral(" priority");
+                const QString dueDate = payload.value(QStringLiteral("dueDate")).toString();
+                if (!dueDate.isEmpty()) status += QStringLiteral(" · Due ") + dueDate;
+                return candidate(QStringLiteral("task:%1").arg(id), QStringLiteral("task"),
+                    QStringLiteral("tasks"), title, status, QStringLiteral("Tasks"),
+                    QStringLiteral("tasks"), id, {}, QStringLiteral("✓"),
+                    actions({{QStringLiteral("open"), QStringLiteral("Open task")},
+                             {payload.value(QStringLiteral("completed")).toBool()
+                                  ? QStringLiteral("markIncomplete") : QStringLiteral("markComplete"),
+                              payload.value(QStringLiteral("completed")).toBool()
+                                  ? QStringLiteral("Mark incomplete") : QStringLiteral("Mark complete")}}),
+                    payload, {title}, {tagText},
+                    {payload.value(QStringLiteral("description")).toString()});
+            })) return failure<QVariantList>(error.category());
+
+    if (!collect(QStringLiteral(
+            "SELECT a.id AS target_sort,a.id,a.display_name AS title,a.executable_path,"
+            "a.category_id,c.name AS category_name,c.description AS category_description,"
+            "i.filename AS icon_filename FROM desktop_apps a "
+            "LEFT JOIN application_categories c ON c.id=a.category_id "
+            "LEFT JOIN desktop_app_icons i ON i.app_id=a.id"),
+            {QStringLiteral("a.display_name"), QStringLiteral("a.executable_path"),
+             QStringLiteral("c.name"), QStringLiteral("c.description")},
+            [](const QSqlQuery &row) {
+                const qint64 id = queryValue(row, QStringLiteral("id")).toLongLong();
+                const QString title = queryValue(row, QStringLiteral("title")).toString();
+                const QString category = queryValue(row, QStringLiteral("category_name")).toString();
+                const QString path = queryValue(row, QStringLiteral("executable_path")).toString();
+                const QString filename = QFileInfo(path).fileName();
+                const qint64 categoryId = queryValue(row, QStringLiteral("category_id")).toLongLong();
+                const QVariantMap payload{{QStringLiteral("id"), id},
+                    {QStringLiteral("displayName"), title}, {QStringLiteral("executablePath"), path},
+                    {QStringLiteral("categoryId"), categoryId}, {QStringLiteral("categoryName"), category},
+                    {QStringLiteral("iconFilename"), queryValue(row, QStringLiteral("icon_filename"))}};
+                QString subtitle = filename;
+                if (!category.isEmpty()) subtitle = category + QStringLiteral(" · ") + filename;
+                QVariantList available = actions({{QStringLiteral("open"), QStringLiteral("Open entry")},
+                    {QStringLiteral("launch"), QStringLiteral("Launch")}});
+                if (categoryId > 0)
+                    available.push_back(QVariantMap{{QStringLiteral("id"), QStringLiteral("category")},
+                        {QStringLiteral("label"), QStringLiteral("Open category")}});
+                return candidate(QStringLiteral("desktopApplication:%1").arg(id),
+                    QStringLiteral("desktopApplication"), QStringLiteral("applications"), title,
+                    subtitle, QStringLiteral("Saved applications"), QStringLiteral("applications"),
+                    id, categoryId, QStringLiteral("▣"), available, payload, {title},
+                    {filename, category}, {path, queryValue(row, QStringLiteral("category_description")).toString()});
+            })) return failure<QVariantList>(error.category());
+
+    if (!collect(QStringLiteral(
+            "SELECT s.id AS target_sort,s.id,s.name AS title,s.description,"
+            "COALESCE(i.filename,'') AS icon_filename FROM setups s "
+            "LEFT JOIN setup_icons i ON i.setup_id=s.id"),
+            {QStringLiteral("s.name"), QStringLiteral("s.description")},
+            [](const QSqlQuery &row) {
+                const qint64 id = queryValue(row, QStringLiteral("id")).toLongLong();
+                const QString title = queryValue(row, QStringLiteral("title")).toString();
+                QVariantList appIds;
+                const QVariantMap payload{{QStringLiteral("id"), id},
+                    {QStringLiteral("name"), title},
+                    {QStringLiteral("description"), queryValue(row, QStringLiteral("description"))},
+                    {QStringLiteral("applicationIds"), appIds},
+                    {QStringLiteral("iconFilename"), queryValue(row, QStringLiteral("icon_filename"))}};
+                return candidate(QStringLiteral("setup:%1").arg(id), QStringLiteral("setup"),
+                    QStringLiteral("setups"), title, queryValue(row, QStringLiteral("description")).toString(),
+                    QStringLiteral("Setups"), QStringLiteral("setups"), id, {}, QStringLiteral("▱"),
+                    actions({{QStringLiteral("open"), QStringLiteral("Open setup")},
+                             {QStringLiteral("launch"), QStringLiteral("Launch setup")}}),
+                    payload, {title}, {}, {queryValue(row, QStringLiteral("description")).toString()});
+            })) return failure<QVariantList>(error.category());
+
+    if (!collect(QStringLiteral(
+            "SELECT g.id AS target_sort,g.id,g.steam_app_id,g.name AS title,g.price_status "
+            "FROM steam_games g"), {QStringLiteral("g.name")},
+            [](const QSqlQuery &row) {
+                const qint64 id = queryValue(row, QStringLiteral("id")).toLongLong();
+                const quint32 appId = queryValue(row, QStringLiteral("steam_app_id")).toUInt();
+                const QString title = queryValue(row, QStringLiteral("title")).toString();
+                const QVariantMap payload{{QStringLiteral("id"), id}, {QStringLiteral("appId"), appId},
+                    {QStringLiteral("name"), title}, {QStringLiteral("priceStatus"), queryValue(row, QStringLiteral("price_status"))}};
+                return candidate(QStringLiteral("steamPrice:%1").arg(appId),
+                    QStringLiteral("steamPrice"), QStringLiteral("games"), title,
+                    {}, QStringLiteral("Price Tracking"),
+                    QStringLiteral("steam"), id, appId, QStringLiteral("◉"),
+                    actions({{QStringLiteral("open"), QStringLiteral("Price history")},
+                             {QStringLiteral("store"), QStringLiteral("Open Steam Store")}}),
+                    payload, {title});
+            })) return failure<QVariantList>(error.category());
+
+    if (!collect(QStringLiteral(
+            "SELECT r.steam_app_id AS target_sort,r.steam_app_id,r.title,r.release_date_text,"
+            "r.release_status FROM steam_release_follows r"),
+            {QStringLiteral("r.title"), QStringLiteral("r.release_date_text")},
+            [](const QSqlQuery &row) {
+                const quint32 appId = queryValue(row, QStringLiteral("steam_app_id")).toUInt();
+                const QString title = queryValue(row, QStringLiteral("title")).toString();
+                QString subtitle = queryValue(row, QStringLiteral("release_status")).toString()
+                    .replace(QLatin1Char('_'), QLatin1Char(' '));
+                const QString dateText = queryValue(row, QStringLiteral("release_date_text")).toString();
+                if (!dateText.isEmpty()) subtitle += QStringLiteral(" · ") + dateText;
+                const QVariantMap payload{{QStringLiteral("appId"), appId}, {QStringLiteral("title"), title}};
+                return candidate(QStringLiteral("steamRelease:%1").arg(appId),
+                    QStringLiteral("steamRelease"), QStringLiteral("games"), title, subtitle,
+                    QStringLiteral("Release Radar"), QStringLiteral("steam"), appId, {},
+                    QStringLiteral("◉"), actions({{QStringLiteral("open"), QStringLiteral("Open release")},
+                        {QStringLiteral("store"), QStringLiteral("Open Steam Store")}}),
+                    payload, {title}, {}, {dateText});
+            })) return failure<QVariantList>(error.category());
+
+    if (!collect(QStringLiteral(
+            "SELECT g.steam_app_id AS target_sort,g.steam_app_id,g.name AS title,g.ownership_status "
+            "FROM steam_game_update_follows g"), {QStringLiteral("g.name")},
+            [](const QSqlQuery &row) {
+                const quint32 appId = queryValue(row, QStringLiteral("steam_app_id")).toUInt();
+                const QString title = queryValue(row, QStringLiteral("title")).toString();
+                const QString ownership = queryValue(row, QStringLiteral("ownership_status")).toString()
+                    == QStringLiteral("owned") ? QStringLiteral("Owned") : QStringLiteral("Not owned");
+                const QVariantMap payload{{QStringLiteral("appId"), appId}, {QStringLiteral("name"), title}};
+                return candidate(QStringLiteral("steamGameUpdates:%1").arg(appId),
+                    QStringLiteral("steamGameUpdates"), QStringLiteral("games"), title,
+                    ownership, QStringLiteral("Game Updates"),
+                    QStringLiteral("gameUpdates"), appId, {}, QStringLiteral("◉"),
+                    actions({{QStringLiteral("open"), QStringLiteral("Open game news")},
+                             {QStringLiteral("store"), QStringLiteral("Open Steam Store")}}),
+                    payload, {title});
+            })) return failure<QVariantList>(error.category());
+
+    if (!collect(QStringLiteral(
+            "SELECT c.id AS target_sort,c.id,c.name AS title,c.description FROM steam_collections c"),
+            {QStringLiteral("c.name"), QStringLiteral("c.description")},
+            [](const QSqlQuery &row) {
+                const qint64 id = queryValue(row, QStringLiteral("id")).toLongLong();
+                const QString title = queryValue(row, QStringLiteral("title")).toString();
+                const QString description = queryValue(row, QStringLiteral("description")).toString();
+                const QVariantMap payload{{QStringLiteral("id"), id}, {QStringLiteral("name"), title},
+                    {QStringLiteral("description"), description}};
+                return candidate(QStringLiteral("steamCollection:%1").arg(id),
+                    QStringLiteral("steamCollection"), QStringLiteral("games"), title,
+                    QStringLiteral("Steam Collection"), QStringLiteral("Collections"),
+                    QStringLiteral("steam"), id, {}, QStringLiteral("▤"),
+                    actions({{QStringLiteral("open"), QStringLiteral("Open collection")}}),
+                    payload, {title}, {}, {description});
+            })) return failure<QVariantList>(error.category());
+
+    if (!collect(QStringLiteral(
+            "SELECT game.steam_app_id AS target_sort,game.steam_app_id,c.id AS collection_id,"
+            "c.name AS collection_name,game.name AS title,game.store_url "
+            "FROM steam_collection_games cg JOIN steam_collections c ON c.id=cg.collection_id "
+            "JOIN steam_game_catalog game ON game.steam_app_id=cg.steam_app_id"),
+            {QStringLiteral("game.name"), QStringLiteral("c.name")},
+            [](const QSqlQuery &row) {
+                const quint32 appId = queryValue(row, QStringLiteral("steam_app_id")).toUInt();
+                const qint64 collectionId = queryValue(row, QStringLiteral("collection_id")).toLongLong();
+                const QString title = queryValue(row, QStringLiteral("title")).toString();
+                const QString collectionName = queryValue(row, QStringLiteral("collection_name")).toString();
+                const QVariantMap payload{{QStringLiteral("appId"), appId},
+                    {QStringLiteral("collectionId"), collectionId}, {QStringLiteral("name"), title},
+                    {QStringLiteral("storeUrl"), queryValue(row, QStringLiteral("store_url"))}};
+                return candidate(QStringLiteral("steamCollectionGame:%1:%2").arg(collectionId).arg(appId),
+                    QStringLiteral("steamCollectionGame"), QStringLiteral("games"), title,
+                    QStringLiteral("Collection · ") + collectionName, QStringLiteral("Collections"),
+                    QStringLiteral("steam"), appId, collectionId, QStringLiteral("▤"),
+                    actions({{QStringLiteral("open"), QStringLiteral("Open collection member")},
+                             {QStringLiteral("store"), QStringLiteral("Open Steam Store")}}),
+                    payload, {title}, {collectionName});
+            })) return failure<QVariantList>(error.category());
+
+    if (!collect(QStringLiteral(
+            "SELECT c.id AS target_sort,c.id,c.name AS title,c.source FROM favorite_categories c"),
+            {QStringLiteral("c.name")},
+            [](const QSqlQuery &row) {
+                const qint64 id = queryValue(row, QStringLiteral("id")).toLongLong();
+                const QString title = queryValue(row, QStringLiteral("title")).toString();
+                const QString source = queryValue(row, QStringLiteral("source")).toString();
+                const QString provider = source == QStringLiteral("telegram")
+                    ? QStringLiteral("Telegram") : QStringLiteral("YouTube");
+                const QVariantMap payload{{QStringLiteral("categoryId"), id}, {QStringLiteral("source"), source}};
+                return candidate(QStringLiteral("favoriteCategory:%1:%2").arg(source).arg(id),
+                    QStringLiteral("favoriteCategory"), QStringLiteral("favorites"), title,
+                    QStringLiteral("Category"), provider, source, id, source,
+                    source == QStringLiteral("telegram") ? QStringLiteral("➤") : QStringLiteral("▶"),
+                    actions({{QStringLiteral("open"), QStringLiteral("Open category")}}),
+                    payload, {title});
+            })) return failure<QVariantList>(error.category());
+
+    if (!collect(QStringLiteral(
+            "SELECT f.username AS target_sort,f.username AS source_id,f.username AS title,"
+            "c.name AS category_name FROM telegram_favorites f "
+            "LEFT JOIN favorite_categories c ON c.id=f.category_id"),
+            {QStringLiteral("f.username"), QStringLiteral("c.name")},
+            [](const QSqlQuery &row) {
+                const QString username = queryValue(row, QStringLiteral("source_id")).toString();
+                const QString category = queryValue(row, QStringLiteral("category_name")).toString();
+                const QVariantMap payload{{QStringLiteral("source"), QStringLiteral("telegram")},
+                    {QStringLiteral("sourceId"), username},
+                    {QStringLiteral("externalUrl"), QStringLiteral("https://t.me/") + username}};
+                const QString subtitle = category.isEmpty() ? QStringLiteral("Saved channel") : category;
+                return candidate(QStringLiteral("telegramFavorite:%1").arg(username),
+                    QStringLiteral("telegramFavorite"), QStringLiteral("favorites"), username,
+                    subtitle, QStringLiteral("Telegram"), QStringLiteral("telegram"), username,
+                    queryValue(row, QStringLiteral("category_name")), QStringLiteral("➤"),
+                    actions({{QStringLiteral("open"), QStringLiteral("Open channel")},
+                             {QStringLiteral("external"), QStringLiteral("Open external link")}}),
+                    payload, {username}, {category});
+            })) return failure<QVariantList>(error.category());
+
+    if (!collect(QStringLiteral(
+            "SELECT f.channel_id AS target_sort,f.channel_id AS source_id,"
+            "COALESCE(NULLIF(f.username,''),f.channel_id) AS title,f.username,"
+            "c.name AS category_name FROM youtube_favorites f "
+            "LEFT JOIN favorite_categories c ON c.id=f.category_id"),
+            {QStringLiteral("f.channel_id"), QStringLiteral("f.username"), QStringLiteral("c.name")},
+            [](const QSqlQuery &row) {
+                const QString channelId = queryValue(row, QStringLiteral("source_id")).toString();
+                const QString title = queryValue(row, QStringLiteral("title")).toString();
+                const QString username = queryValue(row, QStringLiteral("username")).toString();
+                const QString category = queryValue(row, QStringLiteral("category_name")).toString();
+                const QVariantMap payload{{QStringLiteral("source"), QStringLiteral("youtube")},
+                    {QStringLiteral("sourceId"), channelId}, {QStringLiteral("username"), username},
+                    {QStringLiteral("externalUrl"), QStringLiteral("https://www.youtube.com/channel/") + channelId}};
+                const QString subtitle = category.isEmpty() ? QStringLiteral("Saved channel") : category;
+                return candidate(QStringLiteral("youtubeFavorite:%1").arg(channelId),
+                    QStringLiteral("youtubeFavorite"), QStringLiteral("favorites"), title,
+                    subtitle, QStringLiteral("YouTube"), QStringLiteral("youtube"), channelId,
+                    queryValue(row, QStringLiteral("category_name")), QStringLiteral("▶"),
+                    actions({{QStringLiteral("open"), QStringLiteral("Open channel")},
+                             {QStringLiteral("external"), QStringLiteral("Open external link")}}),
+                    payload, {title}, {channelId, username, category});
+            })) return failure<QVariantList>(error.category());
+
+    if (cancellationRequested && cancellationRequested())
+        return failure<QVariantList>(domain::ErrorCategory::Cancelled);
+
+    for (SearchCandidate &item : found) {
+        if (cancellationRequested && cancellationRequested())
+            return failure<QVariantList>(domain::ErrorCategory::Cancelled);
+        const QString type = item.result.value(QStringLiteral("type")).toString();
+        if (type == QStringLiteral("setup")) {
+            const qint64 setupId = item.result.value(QStringLiteral("targetId")).toLongLong();
+            QSqlQuery applicationIds(m_database);
+            applicationIds.prepare(QStringLiteral("SELECT app_id FROM setup_apps "
+                                                   "WHERE setup_id=? ORDER BY position,app_id"));
+            applicationIds.addBindValue(setupId);
+            if (!applicationIds.exec()) return failure<QVariantList>(queryFailure(applicationIds));
+            QVariantList orderedIds;
+            while (applicationIds.next()) orderedIds.push_back(applicationIds.value(0).toLongLong());
+            applicationIds.finish();
+            QVariantMap payload = item.result.value(QStringLiteral("payload")).toMap();
+            payload.insert(QStringLiteral("applicationIds"), orderedIds);
+            item.result.insert(QStringLiteral("payload"), payload);
+            continue;
+        }
+        if (type != QStringLiteral("task")) continue;
+        const qint64 taskId = item.result.value(QStringLiteral("targetId")).toLongLong();
+        QSqlQuery tags(m_database);
+        tags.prepare(QStringLiteral("SELECT name FROM tags t JOIN task_tags x ON x.tag_id=t.id "
+                                    "WHERE x.task_id=? ORDER BY t.name_normalized"));
+        tags.addBindValue(taskId);
+        if (!tags.exec()) return failure<QVariantList>(queryFailure(tags));
+        QStringList tagNames;
+        while (tags.next()) tagNames.push_back(tags.value(0).toString());
+        tags.finish();
+        QVariantList tagValues;
+        for (const QString &tag : tagNames) tagValues.push_back(tag);
+
+        QSqlQuery subtasks(m_database);
+        subtasks.prepare(QStringLiteral("SELECT id,title,is_completed FROM task_subtasks "
+                                        "WHERE task_id=? ORDER BY position,id"));
+        subtasks.addBindValue(taskId);
+        if (!subtasks.exec()) return failure<QVariantList>(queryFailure(subtasks));
+        QVariantList subtaskValues;
+        while (subtasks.next()) subtaskValues.push_back(QVariantMap{
+            {QStringLiteral("id"), subtasks.value(0).toLongLong()},
+            {QStringLiteral("title"), subtasks.value(1).toString()},
+            {QStringLiteral("completed"), subtasks.value(2).toBool()}});
+        subtasks.finish();
+        QVariantMap payload = item.result.value(QStringLiteral("payload")).toMap();
+        payload.insert(QStringLiteral("tags"), tagValues);
+        payload.insert(QStringLiteral("subtasks"), subtaskValues);
+        item.result.insert(QStringLiteral("payload"), payload);
+        item.categoryFields = tagNames;
+    }
+
+    QVariantList results;
+    for (SearchCandidate &item : found) {
+        const int rank = domain::UniversalSearch::score(query, item.titleFields,
+            item.categoryFields, item.descriptionFields);
+        if (rank <= 0) continue;
+        item.result.insert(QStringLiteral("score"), rank);
+        results.push_back(item.result);
+    }
+    return {results, domain::AppError::none()};
+}
+
 StorageRepositories::StorageRepositories(QSqlDatabase &database)
     : tasks(database)
     , taskHistory(database)
@@ -5666,6 +6174,7 @@ StorageRepositories::StorageRepositories(QSqlDatabase &database)
     , gameUpdates(database)
     , dataImport(database)
     , applicationUsage(database)
+    , universalSearch(database)
 {
 }
 

@@ -48,6 +48,29 @@ Item {
         Qt.callLater(function() { releasePanel.revealPendingCalendarRelease() })
     }
 
+    function openSearchResult(result, action) {
+        if (!result) return
+        const payload = result.payload || ({})
+        if (result.type === "steamPrice") {
+            currentSection = "prices"
+            if (action === "open") controller.openPriceHistory(Number(payload.id || result.targetId))
+            return
+        }
+        if (result.type === "steamRelease") {
+            currentSection = "releases"
+            if (action === "open") releaseController.openReleaseDetails(Number(payload.appId || result.targetId))
+            return
+        }
+        if (result.type === "steamCollection" || result.type === "steamCollectionGame") {
+            currentSection = "collections"
+            const collectionId = result.type === "steamCollection"
+                ? Number(payload.id || result.targetId) : Number(payload.collectionId || result.secondaryId)
+            collectionsController.selectCollection(collectionId)
+            if (result.type === "steamCollectionGame")
+                collectionsController.setSearchText(String(payload.name || result.title || ""))
+        }
+    }
+
     ColumnLayout {
         id: content
         anchors.left: parent.left

@@ -2,6 +2,7 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import "../components" as Shared
+import "../dialogs" as Dialogs
 import "../pages" as Pages
 import Something.App as ThemeModule
 
@@ -76,6 +77,8 @@ ApplicationWindow {
     readonly property var routeTitles: routeCatalog.routeTitles
     readonly property var navigationItems: routeCatalog.navigationItems
     property bool shuttingDown: false
+    property var pendingSearchResult: null
+    property string pendingSearchAction: ""
 
     onVisibleChanged: applicationUsageController.setPageVisible(
         visible && currentRoute === "usageStatistics")
@@ -102,6 +105,86 @@ ApplicationWindow {
         returnTitle: window.routeTitles[window.currentRoute] || qsTr("Main Page")
         interactionBlocked: legacyDataImportController.importActive || window.shuttingDown
         onNavigateRequested: function(routeId) { window.navigateTo(routeId) }
+    }
+
+    Dialogs.UniversalSearchDialog {
+        id: universalSearchDialog
+        controller: universalSearchController
+        onClosed: window.focusMainPage()
+    }
+
+    function openUniversalSearch() {
+        if (shuttingDown || legacyDataImportController.importActive || setupLaunchResult.visible)
+            return
+        universalSearchDialog.open()
+    }
+
+    function handleSearchResult(result, action) {
+        if (!result || !result.type) return
+        const payload = result.payload || ({})
+        const targetId = result.targetId
+        universalSearchDialog.close()
+
+        if (result.type === "route") {
+            navigateTo(String(result.routeId || targetId || ""))
+            return
+        }
+        if (result.type === "task" && (action === "markComplete" || action === "markIncomplete")) {
+            taskController.toggleTaskFromView(Number(payload.taskId || targetId),
+                Number(payload.revision), action === "markComplete")
+            return
+        }
+        if (result.type === "desktopApplication" && action === "launch") {
+            desktopApplicationsController.launchApplication(Number(targetId))
+            return
+        }
+        if (result.type === "setup" && action === "launch") {
+            setupsController.startSetup(Number(targetId))
+            return
+        }
+        if (result.type === "runningApplication" && action === "activate") {
+            runningApplicationsController.activateWindow(String(targetId))
+            return
+        }
+        if ((result.type === "telegramFavorite" || result.type === "youtubeFavorite")
+                && action === "external") {
+            favoritesController.openExternal(String(payload.source || ""),
+                                             String(payload.externalUrl || ""))
+            return
+        }
+        if (action === "store") {
+            if (result.type === "steamPrice")
+                steamGamesController.openStore(Number(payload.id || targetId))
+            else if (result.type === "steamRelease")
+                steamReleaseController.openStore(Number(payload.appId || targetId))
+            else if (result.type === "steamGameUpdates")
+                steamGameUpdatesController.openStore(Number(payload.appId || targetId))
+            else if (result.type === "steamCollectionGame")
+                steamCollectionsController.openStore(Number(payload.appId || targetId))
+            return
+        }
+
+        const routeId = String(result.routeId || "")
+        if (!routeId || routeId === "terminal") {
+            navigateTo(routeId)
+            return
+        }
+        pendingSearchResult = result
+        pendingSearchAction = action
+        navigateTo(routeId)
+        if (routeId === currentRoute)
+            Qt.callLater(dispatchPendingSearchResult)
+    }
+
+    function dispatchPendingSearchResult() {
+        const result = pendingSearchResult
+        if (!result || !pageLoader.item || String(result.routeId || "") !== currentRoute)
+            return
+        const action = pendingSearchAction
+        pendingSearchResult = null
+        pendingSearchAction = ""
+        if (typeof pageLoader.item.openSearchResult === "function")
+            pageLoader.item.openSearchResult(result, action)
     }
 
     function focusMainPage() {
@@ -142,6 +225,10 @@ ApplicationWindow {
     function navigateTo(routeId) {
         if (shuttingDown || !routeTitles[routeId])
             return
+        if (pendingSearchResult && String(pendingSearchResult.routeId || "") !== routeId) {
+            pendingSearchResult = null
+            pendingSearchAction = ""
+        }
         if (routeId === "terminal") {
             if (!legacyDataImportController.importActive && !setupLaunchResult.visible)
                 consoleWindow.present()
@@ -317,6 +404,12 @@ ApplicationWindow {
                 quiet: window.currentRoute !== "dashboard"
                 onClicked: window.navigateTo("dashboard")
             }
+            Shared.AppButton {
+                text: qsTr("⌕  Search · Ctrl+K")
+                Accessible.name: qsTr("Universal Search")
+                enabled: !legacyDataImportController.importActive && !window.shuttingDown
+                onClicked: window.openUniversalSearch()
+            }
             Item { Layout.fillWidth: true }
             Shared.AppButton {
                 text: qsTr("Open Console")
@@ -447,6 +540,7 @@ ApplicationWindow {
                         if (item && typeof item.restoreViewState === "function")
                             item.restoreViewState(window.routeState[window.currentRoute] || {})
                         shellScroll.contentItem.contentY = Number(window.routeScrollPositions[window.currentRoute] || 0)
+                        Qt.callLater(window.dispatchPendingSearchResult)
                     }
                 }
             }
@@ -533,6 +627,19 @@ ApplicationWindow {
         context: Qt.WindowShortcut
         enabled: !window.shortcutIsBlocked()
         onActivated: window.navigateTo("terminal")
+    }
+
+    Shortcut {
+        sequence: "Ctrl+K"
+        context: Qt.WindowShortcut
+        enabled: !window.shortcutIsBlocked() && !universalSearchDialog.visible
+                 && !window.shuttingDown
+        onActivated: window.openUniversalSearch()
+    }
+
+    Connections {
+        target: universalSearchController
+        function onResultActivated(result, action) { window.handleSearchResult(result, action) }
     }
 
     Connections {

@@ -41,6 +41,7 @@
 #include "controllers/steam_games_controller.h"
 #include "controllers/steam_game_updates_controller.h"
 #include "controllers/tasks_controller.h"
+#include "controllers/universal_search_controller.h"
 #include "controllers/task_history_controller.h"
 #include "controllers/terminal_controller.h"
 #include "controllers/wallpaper_controller.h"
@@ -173,6 +174,8 @@ int main(int argc, char *argv[])
         &services, &desktopApplicationsPlatform, applicationImages);
     something::controllers::RunningApplicationsController runningApplicationsController(
         &services, &runningWindowsPlatform);
+    something::controllers::UniversalSearchController universalSearchController(&services);
+    universalSearchController.setRunningWindowsModel(runningApplicationsController.windows());
     something::controllers::ApplicationUsageController applicationUsageController(
         &services, &applicationUsageService);
     something::controllers::SettingsController settingsController(&services, &clock, &mutationWorkflow);
@@ -315,6 +318,8 @@ int main(int argc, char *argv[])
                                              &desktopApplicationsController);
     engine.rootContext()->setContextProperty(QStringLiteral("runningApplicationsController"),
                                              &runningApplicationsController);
+    engine.rootContext()->setContextProperty(QStringLiteral("universalSearchController"),
+                                             &universalSearchController);
     engine.rootContext()->setContextProperty(QStringLiteral("applicationUsageController"),
                                              &applicationUsageController);
     engine.rootContext()->setContextProperty(QStringLiteral("appSettingsController"),
