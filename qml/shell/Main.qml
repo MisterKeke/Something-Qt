@@ -264,6 +264,21 @@ ApplicationWindow {
             settingsController: appSettingsController
             backgroundController: window.trayIntegration
             usageController: applicationUsageController
+            automationController: automationRulesController
+            onNavigateRequested: function(routeId) { window.navigateTo(routeId) }
+        }
+    }
+
+    Component {
+        id: automationRulesPageComponent
+        Pages.AutomationRulesPage {
+            controller: automationRulesController
+            usageController: applicationUsageController
+            desktopApplicationsController: desktopApplicationsController
+            setupsController: setupsController
+            steamGamesController: steamGamesController
+            steamReleaseController: steamReleaseController
+            gameUpdatesController: steamGameUpdatesController
         }
     }
 
@@ -461,6 +476,11 @@ ApplicationWindow {
                         text: appController.lifecycleState === "running" ? qsTr("Ready") : qsTr("Starting")
                         badgeColor: appController.lifecycleState === "running" ? ThemeModule.Theme.success : ThemeModule.Theme.warning
                     }
+                    Shared.StatusBadge {
+                        visible: automationRulesController.ready && automationRulesController.paused
+                        text: qsTr("Automations paused")
+                        badgeColor: ThemeModule.Theme.warning
+                    }
                     Shared.AppButton {
                         visible: setupsController.launching
                         text: qsTr("Stop setup")
@@ -521,7 +541,8 @@ ApplicationWindow {
                     asynchronous: true
                     opacity: status === Loader.Ready ? 1 : 0
                     Behavior on opacity { NumberAnimation { duration: ThemeModule.Theme.pageMotion; easing.type: Easing.OutCubic } }
-                    sourceComponent: window.currentRoute === "settings" ? wallpaperPageComponent
+                    sourceComponent: window.currentRoute === "automationRules" ? automationRulesPageComponent
+                        : window.currentRoute === "settings" ? wallpaperPageComponent
                         : window.currentRoute === "tasks" ? tasksPageComponent
                         : window.currentRoute === "calendar" ? calendarPageComponent
                         : window.currentRoute === "dashboard" ? dashboardPageComponent

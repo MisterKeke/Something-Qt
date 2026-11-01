@@ -276,6 +276,7 @@ storage::StorageCommand SteamGameUpdatesService::saveNewsPage(
         storage::StorageReply reply;
         reply.values.insert(QStringLiteral("insertedCount"), saved.value.insertedCount);
         reply.values.insert(QStringLiteral("refreshedCount"), saved.value.refreshedCount);
+        reply.values.insert(QStringLiteral("insertedNewsIds"), saved.value.insertedNewsIds);
         reply.values.insert(QStringLiteral("unreadNewsCount"),
                             unreadCounts.value.value(appId, 0));
         // Overall retention can evict articles from other games as well.

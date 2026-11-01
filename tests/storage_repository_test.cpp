@@ -22,6 +22,8 @@ private slots:
     void migratorRejectsUntrackedAndUnknownHistories();
     void taskAggregateUpdateIsAtomicAndRevisionChecked();
     void taskAutomationPersistsWithTaskAndDeduplicatesExecutionHistory();
+    void automationRulesPersistRevisionsExecutionAndRetainedHistory();
+    void phaseFiveAutomationAndHistorySurviveGlobalEngineMigration();
     void scheduleBatchRejectsStaleTaskScheduleAndPreferenceRevisionsAtomically();
     void taskSearchFiltersPagesAndOmittedMetadata();
     void categoryDeleteMovesAssignmentsWithinOneSource();
@@ -57,7 +59,7 @@ void StorageRepositoryTest::migrationsAreTransactionalIndependentAndRepeatable()
     QString connectionName;
     QSqlDatabase database;
     QVERIFY(openTestDatabase(&database, &connectionName));
-    QCOMPARE(storage::SchemaMigrator::latestVersion(), 21);
+    QCOMPARE(storage::SchemaMigrator::latestVersion(), 22);
     QVERIFY(storage::SchemaMigrator::apply(database));
 
     QSqlQuery history(database);
@@ -80,6 +82,11 @@ void StorageRepositoryTest::migrationsAreTransactionalIndependentAndRepeatable()
                                     QStringLiteral("task_history"),
                                     QStringLiteral("task_automations"),
                                     QStringLiteral("task_automation_executions"),
+                                    QStringLiteral("automation_rules"),
+                                    QStringLiteral("automation_conditions"),
+                                    QStringLiteral("automation_actions"),
+                                    QStringLiteral("automation_executions"),
+                                    QStringLiteral("automation_action_results"),
                                     QStringLiteral("task_schedules"),
                                     QStringLiteral("scheduling_preferences"),
                                     QStringLiteral("preferences")}) {
@@ -216,6 +223,175 @@ void StorageRepositoryTest::taskAutomationPersistsWithTaskAndDeduplicatesExecuti
     QVERIFY(history.exec(QStringLiteral("SELECT COUNT(*) FROM task_automation_executions")));
     QVERIFY(history.next());
     QCOMPARE(history.value(0).toInt(), 0);
+
+    database.close();
+    database = QSqlDatabase();
+    QSqlDatabase::removeDatabase(connectionName);
+}
+
+void StorageRepositoryTest::automationRulesPersistRevisionsExecutionAndRetainedHistory()
+{
+    QString connectionName;
+    QSqlDatabase database;
+    QVERIFY(openTestDatabase(&database, &connectionName));
+    storage::StorageRepositories repositories(database);
+
+    domain::AutomationRule rule;
+    rule.name = QStringLiteral("Task completion notice");
+    rule.description = QStringLiteral("Persisted global rule");
+    rule.triggerType = QStringLiteral("task.completed");
+    rule.triggerConfig = {{QStringLiteral("taskId"), 42}};
+    rule.conditions.push_back({QStringLiteral("task_priority"), QStringLiteral("high"),
+                               QStringLiteral("equals")});
+    domain::AutomationAction action;
+    action.type = QStringLiteral("show_notification");
+    action.message = QStringLiteral("Done: {task.title}");
+    rule.actions.push_back(action);
+
+    const auto created = repositories.automations.saveRule(rule, 0);
+    QVERIFY(created.succeeded());
+    QCOMPARE(created.value.revision, 1);
+    QVERIFY(!created.value.id.isEmpty());
+    QCOMPARE(created.value.conditions.size(), 1);
+    QCOMPARE(created.value.actions.size(), 1);
+
+    domain::AutomationRule edited = created.value;
+    edited.name = QStringLiteral("Updated task notice");
+    const auto updated = repositories.automations.saveRule(edited, created.value.revision);
+    QVERIFY(updated.succeeded());
+    QCOMPARE(updated.value.revision, 2);
+    QCOMPARE(updated.value.name, QStringLiteral("Updated task notice"));
+    const auto stale = repositories.automations.saveRule(edited, created.value.revision);
+    QVERIFY(!stale.succeeded());
+    QCOMPARE(stale.error.category(), domain::ErrorCategory::Conflict);
+
+    domain::AutomationEvent event;
+    event.id = QStringLiteral("task:completed:task:42:revision:7");
+    event.type = QStringLiteral("task.completed");
+    event.sourceModule = QStringLiteral("tasks");
+    event.sourceEntityId = QStringLiteral("42");
+    event.occurredAtUtc = QDateTime::fromString(QStringLiteral("2026-11-01T12:00:00.000Z"),
+                                                Qt::ISODateWithMs);
+    event.payload = {{QStringLiteral("task.id"), 42},
+                     {QStringLiteral("task.title"), QStringLiteral("Write notes")}};
+    const QString requestedAt = QStringLiteral("2026-11-01T12:00:01.000Z");
+    const auto inserted = repositories.automations.insertExecution(
+        QStringLiteral("global-execution-1"), updated.value.id, updated.value.name,
+        event, requestedAt);
+    QVERIFY(inserted.succeeded());
+    QVERIFY(inserted.value);
+    const auto duplicate = repositories.automations.insertExecution(
+        QStringLiteral("global-execution-duplicate"), updated.value.id, updated.value.name,
+        event, requestedAt);
+    QVERIFY(duplicate.succeeded());
+    QVERIFY(!duplicate.value);
+
+    const QString startedAt = QStringLiteral("2026-11-01T12:00:02.000Z");
+    const QString finishedAt = QStringLiteral("2026-11-01T12:00:03.000Z");
+    QVERIFY(repositories.automations.updateExecution(QStringLiteral("global-execution-1"),
+        QStringLiteral("running"), startedAt, {}, {}).succeeded());
+    domain::AutomationAction persistedAction = updated.value.actions.front();
+    QVERIFY(repositories.automations.recordActionResult(QStringLiteral("global-execution-1"),
+        persistedAction, startedAt, finishedAt, QStringLiteral("succeeded"), {}).succeeded());
+    QVERIFY(repositories.automations.updateExecution(QStringLiteral("global-execution-1"),
+        QStringLiteral("succeeded"), {}, finishedAt, {}).succeeded());
+
+    const auto history = repositories.automations.history(updated.value.id,
+        QStringLiteral("succeeded"), QStringLiteral("task.completed"),
+        QStringLiteral("2026-11-01T00:00:00.000Z"),
+        QStringLiteral("2026-11-02T00:00:00.000Z"), 50, 0);
+    QVERIFY(history.succeeded());
+    QCOMPARE(history.value.size(), 1);
+    const QVariantMap row = history.value.front().toMap();
+    QCOMPARE(row.value(QStringLiteral("eventOccurredAtUtc")).toString(),
+             QStringLiteral("2026-11-01T12:00:00.000Z"));
+    QCOMPARE(row.value(QStringLiteral("actionsCompleted")).toInt(), 1);
+    QCOMPARE(row.value(QStringLiteral("actionsAttempted")).toInt(), 1);
+
+    QVERIFY(repositories.automations.removeRule(updated.value.id).succeeded());
+    const auto retainedHistory = repositories.automations.history({}, {}, {}, {}, {}, 50, 0);
+    QVERIFY(retainedHistory.succeeded());
+    QCOMPARE(retainedHistory.value.size(), 1);
+    const QVariantMap retainedRow = retainedHistory.value.front().toMap();
+    QVERIFY(retainedRow.value(QStringLiteral("ruleId")).toString().isEmpty());
+    QCOMPARE(retainedRow.value(QStringLiteral("ruleName")).toString(), updated.value.name);
+
+    database.close();
+    database = QSqlDatabase();
+    QSqlDatabase::removeDatabase(connectionName);
+}
+
+void StorageRepositoryTest::phaseFiveAutomationAndHistorySurviveGlobalEngineMigration()
+{
+    QString connectionName;
+    QSqlDatabase database;
+    QVERIFY(openTestDatabase(&database, &connectionName));
+    storage::StorageRepositories repositories(database);
+
+    storage::TaskInput input;
+    input.title = QString(120, QLatin1Char('T'));
+    storage::TaskAutomationInput automation;
+    automation.enabled = true;
+    automation.actionType = QStringLiteral("show_notification");
+    automation.notificationMessage = QStringLiteral("Done: {task.completedAt}");
+    automation.configured = true;
+    input.automation = automation;
+    const auto task = repositories.tasks.create(input);
+    QVERIFY(task.succeeded());
+    QVERIFY(task.value.automation.has_value());
+
+    storage::TaskAutomationExecution legacyExecution;
+    legacyExecution.executionId = QStringLiteral("legacy-phase-five-execution");
+    legacyExecution.automationId = task.value.automation->id;
+    legacyExecution.taskId = task.value.id;
+    legacyExecution.completionEventId = QStringLiteral("task:%1:revision:2").arg(task.value.id);
+    legacyExecution.actionType = automation.actionType;
+    legacyExecution.targetReference = QStringLiteral("notification");
+    legacyExecution.requestedAtUtc = QStringLiteral("2026-11-01T11:59:00.000Z");
+    legacyExecution.configurationRevision = task.value.automation->revision;
+    const auto inserted = repositories.taskAutomations.insertExecution(legacyExecution);
+    QVERIFY(inserted.succeeded());
+    QVERIFY(inserted.value);
+    QVERIFY(repositories.taskAutomations.updateExecution(legacyExecution.executionId,
+        QStringLiteral("succeeded"), QStringLiteral("2026-11-01T11:59:00.200Z"), {}).succeeded());
+
+    QSqlQuery downgrade(database);
+    for (const QString &table : {QStringLiteral("automation_action_results"),
+                                 QStringLiteral("automation_actions"),
+                                 QStringLiteral("automation_conditions"),
+                                 QStringLiteral("automation_executions"),
+                                 QStringLiteral("automation_rules")})
+        QVERIFY2(downgrade.exec(QStringLiteral("DROP TABLE ") + table),
+                 qPrintable(downgrade.lastError().text()));
+    QVERIFY(downgrade.exec(QStringLiteral("DELETE FROM schema_migrations WHERE version=22")));
+    downgrade.finish();
+
+    QString diagnostic;
+    QVERIFY2(storage::SchemaMigrator::apply(database, &diagnostic), qPrintable(diagnostic));
+    const auto rules = repositories.automations.rules();
+    QVERIFY(rules.succeeded());
+    QCOMPARE(rules.value.size(), 1);
+    QCOMPARE(rules.value.front().sourceTaskId, task.value.id);
+    QCOMPARE(rules.value.front().name, task.value.title.left(88) + QStringLiteral(" automation"));
+    QVERIFY(rules.value.front().createdAtUtc.endsWith(QLatin1Char('Z')));
+    QVERIFY(rules.value.front().updatedAtUtc.endsWith(QLatin1Char('Z')));
+    QCOMPARE(rules.value.front().actions.size(), 1);
+    QCOMPARE(rules.value.front().actions.front().message, automation.notificationMessage);
+    domain::AutomationRule unmanagedCopy = rules.value.front();
+    unmanagedCopy.sourceTaskId = 0;
+    QVERIFY(!repositories.automations.saveRule(unmanagedCopy,
+        rules.value.front().revision).succeeded());
+    QVERIFY(!repositories.automations.removeRule(rules.value.front().id).succeeded());
+
+    const auto migratedTask = repositories.tasks.get(task.value.id);
+    QVERIFY(migratedTask.succeeded());
+    QVERIFY(migratedTask.value.automation.has_value());
+    QCOMPARE(migratedTask.value.automation->latestExecutionStatus, QStringLiteral("succeeded"));
+    const auto history = repositories.automations.history({}, {}, {}, {}, {}, 50, 0);
+    QVERIFY(history.succeeded());
+    QCOMPARE(history.value.size(), 1);
+    QCOMPARE(history.value.front().toMap().value(QStringLiteral("eventId")).toString(),
+             QStringLiteral("task:completed:") + legacyExecution.completionEventId);
 
     database.close();
     database = QSqlDatabase();

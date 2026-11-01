@@ -1103,12 +1103,18 @@ RepositoryResult<std::optional<TaskAutomation>> TaskAutomationRepository::getFor
     query.prepare(QStringLiteral(
         "SELECT a.id,a.task_id,a.enabled,a.trigger_type,a.action_type,a.target_id,a.url,"
         "a.notification_message,a.delay_ms,a.revision,a.created_at,a.updated_at,"
-        "COALESCE((SELECT e.status FROM task_automation_executions e "
-        "WHERE e.task_id=a.task_id ORDER BY e.rowid DESC LIMIT 1),''),"
-        "COALESCE((SELECT e.error_message FROM task_automation_executions e "
-        "WHERE e.task_id=a.task_id ORDER BY e.rowid DESC LIMIT 1),''),"
-        "COALESCE((SELECT e.executed_at_utc FROM task_automation_executions e "
-        "WHERE e.task_id=a.task_id ORDER BY e.rowid DESC LIMIT 1),'') "
+        "COALESCE((SELECT e.status FROM automation_executions e JOIN automation_rules r "
+        "ON r.id=e.rule_id WHERE r.source_task_id=a.task_id ORDER BY e.rowid DESC LIMIT 1),"
+        "(SELECT e.status FROM task_automation_executions e WHERE e.task_id=a.task_id "
+        "ORDER BY e.rowid DESC LIMIT 1),''),"
+        "COALESCE((SELECT e.error_message FROM automation_executions e JOIN automation_rules r "
+        "ON r.id=e.rule_id WHERE r.source_task_id=a.task_id ORDER BY e.rowid DESC LIMIT 1),"
+        "(SELECT e.error_message FROM task_automation_executions e WHERE e.task_id=a.task_id "
+        "ORDER BY e.rowid DESC LIMIT 1),''),"
+        "COALESCE((SELECT e.finished_at_utc FROM automation_executions e JOIN automation_rules r "
+        "ON r.id=e.rule_id WHERE r.source_task_id=a.task_id ORDER BY e.rowid DESC LIMIT 1),"
+        "(SELECT e.executed_at_utc FROM task_automation_executions e WHERE e.task_id=a.task_id "
+        "ORDER BY e.rowid DESC LIMIT 1),'') "
         "FROM task_automations a WHERE a.task_id=?"));
     query.addBindValue(taskId);
     if (!query.exec())
@@ -1154,6 +1160,15 @@ RepositoryResult<TaskAutomation> TaskAutomationRepository::saveForTask(
             && saved.url == input.url
             && saved.notificationMessage == input.notificationMessage
             && saved.delayMs == input.delayMs) {
+            QSqlQuery refreshMirrorName(m_database);
+            refreshMirrorName.prepare(QStringLiteral(
+                "UPDATE automation_rules SET name=(SELECT substr(title,1,88)||' automation' FROM tasks WHERE id=?) "
+                "WHERE source_task_id=? AND name<>(SELECT substr(title,1,88)||' automation' FROM tasks WHERE id=?)"));
+            refreshMirrorName.addBindValue(taskId);
+            refreshMirrorName.addBindValue(taskId);
+            refreshMirrorName.addBindValue(taskId);
+            if (!refreshMirrorName.exec())
+                return failure<TaskAutomation>(queryFailure(refreshMirrorName));
             RepositoryResult<TaskAutomation> unchanged;
             unchanged.value = saved;
             return unchanged;
@@ -1178,6 +1193,37 @@ RepositoryResult<TaskAutomation> TaskAutomationRepository::saveForTask(
     query.addBindValue(input.notificationMessage);
     query.addBindValue(input.delayMs);
     if (!query.exec()) return failure<TaskAutomation>(queryFailure(query));
+
+    QSqlQuery mirrorRule(m_database);
+    mirrorRule.prepare(QStringLiteral(
+        "INSERT INTO automation_rules(id,source_task_id,name,description,trigger_type,"
+        "trigger_config_json,enabled,cooldown_seconds,revision,created_at_utc,updated_at_utc) "
+        "SELECT 'task-'||a.task_id,a.task_id,substr(t.title,1,88)||' automation','Managed from the Task Editor.',"
+        "'task.completed','{\"taskId\":'||a.task_id||'}',a.enabled,0,a.revision,"
+        "strftime('%Y-%m-%dT%H:%M:%fZ',a.created_at),strftime('%Y-%m-%dT%H:%M:%fZ',a.updated_at) "
+        "FROM task_automations a JOIN tasks t ON t.id=a.task_id WHERE a.task_id=? "
+        "ON CONFLICT(source_task_id) DO UPDATE SET name=excluded.name,description=excluded.description,"
+        "trigger_type=excluded.trigger_type,trigger_config_json=excluded.trigger_config_json,"
+        "enabled=excluded.enabled,revision=excluded.revision,updated_at_utc=excluded.updated_at_utc"));
+    mirrorRule.addBindValue(taskId);
+    if (!mirrorRule.exec()) return failure<TaskAutomation>(queryFailure(mirrorRule));
+    QSqlQuery ruleId(m_database);
+    ruleId.prepare(QStringLiteral("SELECT id FROM automation_rules WHERE source_task_id=?"));
+    ruleId.addBindValue(taskId);
+    if (!ruleId.exec() || !ruleId.next()) return failure<TaskAutomation>(queryFailure(ruleId));
+    const QString globalRuleId = ruleId.value(0).toString();
+    QSqlQuery clearActions(m_database);
+    clearActions.prepare(QStringLiteral("DELETE FROM automation_actions WHERE rule_id=?"));
+    clearActions.addBindValue(globalRuleId);
+    if (!clearActions.exec()) return failure<TaskAutomation>(queryFailure(clearActions));
+    QSqlQuery action(m_database);
+    action.prepare(QStringLiteral(
+        "INSERT INTO automation_actions(action_id,rule_id,execution_order,action_type,target_id,"
+        "url,message,delay_ms,enabled) SELECT 'task-action-'||task_id,?,0,action_type,target_id,"
+        "url,notification_message,delay_ms,1 FROM task_automations WHERE task_id=?"));
+    action.addBindValue(globalRuleId);
+    action.addBindValue(taskId);
+    if (!action.exec()) return failure<TaskAutomation>(queryFailure(action));
     const auto saved = getForTask(taskId);
     if (!saved.succeeded()) return failure<TaskAutomation>(saved.error.category());
     if (!saved.value) return failure<TaskAutomation>(domain::ErrorCategory::Storage);
@@ -1194,6 +1240,10 @@ RepositoryResult<void> TaskAutomationRepository::removeForTask(qint64 taskId)
     query.prepare(QStringLiteral("DELETE FROM task_automations WHERE task_id=?"));
     query.addBindValue(taskId);
     if (!query.exec()) return failureVoid(queryFailure(query));
+    QSqlQuery removeRule(m_database);
+    removeRule.prepare(QStringLiteral("DELETE FROM automation_rules WHERE source_task_id=?"));
+    removeRule.addBindValue(taskId);
+    if (!removeRule.exec()) return failureVoid(queryFailure(removeRule));
     return {};
 }
 
@@ -2871,6 +2921,7 @@ RepositoryResult<QString> PreferencesRepository::get(QString key) const
     static const QSet<QString> retainedKeys{
         QStringLiteral("tasks.week_start"), QStringLiteral("appearance.selected_wallpaper"),
         QStringLiteral("calendar.game_releases_visible"),
+        QStringLiteral("automation.paused"),
         QStringLiteral("favorite_updates.previous_opened_at"),
         QStringLiteral("favorite_updates.current_opened_at"),
         QStringLiteral("favorite_updates.previous_refresh_at"),
@@ -5737,6 +5788,7 @@ SteamGameUpdatesRepository::upsertNewsPage(
         insert.finish();
         if (inserted) {
             ++counts.insertedCount;
+            counts.insertedNewsIds.push_back(article.newsId);
             continue;
         }
 
@@ -6288,6 +6340,32 @@ RepositoryResult<QVariantList> UniversalSearchRepository::search(
                     payload, {title}, {channelId, username, category});
             })) return failure<QVariantList>(error.category());
 
+    if (!collect(QStringLiteral(
+            "SELECT r.id AS target_sort,r.id AS rule_id,r.name AS title,r.description,"
+            "r.trigger_type,r.enabled,r.source_task_id FROM automation_rules r"),
+            {QStringLiteral("r.name"), QStringLiteral("r.description"),
+             QStringLiteral("r.trigger_type")},
+            [](const QSqlQuery &row) {
+                const QString id = queryValue(row, QStringLiteral("rule_id")).toString();
+                const QString title = queryValue(row, QStringLiteral("title")).toString();
+                const QString trigger = queryValue(row, QStringLiteral("trigger_type")).toString();
+                const qint64 taskId = queryValue(row, QStringLiteral("source_task_id")).toLongLong();
+                const bool enabled = queryValue(row, QStringLiteral("enabled")).toBool();
+                const QVariantMap payload{{QStringLiteral("id"), id},
+                    {QStringLiteral("ruleId"), id}, {QStringLiteral("sourceTaskId"), taskId},
+                    {QStringLiteral("triggerType"), trigger}};
+                const QVariantList available = taskId > 0
+                    ? actions({{QStringLiteral("open"), QStringLiteral("Open rule")}})
+                    : actions({{QStringLiteral("open"), QStringLiteral("Open rule")},
+                               {QStringLiteral("edit"), QStringLiteral("Edit rule")}});
+                return candidate(QStringLiteral("automationRule:%1").arg(id),
+                    QStringLiteral("automationRule"), QStringLiteral("automations"), title,
+                    trigger + (enabled ? QStringLiteral(" · Enabled") : QStringLiteral(" · Disabled")),
+                    QStringLiteral("Automation Rules"), QStringLiteral("automationRules"),
+                    id, {}, QStringLiteral("↻"), available, payload, {title}, {trigger},
+                    {queryValue(row, QStringLiteral("description")).toString()});
+            })) return failure<QVariantList>(error.category());
+
     if (cancellationRequested && cancellationRequested())
         return failure<QVariantList>(domain::ErrorCategory::Cancelled);
 
@@ -6356,6 +6434,7 @@ StorageRepositories::StorageRepositories(QSqlDatabase &database)
     : tasks(database)
     , taskHistory(database)
     , taskAutomations(database)
+    , automations(database)
     , scheduling(database)
     , currencies(database)
     , favorites(database)

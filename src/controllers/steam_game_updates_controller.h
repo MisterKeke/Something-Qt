@@ -81,6 +81,8 @@ public:
 signals:
     void stateChanged();
     void artworkInvalidated(const QString &filename);
+    void newNewsDiscovered(quint32 appId, const QVariantList &articles,
+                           const QString &timestampUtc);
 
 private:
     enum class Kind {
@@ -96,6 +98,7 @@ private:
         QString attemptedAtUtc;
         QString safeError;
         QString artworkUrl;
+        QVariantList sourceArticles;
         bool success{false};
         bool appendPage{false};
         quint64 generation{0};

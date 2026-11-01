@@ -2,6 +2,7 @@
 
 #include "../domain/app_error.h"
 #include "../domain/task.h"
+#include "../domain/automation_rules.h"
 #include "../domain/task_history.h"
 #include "../domain/task_scheduling.h"
 #include "../domain/steam_news.h"
@@ -40,6 +41,10 @@ using domain::TaskAutomation;
 using domain::TaskAutomationInput;
 using domain::TaskFilter;
 using domain::TaskInput;
+using domain::AutomationAction;
+using domain::AutomationCondition;
+using domain::AutomationEvent;
+using domain::AutomationRule;
 using domain::TaskSchedule;
 using domain::TaskScheduleProposal;
 using domain::TaskScheduleSnapshot;
@@ -343,6 +348,7 @@ struct SteamGameUpdateNewsPage final {
 struct SteamGameUpdateNewsUpsertResult final {
     int insertedCount{0};
     int refreshedCount{0};
+    QStringList insertedNewsIds;
 };
 
 } // namespace something::storage

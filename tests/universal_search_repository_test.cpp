@@ -16,6 +16,7 @@ private slots:
     void init();
     void cleanup();
     void searchesTasksApplicationsAndFavorites();
+    void searchesAutomationRulesWithoutExecutingThem();
     void boundsLargeResultSetsAndHonorsCancellation();
     void rejectsEmptyAndMalformedQueries();
 
@@ -105,6 +106,36 @@ void UniversalSearchRepositoryTest::searchesTasksApplicationsAndFavorites()
     QCOMPARE(channel.value.size(), 1);
     QCOMPARE(channel.value.first().toMap().value(QStringLiteral("type")).toString(),
              QStringLiteral("telegramFavorite"));
+}
+
+void UniversalSearchRepositoryTest::searchesAutomationRulesWithoutExecutingThem()
+{
+    storage::AutomationRepository automations(m_database);
+    domain::AutomationRule rule;
+    rule.name = QStringLiteral("Weekday focus reminder");
+    rule.description = QStringLiteral("Start the writing setup on weekdays");
+    rule.triggerType = QStringLiteral("schedule.time_reached");
+    rule.triggerConfig = {{QStringLiteral("time"), QStringLiteral("09:00")},
+                          {QStringLiteral("weekdays"), QVariantList{1, 2, 3, 4, 5}}};
+    domain::AutomationAction action;
+    action.type = QStringLiteral("show_notification");
+    action.message = QStringLiteral("Focus time");
+    rule.actions.push_back(action);
+    const auto saved = automations.saveRule(rule, 0);
+    QVERIFY(saved.succeeded());
+
+    storage::UniversalSearchRepository search(m_database);
+    const auto results = search.search(QStringLiteral("weekday focus"));
+    QVERIFY(results.succeeded());
+    QCOMPARE(results.value.size(), 1);
+    const QVariantMap result = results.value.front().toMap();
+    QCOMPARE(result.value(QStringLiteral("type")).toString(), QStringLiteral("automationRule"));
+    QCOMPARE(result.value(QStringLiteral("routeId")).toString(), QStringLiteral("automationRules"));
+    QCOMPARE(result.value(QStringLiteral("targetId")).toString(), saved.value.id);
+    const QVariantList actions = result.value(QStringLiteral("actions")).toList();
+    QCOMPARE(actions.size(), 2);
+    QCOMPARE(actions.at(0).toMap().value(QStringLiteral("id")).toString(), QStringLiteral("open"));
+    QCOMPARE(actions.at(1).toMap().value(QStringLiteral("id")).toString(), QStringLiteral("edit"));
 }
 
 void UniversalSearchRepositoryTest::boundsLargeResultSetsAndHonorsCancellation()

@@ -261,13 +261,9 @@ Dialog {
     }
 
     Connections {
-        target: taskAutomationService
+        target: automationRulesController
         function onExecutionChanged(taskId, status, errorMessage, executedAtUtc) {
-            if (Number(taskId) === 0) {
-                if (root.editing && root.taskId > 0)
-                    root.taskController.loadTaskForEditor(root.taskId)
-                return
-            }
+            if (Number(taskId) <= 0) return
             if (Number(taskId) !== root.taskId) return
             var updated = Object.assign({}, root.automationStatus)
             updated.latestExecutionStatus = String(status)

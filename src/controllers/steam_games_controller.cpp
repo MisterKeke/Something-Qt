@@ -828,6 +828,17 @@ void SteamGamesController::onStorageFinished(quint64 id, const QVariantMap &valu
             .arg(m_refreshUpdatedCount).arg(m_refreshFailedCount).arg(m_refreshWork.size());
         for (int index = 0; index < m_refreshUpdates.size(); ++index) {
             const storage::SteamRefreshUpdate &update = m_refreshUpdates.at(index);
+            if (update.refreshedGame) {
+                const QVariantMap previous = m_refreshWork.at(index).game;
+                const QVariantList freshGames = values.value(QStringLiteral("games")).toList();
+                for (const QVariant &value : freshGames) {
+                    const QVariantMap current = value.toMap();
+                    if (current.value(QStringLiteral("id")).toLongLong() == update.gameId) {
+                        emit priceRefreshCommitted(previous, current);
+                        break;
+                    }
+                }
+            }
             if (!update.refreshedGame || update.refreshedGame->imageSourceUrl.isEmpty()) continue;
             const QVariantMap &previous = m_refreshWork.at(index).game;
             if (previous.value(QStringLiteral("artworkSource")).toString().isEmpty()

@@ -40,7 +40,8 @@ public:
                           platform::DesktopApplicationsPlatform *desktopPlatform,
                           controllers::BackgroundController *background,
                           QObject *parent = nullptr,
-                          TaskAutomationAdapters adapters = {});
+                          TaskAutomationAdapters adapters = {},
+                          bool completionEventsEnabled = true);
     ~TaskAutomationService() override;
 
     void prepareShutdown();
