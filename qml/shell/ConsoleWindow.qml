@@ -2,6 +2,7 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import "../pages" as Pages
+import "../components" as Shared
 import Something.App as ThemeModule
 
 ApplicationWindow {
@@ -65,5 +66,14 @@ ApplicationWindow {
         returnTitle: consoleWindow.returnTitle
         showReturnButton: consoleWindow.fullApplicationOpened
         onNavigateRequested: function(routeId) { consoleWindow.navigateRequested(routeId) }
+    }
+
+    Shared.NotificationToast {
+        anchors.horizontalCenter: parent.horizontalCenter
+        anchors.bottom: parent.bottom
+        anchors.bottomMargin: 20
+        z: 100
+        message: backgroundController.notificationMessage
+        onDismissed: backgroundController.clearNotificationMessage()
     }
 }

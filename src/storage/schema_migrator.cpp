@@ -753,6 +753,45 @@ constexpr const char *applicationUsage[] = {
     "INSERT INTO usage_tracking_settings(key, value) VALUES('retention_days','365')"
 };
 
+constexpr const char *taskAutomation[] = {
+    R"SQL(CREATE TABLE task_automations (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        task_id INTEGER NOT NULL UNIQUE REFERENCES tasks(id) ON DELETE CASCADE,
+        enabled INTEGER NOT NULL CHECK(enabled IN (0,1)),
+        trigger_type TEXT NOT NULL CHECK(trigger_type='task_completed'),
+        action_type TEXT NOT NULL CHECK(action_type IN
+            ('launch_application','launch_setup','open_url','show_notification')),
+        target_id INTEGER,
+        url TEXT,
+        notification_message TEXT NOT NULL,
+        delay_ms INTEGER NOT NULL CHECK(delay_ms IN (0,5000,30000)),
+        revision INTEGER NOT NULL CHECK(revision > 0),
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        CHECK ((action_type IN ('launch_application','launch_setup')
+                AND target_id IS NOT NULL AND target_id > 0 AND url IS NULL)
+            OR (action_type='open_url' AND target_id IS NULL AND url IS NOT NULL)
+            OR (action_type='show_notification' AND target_id IS NULL AND url IS NULL))
+    ))SQL",
+    R"SQL(CREATE TABLE task_automation_executions (
+        execution_id TEXT PRIMARY KEY,
+        automation_id INTEGER REFERENCES task_automations(id) ON DELETE SET NULL,
+        task_id INTEGER NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+        completion_event_id TEXT NOT NULL UNIQUE,
+        action_type TEXT NOT NULL CHECK(action_type IN
+            ('launch_application','launch_setup','open_url','show_notification')),
+        target_reference TEXT NOT NULL,
+        requested_at_utc TEXT NOT NULL,
+        executed_at_utc TEXT,
+        status TEXT NOT NULL CHECK(status IN
+            ('pending','running','succeeded','failed','canceled','skipped')),
+        error_message TEXT NOT NULL DEFAULT '',
+        configuration_revision INTEGER NOT NULL CHECK(configuration_revision > 0)
+    ))SQL",
+    "CREATE INDEX idx_task_automation_execution_task_requested ON task_automation_executions(task_id, requested_at_utc DESC)",
+    "CREATE INDEX idx_task_automation_execution_automation_requested ON task_automation_executions(automation_id, requested_at_utc DESC)",
+};
+
 constexpr std::array migrations{
     Migration{1, "core tasks currencies preferences", core, qsizetype(std::size(core))},
     Migration{2, "favorites and retained update news", favorites, qsizetype(std::size(favorites))},
@@ -788,6 +827,8 @@ constexpr std::array migrations{
               qsizetype(std::size(steamUnsupportedPriceState))},
     Migration{20, "application usage tracking and statistics", applicationUsage,
               qsizetype(std::size(applicationUsage))},
+    Migration{21, "task automations and execution history", taskAutomation,
+              qsizetype(std::size(taskAutomation))},
 };
 
 bool fail(QString *diagnostic, const QString &message)
@@ -856,6 +897,8 @@ bool hasUnexpectedTables(const QSqlDatabase &database, QString *diagnostic, bool
         QStringLiteral("usage_segments"),
         QStringLiteral("usage_tracking_settings"),
         QStringLiteral("usage_excluded_applications"),
+        QStringLiteral("task_automations"),
+        QStringLiteral("task_automation_executions"),
         QStringLiteral("task_history"), QStringLiteral("task_schedules"),
         QStringLiteral("scheduling_preferences"),
         QStringLiteral("weather_comparison_cities")

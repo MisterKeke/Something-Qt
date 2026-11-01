@@ -43,6 +43,9 @@ public:
 signals:
     void requestFinished(const something::services::MutationResult &result);
     void taskCommitted(const QString &requestId, const QVariantMap &task, bool created);
+    void taskCompletionCommitted(const QString &completionEventId,
+                                 const QVariantMap &task,
+                                 bool previousCompleted, bool currentCompleted);
     void weekStartCommitted(const QString &requestId, int sundayZero);
 
 private:

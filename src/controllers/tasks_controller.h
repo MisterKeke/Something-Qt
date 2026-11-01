@@ -68,6 +68,7 @@ public:
     Q_INVOKABLE void toggleSubtaskFromView(qint64 taskId, qint64 subtaskId,
                                           qint64 revision, bool completed);
     Q_INVOKABLE void saveTask(const QVariantMap &draft);
+    Q_INVOKABLE void loadTaskForEditor(qint64 id);
     Q_INVOKABLE void deleteTask(qint64 id);
     Q_INVOKABLE void reloadConflictTask();
     Q_INVOKABLE void clearEditorState();
@@ -79,12 +80,15 @@ signals:
     void filtersChanged();
     void editorSaveSucceeded();
     void conflictTaskLoaded(const QVariantMap &task);
+    void editorTaskLoaded(const QVariantMap &task);
+    void editorTaskLoadFailed(qint64 taskId, const QString &message);
     void notificationChanged();
     void taskMutationCommitted(qint64 taskId, const QVariantMap &currentTask, bool deleted);
     void taskMutationMayHaveCommitted();
 
 private:
-    enum class Action { List, Create, Update, Complete, Priority, Subtask, Delete, ReloadConflict };
+    enum class Action { List, Create, Update, Complete, Priority, Subtask, Delete,
+                        ReloadConflict, EditorLoad };
     struct PendingAction {
         Action action{Action::List};
         qint64 taskId{0};

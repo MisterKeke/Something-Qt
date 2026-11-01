@@ -47,6 +47,7 @@ public:
     Q_INVOKABLE void setPageVisible(bool visible);
     Q_INVOKABLE void reload();
     Q_INVOKABLE void loadAllApplications();
+    Q_INVOKABLE void loadApplicationTargets();
     Q_INVOKABLE void loadCategories();
     Q_INVOKABLE void loadApplicationsByCategory(qint64 categoryId);
     Q_INVOKABLE void loadUncategorizedApplications();
@@ -125,6 +126,7 @@ private:
     bool m_stagingCleanupDone{false};
     bool m_ready{false};
     bool m_pageVisible{false};
+    bool m_applicationTargetsRequested{false};
     bool m_loading{false};
     bool m_categoriesLoading{false};
     int m_uncategorizedCount{0};

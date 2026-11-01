@@ -36,12 +36,28 @@ struct RepositoryResult<void> {
 using domain::Subtask;
 using domain::SubtaskInput;
 using domain::Task;
+using domain::TaskAutomation;
+using domain::TaskAutomationInput;
 using domain::TaskFilter;
 using domain::TaskInput;
 using domain::TaskSchedule;
 using domain::TaskScheduleProposal;
 using domain::TaskScheduleSnapshot;
 using domain::SchedulingPreferences;
+
+struct TaskAutomationExecution final {
+    QString executionId;
+    qint64 automationId{0};
+    qint64 taskId{0};
+    QString completionEventId;
+    QString actionType;
+    QString targetReference;
+    QString requestedAtUtc;
+    QString executedAtUtc;
+    QString status;
+    QString errorMessage;
+    qint64 configurationRevision{0};
+};
 
 struct TaskScheduleBatchResult final {
     QVector<TaskSchedule> schedules;

@@ -347,6 +347,31 @@ void BackgroundController::setNotifyOnFirstHide(bool enabled)
     emit settingsChanged();
 }
 
+bool BackgroundController::showAutomationNotification(QString title, QString message)
+{
+    title = title.trimmed();
+    message = message.trimmed();
+    if (message.isEmpty()) return false;
+    if (m_systemTrayEnabled && trayAvailable() && QSystemTrayIcon::supportsMessages()
+        && m_trayIcon && m_trayIcon->isVisible()) {
+        m_trayIcon->showMessage(title.isEmpty() ? tr("Task automation") : title,
+                                message, QSystemTrayIcon::Information, 5000);
+        return true;
+    }
+    // The message remains available to the shell's in-app toast when a window
+    // is restored or the tray integration is unavailable.
+    m_notificationMessage = std::move(message);
+    emit presentationChanged();
+    return true;
+}
+
+void BackgroundController::clearNotificationMessage()
+{
+    if (m_notificationMessage.isEmpty()) return;
+    m_notificationMessage.clear();
+    emit presentationChanged();
+}
+
 void BackgroundController::updateTrayIcon()
 {
     const bool shouldShow = m_systemTrayEnabled && trayAvailable() && !m_shutdownRequested;

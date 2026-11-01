@@ -5,6 +5,8 @@
 #include "../application/operation_coordinator.h"
 #include "../domain/task_rules.h"
 
+#include <QDateTime>
+
 namespace something::services {
 namespace {
 
@@ -132,6 +134,18 @@ void ApplicationMutationWorkflow::finish(QString requestId, QString state,
             const QVariantMap task = values.value(QStringLiteral("task")).toMap();
             result.data = {{QStringLiteral("task"), task}};
             emit taskCommitted(requestId, task, kind == QStringLiteral("task-add"));
+            if (kind == QStringLiteral("task-complete")
+                && task.contains(QStringLiteral("previousCompleted"))
+                && !task.value(QStringLiteral("previousCompleted")).toBool()
+                && task.value(QStringLiteral("completed")).toBool()) {
+                const QString eventId = QStringLiteral("task:%1:revision:%2")
+                    .arg(task.value(QStringLiteral("id")).toLongLong())
+                    .arg(task.value(QStringLiteral("revision")).toLongLong());
+                QVariantMap committedTask = task;
+                committedTask.insert(QStringLiteral("completedAtUtc"),
+                    QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs));
+                emit taskCompletionCommitted(eventId, committedTask, false, true);
+            }
         } else if (kind == QStringLiteral("week-start")) {
             emit weekStartCommitted(requestId, values.value(QStringLiteral("weekStart")).toInt());
             result.data = {{QStringLiteral("weekStart"), values.value(QStringLiteral("weekStart"))}};

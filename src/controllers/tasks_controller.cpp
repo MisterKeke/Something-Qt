@@ -294,6 +294,20 @@ storage::TaskInput TasksController::taskInput(const QVariantMap &draft) const
         }
         input.subtasks = std::move(subtasks);
     }
+    if (draft.contains(QStringLiteral("automation"))) {
+        const QVariantMap value = draft.value(QStringLiteral("automation")).toMap();
+        storage::TaskAutomationInput automation;
+        automation.configured = value.value(QStringLiteral("configured")).toBool();
+        automation.enabled = value.value(QStringLiteral("enabled")).toBool();
+        automation.triggerType = value.value(QStringLiteral("triggerType"),
+            QStringLiteral("task_completed")).toString();
+        automation.actionType = value.value(QStringLiteral("actionType")).toString();
+        automation.targetId = value.value(QStringLiteral("targetId")).toLongLong();
+        automation.url = value.value(QStringLiteral("url")).toString();
+        automation.notificationMessage = value.value(QStringLiteral("notificationMessage")).toString();
+        automation.delayMs = value.value(QStringLiteral("delayMs")).toInt();
+        input.automation = std::move(automation);
+    }
     return input;
 }
 
@@ -477,6 +491,24 @@ void TasksController::saveTask(const QVariantMap &draft)
     }
 }
 
+void TasksController::loadTaskForEditor(qint64 id)
+{
+    if (!m_ready || id <= 0) {
+        emit editorTaskLoadFailed(id, QStringLiteral("Task automation settings could not be loaded."));
+        return;
+    }
+    const auto operation = m_graph->beginOperation(QStringLiteral("load task editor details"));
+    if (!operation.isValid()) {
+        emit editorTaskLoadFailed(id, QStringLiteral("Task automation settings could not be loaded."));
+        return;
+    }
+    m_pending.insert(operation.id.value, {Action::EditorLoad, id});
+    if (!m_graph->submitStorage(operation, services::TaskService::get(id))
+        && m_pending.remove(operation.id.value) > 0) {
+        emit editorTaskLoadFailed(id, QStringLiteral("Task automation settings could not be loaded."));
+    }
+}
+
 void TasksController::onSharedTaskCommitted(const QString &requestId,
                                             const QVariantMap &taskMap, bool created)
 {
@@ -625,6 +657,16 @@ void TasksController::onStorageFinished(quint64 operationId, const QVariantMap &
             emit conflictTaskLoaded(taskMapFrom(values));
         }
         emit stateChanged();
+        return;
+    }
+
+    if (action.action == Action::EditorLoad) {
+        if (error.isError())
+            emit editorTaskLoadFailed(action.taskId, error.category() == domain::ErrorCategory::NotFound
+                ? QStringLiteral("This task is no longer available.")
+                : QStringLiteral("Task automation settings could not be loaded."));
+        else if (!error.isCancelled())
+            emit editorTaskLoaded(taskMapFrom(values));
         return;
     }
 

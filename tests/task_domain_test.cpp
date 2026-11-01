@@ -10,6 +10,7 @@ class TaskDomainTest final : public QObject {
 private slots:
     void inputNormalizationAndValidation();
     void filterNormalizationAndValidation();
+    void taskAutomationValidationAndUrlNormalization();
 };
 
 void TaskDomainTest::inputNormalizationAndValidation()
@@ -102,6 +103,29 @@ void TaskDomainTest::filterNormalizationAndValidation()
     TaskFilter invalidDate;
     invalidDate.dueFrom = QStringLiteral("2026-13-01");
     QCOMPARE(normalizeTaskFilter(invalidDate).category(), ErrorCategory::Validation);
+}
+
+void TaskDomainTest::taskAutomationValidationAndUrlNormalization()
+{
+    TaskAutomationInput automation;
+    automation.actionType = QStringLiteral("open_url");
+    automation.url = QStringLiteral("  HTTPS://example.com/path  ");
+    automation.delayMs = 5000;
+    QVERIFY(!normalizeTaskAutomation(automation).isError());
+    QCOMPARE(automation.url, QStringLiteral("https://example.com/path"));
+
+    automation.url = QStringLiteral("file:///C:/Windows/system.ini");
+    QCOMPARE(normalizeTaskAutomation(automation).category(), ErrorCategory::Validation);
+    automation.url = QStringLiteral("powershell:Start-Process");
+    QCOMPARE(normalizeTaskAutomation(automation).category(), ErrorCategory::Validation);
+    automation.url = QStringLiteral("https://example.com/");
+    automation.delayMs = 1000;
+    QCOMPARE(normalizeTaskAutomation(automation).category(), ErrorCategory::Validation);
+
+    automation.configured = false;
+    automation.actionType.clear();
+    automation.delayMs = -1;
+    QVERIFY(!normalizeTaskAutomation(automation).isError());
 }
 
 QTEST_GUILESS_MAIN(TaskDomainTest)

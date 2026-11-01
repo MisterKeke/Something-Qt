@@ -50,6 +50,22 @@ private:
     QSqlDatabase &m_database;
 };
 
+class TaskAutomationRepository final {
+public:
+    explicit TaskAutomationRepository(QSqlDatabase &database);
+    RepositoryResult<std::optional<TaskAutomation>> getForTask(qint64 taskId) const;
+    RepositoryResult<TaskAutomation> saveForTask(qint64 taskId,
+                                                  const TaskAutomationInput &input);
+    RepositoryResult<void> removeForTask(qint64 taskId);
+    RepositoryResult<bool> insertExecution(const TaskAutomationExecution &execution);
+    RepositoryResult<void> updateExecution(const QString &executionId,
+        QString status, QString executedAtUtc, QString errorMessage);
+    RepositoryResult<int> cancelUnfinished(QString executedAtUtc);
+
+private:
+    QSqlDatabase &m_database;
+};
+
 class SchedulingRepository final {
 public:
     explicit SchedulingRepository(QSqlDatabase &database);
@@ -394,6 +410,7 @@ public:
     explicit StorageRepositories(QSqlDatabase &database);
     TaskRepository tasks;
     TaskHistoryRepository taskHistory;
+    TaskAutomationRepository taskAutomations;
     SchedulingRepository scheduling;
     CurrencyFavoritesRepository currencies;
     FavoritesRepository favorites;

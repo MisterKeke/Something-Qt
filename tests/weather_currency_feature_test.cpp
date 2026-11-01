@@ -686,6 +686,8 @@ void WeatherCurrencyFeatureTest::weatherComparisonPersistenceRestoresOrderCacheA
         QVERIFY(downgrade.exec(QStringLiteral("DROP TABLE usage_tracked_applications")));
         QVERIFY(downgrade.exec(QStringLiteral("DROP TABLE usage_tracking_settings")));
         QVERIFY(downgrade.exec(QStringLiteral("DROP TABLE usage_excluded_applications")));
+        QVERIFY(downgrade.exec(QStringLiteral("DROP TABLE task_automation_executions")));
+        QVERIFY(downgrade.exec(QStringLiteral("DROP TABLE task_automations")));
         QVERIFY(downgrade.exec(QStringLiteral(
             "DELETE FROM schema_migrations WHERE version>=11")));
     }

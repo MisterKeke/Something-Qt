@@ -9,5 +9,6 @@ namespace something::domain {
 AppError normalizeTaskInput(TaskInput &input);
 AppError normalizeTaskFilter(TaskFilter &filter);
 bool isValidIsoDate(const QString &date);
+AppError normalizeTaskAutomation(TaskAutomationInput &automation);
 
 } // namespace something::domain

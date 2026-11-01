@@ -22,6 +22,37 @@ struct SubtaskInput final {
     bool completed{false};
 };
 
+// Task-specific automation is intentionally expressed as data. It contains no
+// command text or executable path; launch targets are stable saved-record IDs.
+struct TaskAutomationInput final {
+    bool configured{true}; // false removes the configuration; disabled keeps it
+    bool enabled{false};
+    QString triggerType{QStringLiteral("task_completed")};
+    QString actionType;
+    qint64 targetId{0};
+    QString url;
+    QString notificationMessage;
+    int delayMs{0};
+};
+
+struct TaskAutomation final {
+    qint64 id{0};
+    qint64 taskId{0};
+    bool enabled{false};
+    QString triggerType{QStringLiteral("task_completed")};
+    QString actionType;
+    qint64 targetId{0};
+    QString url;
+    QString notificationMessage;
+    int delayMs{0};
+    qint64 revision{0};
+    QString createdAt;
+    QString updatedAt;
+    QString latestExecutionStatus;
+    QString latestExecutionError;
+    QString latestExecutionAt;
+};
+
 struct Task final {
     qint64 id{0};
     QString title;
@@ -35,6 +66,8 @@ struct Task final {
     qint64 revision{0};
     QStringList tags;
     QVector<Subtask> subtasks;
+    std::optional<TaskAutomation> automation;
+    std::optional<bool> previousCompleted; // set only on a committed completion mutation reply
 };
 
 struct TaskInput final {
@@ -45,6 +78,7 @@ struct TaskInput final {
     std::optional<QString> difficulty; // omitted on update preserves the existing value
     std::optional<QStringList> tags; // omitted on update preserves existing tags
     std::optional<QVector<SubtaskInput>> subtasks; // omitted on update preserves existing subtasks
+    std::optional<TaskAutomationInput> automation; // omitted preserves existing setting on update
 };
 
 struct TaskFilter final {

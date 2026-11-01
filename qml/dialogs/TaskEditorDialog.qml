@@ -15,6 +15,23 @@ Dialog {
     property string pendingDifficulty: ""
     property int previousDifficultyIndex: 0
     property var latestConflictTask: ({})
+    property bool automationExpanded: false
+    property bool automationDetailsLoaded: true
+    property bool automationConfigured: false
+    property bool automationEnabled: false
+    property string automationActionType: "launch_application"
+    property double automationTargetId: 0
+    property string automationUrl: ""
+    property string automationMessage: "Task completed: {task.title}"
+    property int automationDelayMs: 0
+    property var automationStatus: ({})
+    property string automationLoadError: ""
+    onAutomationActionTypeChanged: Qt.callLater(function() {
+        if (automationActionBox) root.setComboValue(automationActionBox, root.automationActionType)
+    })
+    onAutomationDelayMsChanged: Qt.callLater(function() {
+        if (automationDelayBox) root.setComboValue(automationDelayBox, root.automationDelayMs)
+    })
 
     modal: true
     focus: true
@@ -40,6 +57,57 @@ Dialog {
         }
     }
 
+    function setModelComboValue(combo, value) {
+        for (var i = 0; i < combo.count; ++i) {
+            if (String(combo.valueAt(i)) === String(value)) {
+                combo.currentIndex = i
+                return true
+            }
+        }
+        return false
+    }
+
+    function resetAutomation() {
+        automationDetailsLoaded = true
+        automationConfigured = false
+        automationEnabled = false
+        automationActionType = "launch_application"
+        automationTargetId = 0
+        automationUrl = ""
+        automationMessage = "Task completed: {task.title}"
+        automationDelayMs = 0
+        automationStatus = ({})
+        automationLoadError = ""
+    }
+
+    function applyAutomation(value) {
+        const automation = value || ({})
+        automationDetailsLoaded = true
+        automationConfigured = Boolean(automation.configured)
+        automationEnabled = Boolean(automation.enabled)
+        automationActionType = String(automation.actionType || "launch_application")
+        automationTargetId = Number(automation.targetId || 0)
+        automationUrl = String(automation.url || "")
+        automationMessage = String(automation.notificationMessage || "Task completed: {task.title}")
+        automationDelayMs = Number(automation.delayMs || 0)
+        automationStatus = automation
+        automationLoadError = ""
+        Qt.callLater(root.syncAutomationTargetSelection)
+    }
+
+    function syncAutomationTargetSelection() {
+        if (automationActionType === "launch_application")
+            setModelComboValue(applicationTargetBox, automationTargetId)
+        else if (automationActionType === "launch_setup")
+            setModelComboValue(setupTargetBox, automationTargetId)
+    }
+
+    function loadAutomationTargets() {
+        desktopApplicationsController.loadApplicationTargets()
+        setupsController.reload()
+        Qt.callLater(root.syncAutomationTargetSelection)
+    }
+
     function openNew() {
         editing = false
         taskId = 0
@@ -53,6 +121,8 @@ Dialog {
         tagsField.text = ""
         subtaskDrafts = []
         latestConflictTask = ({})
+        resetAutomation()
+        loadAutomationTargets()
         taskController.clearEditorState()
         open()
         Qt.callLater(function() { titleField.forceActiveFocus() })
@@ -74,6 +144,15 @@ Dialog {
                      completed: Boolean(subtask.completed) }
         })
         latestConflictTask = ({})
+        if (task.automation !== undefined) {
+            applyAutomation(task.automation)
+        } else {
+            automationDetailsLoaded = false
+            automationLoadError = ""
+            automationStatus = ({})
+            taskController.loadTaskForEditor(taskId)
+        }
+        loadAutomationTargets()
         taskController.clearEditorState()
         open()
         Qt.callLater(function() { titleField.forceActiveFocus() })
@@ -90,7 +169,7 @@ Dialog {
                 parsedTags.push(tag)
             }
         })
-        return {
+        var result = {
             id: editing ? taskId : 0,
             revision: taskRevision,
             title: titleField.text,
@@ -104,6 +183,19 @@ Dialog {
                          completed: Boolean(subtask.completed) }
             })
         }
+        if (automationDetailsLoaded) {
+            result.automation = {
+                configured: automationConfigured,
+                enabled: automationEnabled,
+                triggerType: "task_completed",
+                actionType: automationActionType,
+                targetId: automationTargetId,
+                url: automationUrl,
+                notificationMessage: automationMessage,
+                delayMs: automationDelayMs
+            }
+        }
+        return result
     }
 
     function saveDraft() {
@@ -139,6 +231,7 @@ Dialog {
             return { id: Number(subtask.id || 0), title: String(subtask.title || ""),
                      completed: Boolean(subtask.completed) }
         })
+        applyAutomation(task.automation)
         latestConflictTask = ({})
         taskController.clearEditorState()
     }
@@ -156,6 +249,42 @@ Dialog {
         function onConflictTaskLoaded(task) {
             root.latestConflictTask = task
         }
+        function onEditorTaskLoaded(task) {
+            if (Number(task.id) === root.taskId)
+                root.applyAutomation(task.automation)
+        }
+        function onEditorTaskLoadFailed(taskId, message) {
+            if (Number(taskId) !== root.taskId) return
+            root.automationDetailsLoaded = false
+            root.automationLoadError = String(message || qsTr("Automation settings could not be loaded."))
+        }
+    }
+
+    Connections {
+        target: taskAutomationService
+        function onExecutionChanged(taskId, status, errorMessage, executedAtUtc) {
+            if (Number(taskId) === 0) {
+                if (root.editing && root.taskId > 0)
+                    root.taskController.loadTaskForEditor(root.taskId)
+                return
+            }
+            if (Number(taskId) !== root.taskId) return
+            var updated = Object.assign({}, root.automationStatus)
+            updated.latestExecutionStatus = String(status)
+            updated.latestExecutionError = String(errorMessage || "")
+            updated.latestExecutionAt = String(executedAtUtc || "")
+            root.automationStatus = updated
+        }
+    }
+
+    Connections {
+        target: desktopApplicationsController.applications
+        function onCountChanged() { root.syncAutomationTargetSelection() }
+    }
+
+    Connections {
+        target: setupsController.setups
+        function onCountChanged() { root.syncAutomationTargetSelection() }
     }
 
     contentItem: ScrollView {
@@ -363,6 +492,302 @@ Dialog {
                     text: qsTr("No subtasks yet.")
                     color: ThemeModule.Theme.textSecondary
                     font.pixelSize: 12
+                }
+            }
+
+            Rectangle {
+                Layout.fillWidth: true
+                implicitHeight: automationColumn.implicitHeight + 18
+                color: ThemeModule.Theme.insetSurface
+                radius: ThemeModule.Theme.panelRadius
+                border.color: ThemeModule.Theme.borderColor
+                border.width: ThemeModule.Theme.panelBorderWidth
+
+                ColumnLayout {
+                    id: automationColumn
+                    anchors.fill: parent
+                    anchors.margins: 9
+                    spacing: 8
+
+                    RowLayout {
+                        Layout.fillWidth: true
+                        ToolButton {
+                            Layout.fillWidth: true
+                            text: (root.automationExpanded ? "▾  " : "▸  ") + qsTr("Automation")
+                            Accessible.name: qsTr("Expand or collapse task automation settings")
+                            onClicked: root.automationExpanded = !root.automationExpanded
+                            contentItem: Label {
+                                text: parent.text
+                                color: ThemeModule.Theme.textPrimary
+                                font.family: ThemeModule.Theme.fontFamily
+                                font.pixelSize: 14
+                                font.weight: Font.DemiBold
+                                horizontalAlignment: Text.AlignLeft
+                                verticalAlignment: Text.AlignVCenter
+                            }
+                        }
+                        Shared.AppButton {
+                            visible: root.automationConfigured
+                            text: qsTr("Remove automation")
+                            quiet: true
+                            onClicked: root.resetAutomation()
+                        }
+                    }
+
+                    ColumnLayout {
+                        visible: root.automationExpanded
+                        Layout.fillWidth: true
+                        spacing: 8
+
+                        Label {
+                            visible: !root.automationDetailsLoaded
+                            Layout.fillWidth: true
+                            text: root.automationLoadError.length > 0
+                                  ? root.automationLoadError : qsTr("Loading automation settings…")
+                            color: root.automationLoadError.length > 0
+                                   ? ThemeModule.Theme.warning : ThemeModule.Theme.textSecondary
+                            wrapMode: Text.Wrap
+                        }
+
+                        ThemeModule.AppCheckBox {
+                            text: qsTr("Enable automation")
+                            checked: root.automationEnabled
+                            enabled: root.automationDetailsLoaded
+                            Accessible.name: qsTr("Enable automation when this task is completed")
+                            onToggled: {
+                                root.automationEnabled = checked
+                                if (checked) root.automationConfigured = true
+                            }
+                        }
+
+                        Label {
+                            Layout.fillWidth: true
+                            text: qsTr("When this task becomes completed")
+                            color: ThemeModule.Theme.textSecondary
+                            font.family: ThemeModule.Theme.fontFamily
+                            font.pixelSize: 12
+                        }
+
+                        Label { text: qsTr("Action"); color: ThemeModule.Theme.textPrimary; font.bold: true }
+                        Shared.AppComboBox {
+                            id: automationActionBox
+                            Layout.fillWidth: true
+                            enabled: root.automationDetailsLoaded && root.automationEnabled
+                            accessibleLabel: qsTr("Automation action")
+                            textRole: "label"
+                            valueRole: "value"
+                            model: [
+                                { label: qsTr("Launch an application"), value: "launch_application" },
+                                { label: qsTr("Launch a Setup"), value: "launch_setup" },
+                                { label: qsTr("Open a URL"), value: "open_url" },
+                                { label: qsTr("Show a notification"), value: "show_notification" }
+                            ]
+                            Component.onCompleted: root.setComboValue(automationActionBox, root.automationActionType)
+                            onActivated: {
+                                root.automationActionType = String(currentValue)
+                                root.automationTargetId = 0
+                                if (root.automationActionType !== "open_url")
+                                    root.automationUrl = ""
+                                Qt.callLater(root.syncAutomationTargetSelection)
+                            }
+                        }
+
+                        Label { text: qsTr("Action target"); color: ThemeModule.Theme.textPrimary; font.bold: true }
+                        Shared.AppComboBox {
+                            id: applicationTargetBox
+                            Layout.fillWidth: true
+                            visible: root.automationActionType === "launch_application"
+                            enabled: root.automationDetailsLoaded && root.automationEnabled
+                            accessibleLabel: qsTr("Saved application to launch")
+                            textRole: "displayName"
+                            valueRole: "applicationId"
+                            model: desktopApplicationsController.applications
+                            onActivated: root.automationTargetId = Number(currentValue)
+                            delegate: ItemDelegate {
+                                required property int index
+                                required property string displayName
+                                required property string executablePath
+                                required property string iconSource
+                                width: applicationTargetBox.width - 8
+                                highlighted: applicationTargetBox.highlightedIndex === index
+                                contentItem: RowLayout {
+                                    spacing: 8
+                                    Image {
+                                        Layout.preferredWidth: 28
+                                        Layout.preferredHeight: 28
+                                        source: iconSource
+                                        fillMode: Image.PreserveAspectFit
+                                        visible: source.toString().length > 0
+                                    }
+                                    ColumnLayout {
+                                        Layout.fillWidth: true
+                                        spacing: 0
+                                        Label {
+                                            Layout.fillWidth: true
+                                            text: displayName
+                                            color: ThemeModule.Theme.textPrimary
+                                            elide: Text.ElideRight
+                                        }
+                                        Label {
+                                            Layout.fillWidth: true
+                                            text: String(executablePath).split(/[\\/]/).pop()
+                                            color: ThemeModule.Theme.textSecondary
+                                            font.pixelSize: 10
+                                            elide: Text.ElideMiddle
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        Label {
+                            visible: root.automationConfigured
+                                     && root.automationActionType === "launch_application"
+                                     && root.automationTargetId > 0
+                                     && applicationTargetBox.currentIndex < 0
+                            text: qsTr("Selected application is no longer available. Select a replacement.")
+                            color: ThemeModule.Theme.warning
+                            wrapMode: Text.Wrap
+                            Layout.fillWidth: true
+                        }
+
+                        Shared.AppComboBox {
+                            id: setupTargetBox
+                            Layout.fillWidth: true
+                            visible: root.automationActionType === "launch_setup"
+                            enabled: root.automationDetailsLoaded && root.automationEnabled
+                            accessibleLabel: qsTr("Setup to launch")
+                            textRole: "name"
+                            valueRole: "setupId"
+                            model: setupsController.setups
+                            onActivated: root.automationTargetId = Number(currentValue)
+                            delegate: ItemDelegate {
+                                required property int index
+                                required property string name
+                                required property string iconSource
+                                width: setupTargetBox.width - 8
+                                highlighted: setupTargetBox.highlightedIndex === index
+                                contentItem: RowLayout {
+                                    spacing: 8
+                                    Image {
+                                        Layout.preferredWidth: 28
+                                        Layout.preferredHeight: 28
+                                        source: iconSource
+                                        fillMode: Image.PreserveAspectFit
+                                    }
+                                    Label {
+                                        Layout.fillWidth: true
+                                        text: name
+                                        color: ThemeModule.Theme.textPrimary
+                                        elide: Text.ElideRight
+                                    }
+                                }
+                            }
+                        }
+                        Label {
+                            visible: root.automationConfigured
+                                     && root.automationActionType === "launch_setup"
+                                     && root.automationTargetId > 0
+                                     && setupTargetBox.currentIndex < 0
+                            text: qsTr("Selected Setup is no longer available. Select a replacement.")
+                            color: ThemeModule.Theme.warning
+                            wrapMode: Text.Wrap
+                            Layout.fillWidth: true
+                        }
+
+                        Shared.AppTextField {
+                            Layout.fillWidth: true
+                            visible: root.automationActionType === "open_url"
+                            enabled: root.automationDetailsLoaded && root.automationEnabled
+                            text: root.automationUrl
+                            placeholderText: qsTr("https://example.com")
+                            accessibleLabel: qsTr("HTTP or HTTPS URL to open")
+                            onTextEdited: root.automationUrl = text
+                        }
+
+                        ColumnLayout {
+                            visible: root.automationActionType === "show_notification"
+                            Layout.fillWidth: true
+                            Label { text: qsTr("Notification message"); color: ThemeModule.Theme.textPrimary; font.bold: true }
+                            TextArea {
+                                Layout.fillWidth: true
+                                Layout.preferredHeight: 72
+                                enabled: root.automationDetailsLoaded && root.automationEnabled
+                                text: root.automationMessage
+                                placeholderText: qsTr("Task completed: {task.title}")
+                                Accessible.name: qsTr("Custom task completion notification message")
+                                color: ThemeModule.Theme.textPrimary
+                                placeholderTextColor: ThemeModule.Theme.textSecondary
+                                font.family: ThemeModule.Theme.fontFamily
+                                wrapMode: TextEdit.Wrap
+                                background: Rectangle {
+                                    color: parent.enabled ? ThemeModule.Theme.raisedSurface : ThemeModule.Theme.disabledSurface
+                                    radius: ThemeModule.Theme.controlRadius
+                                    border.color: ThemeModule.Theme.borderColor
+                                    border.width: ThemeModule.Theme.panelBorderWidth
+                                }
+                                onTextChanged: if (activeFocus) root.automationMessage = text
+                            }
+                            Label {
+                                Layout.fillWidth: true
+                                text: qsTr("Supported placeholders: {task.title}, {task.id}, {task.completedAt}")
+                                color: ThemeModule.Theme.textSecondary
+                                font.pixelSize: 11
+                                wrapMode: Text.Wrap
+                            }
+                        }
+
+                        Label { text: qsTr("Delay"); color: ThemeModule.Theme.textPrimary; font.bold: true }
+                        Shared.AppComboBox {
+                            id: automationDelayBox
+                            Layout.fillWidth: true
+                            enabled: root.automationDetailsLoaded && root.automationEnabled
+                            accessibleLabel: qsTr("Automation delay")
+                            textRole: "label"
+                            valueRole: "value"
+                            model: [
+                                { label: qsTr("Immediately"), value: 0 },
+                                { label: qsTr("5 seconds"), value: 5000 },
+                                { label: qsTr("30 seconds"), value: 30000 }
+                            ]
+                            Component.onCompleted: root.setComboValue(automationDelayBox, root.automationDelayMs)
+                            onActivated: root.automationDelayMs = Number(currentValue)
+                        }
+
+                        Label {
+                            visible: root.automationStatus.latestExecutionStatus !== undefined
+                                     && String(root.automationStatus.latestExecutionStatus).length > 0
+                            Layout.fillWidth: true
+                            text: {
+                                const status = String(root.automationStatus.latestExecutionStatus || "")
+                                if (status === "succeeded"
+                                        && (root.automationActionType === "launch_application"
+                                            || root.automationActionType === "launch_setup"))
+                                    return qsTr("Latest execution: Succeeded (the operating system accepted the launch request)")
+                                return qsTr("Latest execution: %1").arg(status)
+                            }
+                            color: root.automationStatus.latestExecutionStatus === "failed"
+                                   ? ThemeModule.Theme.error
+                                   : root.automationStatus.latestExecutionStatus === "succeeded"
+                                     ? ThemeModule.Theme.success : ThemeModule.Theme.textSecondary
+                            wrapMode: Text.Wrap
+                        }
+                        Label {
+                            visible: String(root.automationStatus.latestExecutionError || "").length > 0
+                            Layout.fillWidth: true
+                            text: String(root.automationStatus.latestExecutionError || "")
+                            color: ThemeModule.Theme.error
+                            wrapMode: Text.Wrap
+                        }
+                        Label {
+                            visible: root.automationConfigured
+                                     && (!root.automationStatus.latestExecutionStatus
+                                         || String(root.automationStatus.latestExecutionStatus).length === 0)
+                            Layout.fillWidth: true
+                            text: qsTr("No executions yet.")
+                            color: ThemeModule.Theme.textSecondary
+                            font.pixelSize: 11
+                        }
+                    }
                 }
             }
 

@@ -17,6 +17,7 @@ target_link_libraries(SomethingQtTestRepositories PUBLIC Qt6::Core Qt6::Sql)
 
 add_executable(SomethingQtApplicationCommandTests
     application_command_test.cpp
+    ../src/controllers/background_controller.cpp
     ../src/controllers/tasks_controller.cpp
     ../src/controllers/terminal_controller.cpp
     ../src/models/tasks_model.cpp
@@ -40,6 +41,7 @@ add_executable(SomethingQtApplicationCommandTests
     ../src/services/preferences_service.cpp
     ../src/services/bounded_worker_pool.cpp
     ../src/services/task_service.cpp
+    ../src/services/task_automation_service.cpp
     ../src/services/wallpaper_service.cpp
     ../src/services/wallpaper_asset_store.cpp
     ../src/services/favorites_service.cpp
@@ -57,7 +59,7 @@ add_executable(SomethingQtApplicationCommandTests
 )
 target_include_directories(SomethingQtApplicationCommandTests PRIVATE ../src)
 target_link_libraries(SomethingQtApplicationCommandTests PRIVATE
-    Qt6::Core Qt6::Gui Qt6::Network Qt6::Sql Qt6::Test lexbor_static)
+    Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Network Qt6::Sql Qt6::Test lexbor_static)
 add_test(NAME SomethingQtApplicationCommandTests COMMAND SomethingQtApplicationCommandTests
     -o "${CMAKE_CURRENT_BINARY_DIR}/application-command-results.txt,txt")
 

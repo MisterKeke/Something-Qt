@@ -4,13 +4,24 @@
 #include "application/application_service_graph.h"
 #include "services/application_command_service.h"
 #include "services/application_mutation_workflow.h"
+#include "services/desktop_applications_service.h"
+#include "services/task_automation_service.h"
 #include "controllers/tasks_controller.h"
 #include "controllers/terminal_controller.h"
+#include "platform/desktop_applications_platform.h"
 
+#include <QFile>
+#include <QDir>
+#include <QMap>
+#include <QSqlDatabase>
+#include <QSqlQuery>
 #include <QSignalSpy>
 #include <QSet>
 #include <QTemporaryDir>
 #include <QtTest>
+
+#include <atomic>
+#include <functional>
 
 using namespace something;
 
@@ -18,6 +29,64 @@ class TestClock final : public domain::Clock {
 public:
     QDateTime nowUtc() const override { return QDateTime::currentDateTimeUtc(); }
     QTimeZone localTimeZone() const override { return QTimeZone::utc(); }
+};
+
+class FakeAutomationPlatform final : public platform::DesktopApplicationsPlatform {
+public:
+    explicit FakeAutomationPlatform(std::atomic_int *launchCount)
+        : m_launchCount(launchCount) {}
+    bool supported() const noexcept override { return true; }
+    domain::AppError resolveExecutable(const QString &selectedPath,
+                                       QString *canonicalPath) const override
+    {
+        if (!canonicalPath || selectedPath.isEmpty())
+            return domain::AppError(domain::ErrorCategory::Validation);
+        *canonicalPath = selectedPath;
+        return domain::AppError::none();
+    }
+    QImage extractExecutableIcon(const QString &,
+        const application::CancellationToken &) const override { return {}; }
+    domain::AppError launchExecutable(const QString &,
+        const application::CancellationToken &cancellation) const override
+    {
+        if (cancellation.isCancellationRequested()) return domain::AppError::cancelled();
+        ++*m_launchCount;
+        return domain::AppError::none();
+    }
+
+private:
+    std::atomic_int *m_launchCount{nullptr};
+};
+
+class FakeAutomationScheduler final {
+public:
+    struct Entry final {
+        int delayMs{0};
+        std::function<void()> callback;
+    };
+
+    int schedule(int delayMs, std::function<void()> callback)
+    {
+        const int id = ++m_nextId;
+        m_entries.insert(id, {delayMs, std::move(callback)});
+        return id;
+    }
+    void cancel(int id) { m_entries.remove(id); }
+    int count() const { return m_entries.size(); }
+    int firstDelay() const { return m_entries.isEmpty() ? -1 : m_entries.cbegin()->delayMs; }
+    bool fireFirst()
+    {
+        if (m_entries.isEmpty()) return false;
+        auto it = m_entries.begin();
+        std::function<void()> callback = std::move(it->callback);
+        m_entries.erase(it);
+        callback();
+        return true;
+    }
+
+private:
+    int m_nextId{0};
+    QMap<int, Entry> m_entries;
 };
 
 class ApplicationCommandTest final : public QObject {
@@ -34,7 +103,9 @@ private slots:
     void acceptedStorageRequestHasOneFinalResult();
     void sharedMutationWorkflowCorrelatesCommittedValuesAndConflicts();
     void workflowReportsMaintenanceAndPendingBoundOutcomes();
+    void failedTaskCompletionTransactionDoesNotEmitAutomationEvent();
     void guiAndConsoleUseSharedTaskWorkflowWithoutClosingAnotherDraft();
+    void taskAutomationUsesFakeActionsAndCancelsStaleDelays();
     void terminalClearDuringPendingPreservesHistoryAndLateResult();
 };
 
@@ -352,6 +423,8 @@ void ApplicationCommandTest::sharedMutationWorkflowCorrelatesCommittedValuesAndC
     QSignalSpy finished(&service, &services::ApplicationCommandService::requestFinished);
     QSignalSpy cancelledResults(&service, &services::ApplicationCommandService::requestCancelled);
     QSignalSpy commits(&workflow, &services::ApplicationMutationWorkflow::taskCommitted);
+    QSignalSpy completionEvents(&workflow,
+        &services::ApplicationMutationWorkflow::taskCompletionCommitted);
     int dependentViewsNotified = 0;
     connect(&workflow, &services::ApplicationMutationWorkflow::taskCommitted, &workflow,
             [&dependentViewsNotified](const QString &, const QVariantMap &, bool) {
@@ -387,6 +460,9 @@ void ApplicationCommandTest::sharedMutationWorkflowCorrelatesCommittedValuesAndC
     QCOMPARE(completed.requestId, completeId);
     QCOMPARE(completed.data.value(QStringLiteral("task")).toMap()
                  .value(QStringLiteral("revision")).toLongLong(), 2);
+    QCOMPARE(completionEvents.size(), 1);
+    QCOMPARE(completionEvents.at(0).at(2).toBool(), false);
+    QCOMPARE(completionEvents.at(0).at(3).toBool(), true);
 
     service.submit(QStringLiteral("task complete %1 --revision 1")
         .arg(committed.value(QStringLiteral("id")).toLongLong()));
@@ -394,6 +470,7 @@ void ApplicationCommandTest::sharedMutationWorkflowCorrelatesCommittedValuesAndC
     const auto conflict = qvariant_cast<services::ConsoleRequestResult>(finished.at(2).at(0));
     QCOMPARE(conflict.state, QStringLiteral("failed"));
     QCOMPARE(conflict.data.value(QStringLiteral("errorCode")).toString(), QStringLiteral("conflict"));
+    QCOMPARE(completionEvents.size(), 1); // Failed stale revision emits no completion trigger.
     const QString weekStartId = service.submit(QStringLiteral("settings week-start 4"));
     QTRY_COMPARE_WITH_TIMEOUT(finished.size(), 4, 5000);
     const auto settingResult = qvariant_cast<services::ConsoleRequestResult>(finished.at(3).at(0));
@@ -456,6 +533,65 @@ void ApplicationCommandTest::workflowReportsMaintenanceAndPendingBoundOutcomes()
     QTRY_VERIFY_WITH_TIMEOUT(graph.isShutdownComplete(), 5000);
 }
 
+void ApplicationCommandTest::failedTaskCompletionTransactionDoesNotEmitAutomationEvent()
+{
+    QTemporaryDir profile;
+    QVERIFY(profile.isValid());
+    application::ApplicationServiceGraph graph(QStringLiteral("failed-task-completion-test"), profile.path());
+    services::ApplicationMutationWorkflow workflow(&graph);
+    QSignalSpy taskCommits(&workflow, &services::ApplicationMutationWorkflow::taskCommitted);
+    QSignalSpy completionEvents(&workflow,
+        &services::ApplicationMutationWorkflow::taskCompletionCommitted);
+    QSignalSpy results(&workflow, &services::ApplicationMutationWorkflow::requestFinished);
+    graph.start();
+    QTRY_VERIFY_WITH_TIMEOUT(graph.lifecycle().state() != application::ApplicationLifecycle::State::Starting, 5000);
+    QVERIFY(graph.lifecycle().state() == application::ApplicationLifecycle::State::Running);
+
+    storage::TaskInput input;
+    input.title = QStringLiteral("Rollback task completion");
+    QVERIFY(workflow.addTask(QStringLiteral("failed-completion-add"), input).accepted);
+    QTRY_COMPARE_WITH_TIMEOUT(taskCommits.size(), 1, 5000);
+    const QVariantMap task = taskCommits.first().at(1).toMap();
+    results.clear();
+
+    const QString connectionName = QStringLiteral("failed-task-completion-trigger");
+    {
+        QSqlDatabase external = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), connectionName);
+        external.setDatabaseName(QDir(graph.profileDirectory()).filePath(QStringLiteral("something.sqlite")));
+        QVERIFY(external.open());
+        QSqlQuery trigger(external);
+        QVERIFY(trigger.exec(QStringLiteral(
+            "CREATE TRIGGER reject_task_completion BEFORE INSERT ON task_history "
+            "WHEN NEW.event_type='task_completed' "
+            "BEGIN SELECT RAISE(ABORT,'test completion rejection'); END")));
+    }
+    QSqlDatabase::removeDatabase(connectionName);
+
+    QVERIFY(workflow.completeTask(QStringLiteral("failed-completion-attempt"),
+        task.value(QStringLiteral("id")).toLongLong(),
+        task.value(QStringLiteral("revision")).toLongLong(), true).accepted);
+    QTRY_COMPARE_WITH_TIMEOUT(results.size(), 1, 5000);
+    QCOMPARE(results.first().at(0).value<services::MutationResult>().state,
+             QStringLiteral("failed"));
+    QVERIFY(completionEvents.isEmpty());
+
+    {
+        QSqlDatabase cleanup = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), connectionName);
+        cleanup.setDatabaseName(QDir(graph.profileDirectory()).filePath(QStringLiteral("something.sqlite")));
+        QVERIFY(cleanup.open());
+        QSqlQuery removeTrigger(cleanup);
+        QVERIFY(removeTrigger.exec(QStringLiteral("DROP TRIGGER reject_task_completion")));
+    }
+    QSqlDatabase::removeDatabase(connectionName);
+
+    QVERIFY(workflow.completeTask(QStringLiteral("successful-completion-retry"),
+        task.value(QStringLiteral("id")).toLongLong(),
+        task.value(QStringLiteral("revision")).toLongLong(), true).accepted);
+    QTRY_COMPARE_WITH_TIMEOUT(completionEvents.size(), 1, 5000);
+    graph.shutdown();
+    QTRY_VERIFY_WITH_TIMEOUT(graph.isShutdownComplete(), 5000);
+}
+
 void ApplicationCommandTest::guiAndConsoleUseSharedTaskWorkflowWithoutClosingAnotherDraft()
 {
     QTemporaryDir profile;
@@ -471,6 +607,8 @@ void ApplicationCommandTest::guiAndConsoleUseSharedTaskWorkflowWithoutClosingAno
     QSignalSpy consoleResults(&console, &services::ApplicationCommandService::requestFinished);
     QSignalSpy consoleCancelled(&console, &services::ApplicationCommandService::requestCancelled);
     QSignalSpy uncertainEvents(&guiTasks, &controllers::TasksController::taskMutationMayHaveCommitted);
+    QSignalSpy completionEvents(&workflow,
+        &services::ApplicationMutationWorkflow::taskCompletionCommitted);
     graph.start();
     QTRY_VERIFY_WITH_TIMEOUT(graph.lifecycle().state() != application::ApplicationLifecycle::State::Starting, 5000);
     QVERIFY2(graph.lifecycle().state() == application::ApplicationLifecycle::State::Running,
@@ -494,6 +632,281 @@ void ApplicationCommandTest::guiAndConsoleUseSharedTaskWorkflowWithoutClosingAno
              cancelledId);
     QCOMPARE(uncertainEvents.size(), 1); // A stale/suppressed mutation result triggers read reconciliation.
     QCOMPARE(editorClosed.size(), 1);
+
+    const QVariantMap guiTask = viewEvents.at(0).at(1).toMap();
+    const qint64 guiTaskId = guiTask.value(QStringLiteral("id")).toLongLong();
+    guiTasks.toggleTaskFromView(guiTaskId, guiTask.value(QStringLiteral("revision")).toLongLong(), true);
+    QTRY_COMPARE_WITH_TIMEOUT(completionEvents.size(), 1, 5000);
+    QCOMPARE(completionEvents.at(0).at(2).toBool(), false);
+    QCOMPARE(completionEvents.at(0).at(3).toBool(), true);
+
+    const int beforeRepeatedComplete = viewEvents.size();
+    const QVariantMap completedTask = viewEvents.last().at(1).toMap();
+    guiTasks.toggleTaskFromView(guiTaskId,
+        completedTask.value(QStringLiteral("revision")).toLongLong(), true);
+    QTRY_COMPARE_WITH_TIMEOUT(viewEvents.size(), beforeRepeatedComplete + 1, 5000);
+    QCOMPARE(completionEvents.size(), 1);
+
+    const QVariantMap repeatedTask = viewEvents.last().at(1).toMap();
+    guiTasks.toggleTaskFromView(guiTaskId,
+        repeatedTask.value(QStringLiteral("revision")).toLongLong(), false);
+    QTRY_COMPARE_WITH_TIMEOUT(viewEvents.size(), beforeRepeatedComplete + 2, 5000);
+    const QVariantMap reopenedTask = viewEvents.last().at(1).toMap();
+    guiTasks.toggleTaskFromView(guiTaskId,
+        reopenedTask.value(QStringLiteral("revision")).toLongLong(), true);
+    QTRY_COMPARE_WITH_TIMEOUT(completionEvents.size(), 2, 5000);
+
+    const QVariantMap consoleTask = viewEvents.at(1).at(1).toMap();
+    const QString consoleCompletion = console.submit(QStringLiteral("task complete %1 --revision %2")
+        .arg(consoleTask.value(QStringLiteral("id")).toLongLong())
+        .arg(consoleTask.value(QStringLiteral("revision")).toLongLong()));
+    QTRY_COMPARE_WITH_TIMEOUT(completionEvents.size(), 3, 5000);
+    QCOMPARE(completionEvents.last().at(0).toString(),
+        QStringLiteral("task:%1:revision:%2")
+            .arg(consoleTask.value(QStringLiteral("id")).toLongLong())
+            .arg(consoleTask.value(QStringLiteral("revision")).toLongLong() + 1));
+    QVERIFY(!consoleCompletion.isEmpty());
+    graph.shutdown();
+    QTRY_VERIFY_WITH_TIMEOUT(graph.isShutdownComplete(), 5000);
+}
+
+void ApplicationCommandTest::taskAutomationUsesFakeActionsAndCancelsStaleDelays()
+{
+    QTemporaryDir profile;
+    QTemporaryDir applicationDirectory;
+    QVERIFY(profile.isValid());
+    QVERIFY(applicationDirectory.isValid());
+    application::ApplicationServiceGraph graph(QStringLiteral("task-automation-test"), profile.path());
+    services::ApplicationMutationWorkflow workflow(&graph);
+    std::atomic_int launchCount{0};
+    FakeAutomationPlatform platform(&launchCount);
+    FakeAutomationScheduler scheduler;
+    QStringList openedUrls;
+    QStringList notifications;
+    bool urlAccepted = true;
+    services::TaskAutomationAdapters adapters;
+    adapters.utcNow = [] { return QStringLiteral("2026-11-01T12:00:00.000Z"); };
+    adapters.schedule = [&scheduler](int delayMs, std::function<void()> callback) {
+        const int id = scheduler.schedule(delayMs, std::move(callback));
+        return [&scheduler, id] { scheduler.cancel(id); };
+    };
+    adapters.openUrl = [&openedUrls, &urlAccepted](const QUrl &url) {
+        openedUrls.push_back(url.toString(QUrl::FullyEncoded));
+        return urlAccepted;
+    };
+    adapters.showNotification = [&notifications](const QString &title, const QString &message) {
+        notifications.push_back(title + QStringLiteral("\n") + message);
+        return true;
+    };
+    services::TaskAutomationService automationService(
+        &graph, &workflow, &platform, nullptr, nullptr, std::move(adapters));
+    QSignalSpy taskCommits(&workflow, &services::ApplicationMutationWorkflow::taskCommitted);
+    QSignalSpy completionEvents(&workflow,
+        &services::ApplicationMutationWorkflow::taskCompletionCommitted);
+    QSignalSpy executionUpdates(&automationService,
+        &services::TaskAutomationService::executionChanged);
+
+    graph.start();
+    QTRY_VERIFY_WITH_TIMEOUT(graph.lifecycle().state() != application::ApplicationLifecycle::State::Starting, 5000);
+    QVERIFY(graph.lifecycle().state() == application::ApplicationLifecycle::State::Running);
+
+    const QString executablePath = applicationDirectory.filePath(QStringLiteral("FakeApp.exe"));
+    QFile executable(executablePath);
+    QVERIFY(executable.open(QIODevice::WriteOnly));
+    QCOMPARE(executable.write("test executable"), qint64(15));
+    executable.close();
+    const auto addApplicationOperation = graph.beginOperation(QStringLiteral("add fake application"));
+    QVERIFY(addApplicationOperation.isValid());
+    bool applicationAdded = false;
+    domain::AppError applicationError;
+    QVariantMap applicationRecord;
+    connect(&graph, &application::ApplicationServiceGraph::storageOperationFinished, &graph,
+        [&](quint64 id, const QVariantMap &values, domain::AppError error) {
+            if (id != addApplicationOperation.id.value) return;
+            applicationAdded = true;
+            applicationError = error;
+            applicationRecord = values.value(QStringLiteral("application")).toMap();
+        });
+    QVERIFY(graph.submitStorage(addApplicationOperation,
+        services::DesktopApplicationsService::add(QStringLiteral("Fake App"), executablePath)));
+    QTRY_VERIFY_WITH_TIMEOUT(applicationAdded, 5000);
+    QVERIFY(!applicationError.isError());
+    const qint64 applicationId = applicationRecord.value(QStringLiteral("id")).toLongLong();
+    QVERIFY(applicationId > 0);
+
+    storage::TaskInput launchInput;
+    launchInput.title = QStringLiteral("Launch fake app");
+    domain::TaskAutomationInput launchAutomation;
+    launchAutomation.enabled = true;
+    launchAutomation.actionType = QStringLiteral("launch_application");
+    launchAutomation.targetId = applicationId;
+    launchAutomation.delayMs = 5000;
+    launchInput.automation = launchAutomation;
+    QVERIFY(workflow.addTask(QStringLiteral("automation-add-launch"), launchInput).accepted);
+    QTRY_COMPARE_WITH_TIMEOUT(taskCommits.size(), 1, 5000);
+    const QVariantMap launchTask = taskCommits.at(0).at(1).toMap();
+    const qint64 launchTaskId = launchTask.value(QStringLiteral("id")).toLongLong();
+    QVERIFY(workflow.completeTask(QStringLiteral("automation-complete-launch"), launchTaskId,
+        launchTask.value(QStringLiteral("revision")).toLongLong(), true).accepted);
+    QTRY_COMPARE_WITH_TIMEOUT(completionEvents.size(), 1, 5000);
+    QTRY_COMPARE_WITH_TIMEOUT(scheduler.count(), 1, 5000);
+    QCOMPARE(scheduler.firstDelay(), 5000);
+    const QString launchEventId = completionEvents.at(0).at(0).toString();
+    const QVariantMap launchEventTask = completionEvents.at(0).at(1).toMap();
+    workflow.taskCompletionCommitted(launchEventId, launchEventTask, false, true);
+    QTRY_VERIFY_WITH_TIMEOUT(graph.operations().activeCount() == 0, 5000);
+    QCOMPARE(scheduler.count(), 1); // Duplicate completion identity inserts only one execution.
+    QVERIFY(scheduler.fireFirst());
+    QTRY_COMPARE_WITH_TIMEOUT(launchCount.load(), 1, 5000);
+    QTRY_VERIFY_WITH_TIMEOUT([&] {
+        for (const auto &row : executionUpdates)
+            if (row.at(0).toLongLong() == launchTaskId
+                && row.at(1).toString() == QStringLiteral("succeeded")) return true;
+        return false;
+    }(), 5000);
+
+    storage::TaskInput delayedInput;
+    delayedInput.title = QStringLiteral("Canceled notification");
+    domain::TaskAutomationInput delayedAutomation;
+    delayedAutomation.enabled = true;
+    delayedAutomation.actionType = QStringLiteral("show_notification");
+    delayedAutomation.notificationMessage = QStringLiteral("Should not display");
+    delayedAutomation.delayMs = 30000;
+    delayedInput.automation = delayedAutomation;
+    QVERIFY(workflow.addTask(QStringLiteral("automation-add-cancel"), delayedInput).accepted);
+    QTRY_COMPARE_WITH_TIMEOUT(taskCommits.size(), 3, 5000); // create and completion each publish a task commit
+    const QVariantMap delayedTask = taskCommits.last().at(1).toMap();
+    const qint64 delayedTaskId = delayedTask.value(QStringLiteral("id")).toLongLong();
+    QVERIFY(workflow.completeTask(QStringLiteral("automation-complete-cancel"), delayedTaskId,
+        delayedTask.value(QStringLiteral("revision")).toLongLong(), true).accepted);
+    QTRY_COMPARE_WITH_TIMEOUT(completionEvents.size(), 3, 5000); // includes the duplicate signal above
+    QTRY_COMPARE_WITH_TIMEOUT(scheduler.count(), 1, 5000);
+    QCOMPARE(scheduler.firstDelay(), 30000);
+    QVariantMap changedTask = completionEvents.last().at(1).toMap();
+    QVariantMap changedAutomation = changedTask.value(QStringLiteral("automation")).toMap();
+    changedAutomation.insert(QStringLiteral("enabled"), false);
+    changedAutomation.insert(QStringLiteral("revision"),
+        changedAutomation.value(QStringLiteral("revision")).toLongLong() + 1);
+    changedTask.insert(QStringLiteral("automation"), changedAutomation);
+    automationService.observeTaskMutation(delayedTaskId, changedTask, false);
+    QTRY_VERIFY_WITH_TIMEOUT([&] {
+        for (const auto &row : executionUpdates)
+            if (row.at(0).toLongLong() == delayedTaskId
+                && row.at(1).toString() == QStringLiteral("canceled")) return true;
+        return false;
+    }(), 5000);
+    QCOMPARE(scheduler.count(), 0);
+    QVERIFY(notifications.isEmpty());
+
+    storage::TaskInput missingApplicationInput;
+    missingApplicationInput.title = QStringLiteral("Missing application target");
+    domain::TaskAutomationInput missingApplicationAutomation;
+    missingApplicationAutomation.enabled = true;
+    missingApplicationAutomation.actionType = QStringLiteral("launch_application");
+    missingApplicationAutomation.targetId = 999999;
+    missingApplicationInput.automation = missingApplicationAutomation;
+    QVERIFY(workflow.addTask(QStringLiteral("automation-add-missing-app"),
+        missingApplicationInput).accepted);
+    QTRY_COMPARE_WITH_TIMEOUT(taskCommits.size(), 5, 5000);
+    const QVariantMap missingApplicationTask = taskCommits.last().at(1).toMap();
+    const qint64 missingApplicationTaskId = missingApplicationTask.value(QStringLiteral("id")).toLongLong();
+    QVERIFY(workflow.completeTask(QStringLiteral("automation-complete-missing-app"),
+        missingApplicationTaskId, missingApplicationTask.value(QStringLiteral("revision")).toLongLong(),
+        true).accepted);
+    QTRY_COMPARE_WITH_TIMEOUT(completionEvents.size(), 4, 5000);
+    QTRY_COMPARE_WITH_TIMEOUT(scheduler.count(), 1, 5000);
+    QCOMPARE(scheduler.firstDelay(), 0);
+    QVERIFY(scheduler.fireFirst());
+    QTRY_VERIFY_WITH_TIMEOUT([&] {
+        for (const auto &row : executionUpdates)
+            if (row.at(0).toLongLong() == missingApplicationTaskId
+                && row.at(1).toString() == QStringLiteral("failed")
+                && row.at(2).toString().contains(QStringLiteral("no longer available"))) return true;
+        return false;
+    }(), 5000);
+    QCOMPARE(launchCount.load(), 1); // Missing IDs never fall back to another saved application.
+
+    storage::TaskInput missingSetupInput;
+    missingSetupInput.title = QStringLiteral("Missing Setup target");
+    domain::TaskAutomationInput missingSetupAutomation;
+    missingSetupAutomation.enabled = true;
+    missingSetupAutomation.actionType = QStringLiteral("launch_setup");
+    missingSetupAutomation.targetId = 999999;
+    missingSetupInput.automation = missingSetupAutomation;
+    QVERIFY(workflow.addTask(QStringLiteral("automation-add-missing-setup"),
+        missingSetupInput).accepted);
+    QTRY_COMPARE_WITH_TIMEOUT(taskCommits.size(), 7, 5000);
+    const QVariantMap missingSetupTask = taskCommits.last().at(1).toMap();
+    const qint64 missingSetupTaskId = missingSetupTask.value(QStringLiteral("id")).toLongLong();
+    QVERIFY(workflow.completeTask(QStringLiteral("automation-complete-missing-setup"),
+        missingSetupTaskId, missingSetupTask.value(QStringLiteral("revision")).toLongLong(),
+        true).accepted);
+    QTRY_COMPARE_WITH_TIMEOUT(completionEvents.size(), 5, 5000);
+    QTRY_COMPARE_WITH_TIMEOUT(scheduler.count(), 1, 5000);
+    QVERIFY(scheduler.fireFirst());
+    QTRY_VERIFY_WITH_TIMEOUT([&] {
+        for (const auto &row : executionUpdates)
+            if (row.at(0).toLongLong() == missingSetupTaskId
+                && row.at(1).toString() == QStringLiteral("failed")
+                && row.at(2).toString().contains(QStringLiteral("Setup is no longer available"))) return true;
+        return false;
+    }(), 5000);
+    QCOMPARE(launchCount.load(), 1);
+
+    storage::TaskInput urlInput;
+    urlInput.title = QStringLiteral("Open URL");
+    domain::TaskAutomationInput urlAutomation;
+    urlAutomation.enabled = true;
+    urlAutomation.actionType = QStringLiteral("open_url");
+    urlAutomation.url = QStringLiteral(" HTTPS://example.com/path ");
+    urlInput.automation = urlAutomation;
+    urlAccepted = false;
+    QVERIFY(workflow.addTask(QStringLiteral("automation-add-url"), urlInput).accepted);
+    QTRY_COMPARE_WITH_TIMEOUT(taskCommits.size(), 9, 5000);
+    const QVariantMap urlTask = taskCommits.last().at(1).toMap();
+    const qint64 urlTaskId = urlTask.value(QStringLiteral("id")).toLongLong();
+    QVERIFY(workflow.completeTask(QStringLiteral("automation-complete-url"), urlTaskId,
+        urlTask.value(QStringLiteral("revision")).toLongLong(), true).accepted);
+    QTRY_COMPARE_WITH_TIMEOUT(completionEvents.size(), 6, 5000);
+    QTRY_COMPARE_WITH_TIMEOUT(scheduler.count(), 1, 5000);
+    QCOMPARE(scheduler.firstDelay(), 0);
+    QVERIFY(scheduler.fireFirst());
+    QTRY_COMPARE_WITH_TIMEOUT(openedUrls.size(), 1, 5000);
+    QCOMPARE(openedUrls.first(), QStringLiteral("https://example.com/path"));
+    QTRY_VERIFY_WITH_TIMEOUT([&] {
+        for (const auto &row : executionUpdates)
+            if (row.at(0).toLongLong() == urlTaskId
+                && row.at(1).toString() == QStringLiteral("failed")
+                && row.at(2).toString().contains(QStringLiteral("could not open"))) return true;
+        return false;
+    }(), 5000);
+
+    storage::TaskInput notificationInput;
+    notificationInput.title = QStringLiteral("Show notification");
+    domain::TaskAutomationInput notificationAutomation;
+    notificationAutomation.enabled = true;
+    notificationAutomation.actionType = QStringLiteral("show_notification");
+    notificationAutomation.notificationMessage = QStringLiteral("Done: {task.title} #{task.id}");
+    notificationInput.automation = notificationAutomation;
+    QVERIFY(workflow.addTask(QStringLiteral("automation-add-notification"), notificationInput).accepted);
+    QTRY_COMPARE_WITH_TIMEOUT(taskCommits.size(), 11, 5000);
+    const QVariantMap notificationTask = taskCommits.last().at(1).toMap();
+    const qint64 notificationTaskId = notificationTask.value(QStringLiteral("id")).toLongLong();
+    QVERIFY(workflow.completeTask(QStringLiteral("automation-complete-notification"), notificationTaskId,
+        notificationTask.value(QStringLiteral("revision")).toLongLong(), true).accepted);
+    QTRY_COMPARE_WITH_TIMEOUT(completionEvents.size(), 7, 5000);
+    QTRY_COMPARE_WITH_TIMEOUT(scheduler.count(), 1, 5000);
+    QVERIFY(scheduler.fireFirst());
+    QTRY_COMPARE_WITH_TIMEOUT(notifications.size(), 1, 5000);
+    QVERIFY(notifications.first().contains(QStringLiteral("Done: Show notification #%1")
+        .arg(notificationTaskId)));
+    QTRY_VERIFY_WITH_TIMEOUT([&] {
+        for (const auto &row : executionUpdates)
+            if (row.at(0).toLongLong() == notificationTaskId
+                && row.at(1).toString() == QStringLiteral("succeeded")) return true;
+        return false;
+    }(), 5000);
+
     graph.shutdown();
     QTRY_VERIFY_WITH_TIMEOUT(graph.isShutdownComplete(), 5000);
 }
